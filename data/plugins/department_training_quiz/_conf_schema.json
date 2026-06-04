@@ -1,0 +1,12 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用部门培训小测试自动批改",
+    "default": true
+  },
+  "pass_score": {
+    "type": "int",
+    "description": "通过分数线，满分 5 分",
+    "default": 4
+  }
+}

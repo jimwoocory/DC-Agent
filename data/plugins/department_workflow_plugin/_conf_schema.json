@@ -1,0 +1,47 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用部门工作流匹配插件；默认关闭，避免未灰度时自动落任务",
+    "default": false
+  },
+  "dry_run": {
+    "type": "bool",
+    "description": "灰度观察模式；命中时只写日志，不创建 Harness task",
+    "default": true
+  },
+  "create_tasks": {
+    "type": "bool",
+    "description": "dry_run=false 时是否创建 Harness task",
+    "default": true
+  },
+  "attach_case": {
+    "type": "bool",
+    "description": "创建任务后是否自动挂接当前 Case",
+    "default": true
+  },
+  "notify_on_match": {
+    "type": "bool",
+    "description": "命中并创建任务后是否发送轻量能力边界提示；不阻止正常 LLM 回复",
+    "default": true
+  },
+  "notify_in_dry_run": {
+    "type": "bool",
+    "description": "dry_run=true 时是否也发送轻提示；默认关闭，避免观察期打扰",
+    "default": false
+  },
+  "min_score": {
+    "type": "int",
+    "description": "私聊或显式场景外的最低匹配分",
+    "default": 12
+  },
+  "group_min_score": {
+    "type": "int",
+    "description": "群聊非显式触发时的最低匹配分，配合 @ 降低打扰",
+    "default": 24
+  },
+  "explicit_min_score": {
+    "type": "int",
+    "description": "出现“部门工作流/训练任务/测试任务”等显式触发词时的最低匹配分",
+    "default": 10
+  }
+}

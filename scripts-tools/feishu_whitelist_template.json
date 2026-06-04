@@ -1,0 +1,54 @@
+{
+  "_说明": "改这个文件，跑 python scripts-tools/import_feishu_whitelist.py 把白名单 merge 进 data/feishu_whitelist.yaml。已存在的同 token 条目会被替换，新条目追加。",
+  "_token 怎么拿": {
+    "doc_token": "飞书云文档 URL：https://feishu.cn/docx/<这里> ",
+    "app_token": "多维表 URL：https://feishu.cn/base/<这里> ",
+    "table_id": "多维表 URL 里 ?table=<这里>",
+    "kb_id": "AstrBot dashboard → 知识库页面 看到的 ID（不是飞书侧概念）"
+  },
+  "documents": [
+    {
+      "doc_token": "doxcXXXXXXXX_换成真的_XXXX",
+      "name": "营销策划模板库",
+      "domain": "marketing",
+      "description": "各类营销 case 历史模板"
+    },
+    {
+      "doc_token": "doxcYYYY_换成真的_YYYY",
+      "name": "客户应标资料库",
+      "domain": "client",
+      "description": "客户提案 / 应标格式 / 行业 know-how"
+    }
+  ],
+  "tables": [
+    {
+      "app_token": "bascnXXXX_换成真的_XXXX",
+      "table_id": "tblXXXX_换成真的_XXXX",
+      "name": "客户档案",
+      "domain": "client",
+      "description": "全部签约客户",
+      "primary_key": "client_name"
+    },
+    {
+      "app_token": "bascnYYYY_换成真的_YYYY",
+      "table_id": "tblYYYY_换成真的_YYYY",
+      "name": "项目台账",
+      "domain": "project",
+      "description": "项目状态 + 负责人 + 截止时间"
+    }
+  ],
+  "folders": [
+    {
+      "kb_id": "client_archives",
+      "name": "客户档案 KB",
+      "domain": "client",
+      "description": "客户合同 / 项目交付 / 关键沟通"
+    },
+    {
+      "kb_id": "project_templates",
+      "name": "项目模板 KB",
+      "domain": "project",
+      "description": "通用 SOP / 模板"
+    }
+  ]
+}

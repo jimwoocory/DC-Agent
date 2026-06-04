@@ -1,0 +1,60 @@
+{
+  "feature": "local_knowledge_base_phase1",
+  "source_plan": "DC-Agent本地知识库升级方案.md",
+  "scope": "phase_1_readonly_diagnosis",
+  "goal": "基于 NAS knowledge 共享目录、DC-Agent NAS memory 索引能力、AstrBot 知识库镜像能力和只读扫描结果，输出本地知识库第一阶段诊断、分类建议、导入计划与 Obsidian 溯源设计。",
+  "hard_constraints": [
+    "不要删除、移动、覆盖任何 NAS 原始文件",
+    "不要直接全量导入知识库",
+    "不要写入 DC-Agent 知识库",
+    "不要生成 Obsidian 桥接文件",
+    "所有第一阶段报告保存到 ObsidianVault/30_Reports/"
+  ],
+  "inputs": {
+    "repository_root": "/Users/dianchi/DC-Agent",
+    "nas_share": "//dcwh-001@192.168.1.35/knowledge",
+    "nas_mount": "/Users/dianchi/nas_kb",
+    "nas_mount_note": "/Users/dianchi/nas_kb 是 NAS 的 knowledge 共享文件夹在本机的挂载点，不是普通本地临时目录。",
+    "nas_config": "nas_sync/config.yaml",
+    "primary_system_knowledge_index": "data/nas_memory.db",
+    "knowledge_base_data_dir": "data/knowledge_base"
+  },
+  "outputs": [
+    "ObsidianVault/30_Reports/DC-Agent知识库能力诊断报告.md",
+    "ObsidianVault/30_Reports/文档资产诊断报告.md",
+    "ObsidianVault/30_Reports/分类重构设计树.md",
+    "ObsidianVault/30_Reports/DC-Agent批量导入执行计划.md",
+    "ObsidianVault/30_Reports/Obsidian关系图谱与资料溯源设计.md"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "phase1-001",
+      "description": "知识库能力诊断报告说明 data/knowledge_base、知识库模块、解析器、embedding provider 与来源引用能力状态。"
+    },
+    {
+      "id": "phase1-002",
+      "description": "文档资产诊断报告说明 NAS 挂载路径、扫描边界、格式分布、目录分布、噪声文件、超大文件、重复文件名和风险。"
+    },
+    {
+      "id": "phase1-003",
+      "description": "分类重构设计树覆盖产品、项目、客户、合同、交付、售后、财务、行政、人事、技术、市场、待人工确认。"
+    },
+    {
+      "id": "phase1-004",
+      "description": "DC-Agent 批量导入执行计划给出知识库拆分、目录/文件类型映射、chunk 与检索参数、小批量试导入方案，并明确不执行真实导入。"
+    },
+    {
+      "id": "phase1-005",
+      "description": "Obsidian 图谱设计说明 00_RawRefs、10_Index、20_Bridges 结构，以及如何由 source_path 生成 [[来源文档]] 引用。"
+    }
+  ],
+  "verification_commands": [
+    "test -f ObsidianVault/30_Reports/DC-Agent知识库能力诊断报告.md",
+    "test -f ObsidianVault/30_Reports/文档资产诊断报告.md",
+    "test -f ObsidianVault/30_Reports/分类重构设计树.md",
+    "test -f ObsidianVault/30_Reports/DC-Agent批量导入执行计划.md",
+    "test -f ObsidianVault/30_Reports/Obsidian关系图谱与资料溯源设计.md",
+    "rg -n \"不要执行真实批量导入|不写入 DC-Agent 知识库|/Users/dianchi/nas_kb|source_path|待人工确认|\\[\\[来源文档\\]\\]\" ObsidianVault/30_Reports harness/contracts/local_knowledge_base_phase1.json"
+  ],
+  "next_gate": "等待用户确认后再进入第二阶段：小批量试导入与检索效果验证。"
+}

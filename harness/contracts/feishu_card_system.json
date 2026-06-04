@@ -1,0 +1,52 @@
+{
+  "feature": "feishu_card_system",
+  "goal": "Keep Feishu cards as an engineering-grade runtime layer with registered templates, deterministic triggers, health gates, versioned rollout, rollback, runtime telemetry, restart validation, and real Feishu grey validation handoff.",
+  "acceptance_criteria": [
+    {
+      "id": "card-system-001",
+      "description": "Every required card type is registered with card_type, version, owner, builder, triggers, fallback, and upgrade metadata.",
+      "verification": "scripts-tools/card-system-health.py"
+    },
+    {
+      "id": "card-system-002",
+      "description": "Every registered card builder can generate a sample card without importing AstrBot or requiring live Feishu credentials.",
+      "verification": "scripts-tools/card-system-health.py"
+    },
+    {
+      "id": "card-system-003",
+      "description": "Casual messages route to casual reply cards, while task-like messages route to waiting cards without mixing the two paths.",
+      "verification": "scripts-tools/card-system-health.py"
+    },
+    {
+      "id": "card-system-004",
+      "description": "Card versions can be listed, advanced into grey rollout, and rolled back without editing template code.",
+      "verification": "scripts-tools/card-system-health.py --versions"
+    },
+    {
+      "id": "card-system-005",
+      "description": "Runtime card sends and failures are recorded so a successful test always has a next-step handoff and a failed test preserves fallback behavior.",
+      "verification": "scripts-tools/card-grey-push.py --receive-id-type union_id --receive-id <receiver> --card-type casual_reply --card-type thinking_waiting && scripts-tools/card-system-health.py --events --limit 20 && scripts-tools/card-system-health.py --next-step"
+    },
+    {
+      "id": "card-system-006",
+      "description": "AstrBot safe restart runs the card system health gate before closing maintenance and continuing grey rollout.",
+      "verification": "scripts-tools/safe_restart.sh astrbot"
+    },
+    {
+      "id": "card-system-007",
+      "description": "The engineering SOP documents how to add, upgrade, grey validate, rollback, and future-proof card templates.",
+      "verification": "DOC/05_Dashboard与卡片/卡片系统工程级升级与验收方案_2026-06-04.md"
+    },
+    {
+      "id": "card-system-008",
+      "description": "Runtime plugins and grey tools send cards through the shared card runtime gateway instead of ad-hoc script-only Feishu calls.",
+      "verification": "scripts-tools/card-system-health.py"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "card_health": "scripts-tools/card-system-health.py",
+    "handoff": "scripts-tools/card-system-health.py --next-step",
+    "real_grey": "scripts-tools/card-grey-push.py --receive-id-type union_id --receive-id <receiver> --card-type casual_reply --card-type thinking_waiting && scripts-tools/card-system-health.py --events --limit 20"
+  }
+}

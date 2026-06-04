@@ -1,0 +1,12 @@
+{
+  "watchdog_dir": {
+    "type": "string",
+    "description": "Watchdog 数据目录（cron 写 alerts.jsonl / state.json / incidents/ 都在这）",
+    "default": "/Users/dianchi/DC-Agent/data/watchdog"
+  },
+  "recent_limit": {
+    "type": "int",
+    "description": "/api/plug/watchdog/recent 返回最近 N 条告警",
+    "default": 50
+  }
+}

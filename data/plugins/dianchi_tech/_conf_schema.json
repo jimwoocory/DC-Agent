@@ -1,0 +1,22 @@
+{
+  "cai_ting_open_id": {
+    "type": "string",
+    "description": "蔡挺飞书 open_id（reporter 推送 IM 用）。例：ou_xxxxxxxxxxxxxxxx",
+    "default": ""
+  },
+  "wiki_space_name": {
+    "type": "string",
+    "description": "飞书 wiki 空间名（需用户手动建并把 巅池-技术（DevOps）加为编辑成员）；跟桌面/NAS 同名『日常任务报告』",
+    "default": "日常任务报告"
+  },
+  "data_root": {
+    "type": "string",
+    "description": "日报数据根目录（夜间脚本产出 / API 列表读这里）",
+    "default": "/Users/dianchi/DC-Agent/data/dianchi_tech"
+  },
+  "recent_limit": {
+    "type": "int",
+    "description": "API /recent 返最近几天的报告元信息",
+    "default": 14
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "entries": {
+    "type": "list",
+    "description": "要在 dashboard '系统入口' 页显示的服务列表。每条 dict：name / url / probe_host / probe_port / hint / icon / [on_demand_kick]",
+    "default": [
+      {
+        "name": "Hermes Agent 官方 WebUI",
+        "url": "http://localhost:9119/",
+        "probe_host": "127.0.0.1",
+        "probe_port": 9119,
+        "hint": "Hermes Agent 官方 UI / sessions 列表",
+        "icon": "🤖"
+      },
+      {
+        "name": "Hermes Agent 第三方 WebUI",
+        "url": "http://localhost:8787/",
+        "probe_host": "127.0.0.1",
+        "probe_port": 8787,
+        "hint": "EKKOLearnAI/hermes-web-ui 第三方界面",
+        "icon": "💬"
+      },
+      {
+        "name": "OpenClaw",
+        "url": "http://localhost:4312/",
+        "probe_host": "127.0.0.1",
+        "probe_port": 4312,
+        "hint": "按需启动 / 看门狗 :9120/kick",
+        "icon": "🖥️",
+        "on_demand_kick": "http://localhost:9120/kick"
+      },
+      {
+        "name": "Hermes Gateway",
+        "url": null,
+        "probe_host": "127.0.0.1",
+        "probe_port": 8644,
+        "hint": "Hermes webhook 网关（后端，无 UI）",
+        "icon": "🔌"
+      },
+      {
+        "name": "AstrBot Response 通道",
+        "url": null,
+        "probe_host": "127.0.0.1",
+        "probe_port": 8645,
+        "hint": "Hermes → AstrBot 回调端口",
+        "icon": "🔁"
+      }
+    ]
+  },
+  "cache_ttl_seconds": {
+    "type": "int",
+    "description": "/status 接口结果缓存秒数（前端 5 秒轮询一次），避免每次都重探所有端口",
+    "default": 5
+  },
+  "watchdogctl_path": {
+    "type": "string",
+    "description": "Watchdog 控制台调用的统一控制脚本路径，用于读取状态以及人工 pause/resume。",
+    "default": "/Users/dianchi/DC-Agent/scripts-watchdog/watchdogctl.sh"
+  }
+}

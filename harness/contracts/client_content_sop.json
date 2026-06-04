@@ -1,0 +1,39 @@
+{
+  "feature": "client_content_sop",
+  "goal": "Keep client-department copy, image prompt, and video script production source-backed, material-gated, and usable by employees in Feishu.",
+  "acceptance_criteria": [
+    {
+      "id": "client-content-sop-001",
+      "description": "Client-department content requests match a dedicated content package scenario instead of a generic marketing workflow.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_client_content_package_matches_copy_image_video_request -q"
+    },
+    {
+      "id": "client-content-sop-002",
+      "description": "Missing client, occasion, brand/product, or goal inputs pause generation and produce material-intake next actions.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_content_sop_payload_blocks_generation_when_materials_are_missing -q"
+    },
+    {
+      "id": "client-content-sop-003",
+      "description": "Client content SOP payload carries required outputs for copy, image prompt, video script, source citations, risk notes, and employee review.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_content_sop_payload_contains_full_media_requirements -q"
+    },
+    {
+      "id": "client-content-sop-004",
+      "description": "Client follow-up, event invitation, and private-domain campaign requests match dedicated P0 scenarios instead of a generic marketing workflow.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_client_p0_scenarios_match_specific_workflows -q"
+    },
+    {
+      "id": "client-content-sop-005",
+      "description": "Client follow-up requests with missing segment, last interaction, or goal are blocked before generation and keep the no-default-email channel policy.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_client_followup_material_gap_blocks_generation -q"
+    },
+    {
+      "id": "client-content-sop-006",
+      "description": "Private-domain campaign payloads require segmentation, message variants, posting sequence, and review checklist when materials are ready.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_client_private_domain_ready_payload_has_review_outputs -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

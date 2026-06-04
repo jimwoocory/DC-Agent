@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+飞书云文档同步脚本
+将飞书云空间的文件自动下载到 NAS 的 inbox 目录
+然后由 watcher.py 自动摄入到 AstrBot 知识库
+
+用法：
+    python feishu_sync.py                    # 执行一次同步
+    python feishu_sync.py --watch           # 监听模式（持续同步）
+    python feishu_sync.py --dry-run         # 测试模式，不实际下载
+"""
+
+import os
+import sys
+import json
+import time
+import logging
+import hashlib
+import argparse
+from pathlib import Path
+from typing import Dict, List, Optional
+from datetime import datetime
+import requests
+import yaml
+
+
+# ============================================================
+# 日志配置
+# ============================================================
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 配置加载
+# ============================================================
+class Config:
+    """从 config.yaml 和环境变量读取配置"""
+
+    def __init__(self, config_file: str = "config.yaml"):
+        self.config_file = config_file
+        self._load_config()
+
+    def _load_config(self):
+        """加载配置文件"""
+        if not os.path.exists(self.config_file):
+            raise FileNotFoundError(f"配置文件不存在: {self.config_file}")
+
+        with open(self.config_file, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
+        # NAS 配置
+        self.nas_config = config.get("nas", {})
+        self.watch_config = config.get("watch", {})
+        self.astrbot_config = config.get("astrbot", {})
+
+        # 飞书应用配置（从环境变量或这里填写）
+        self.feishu_app_id = os.getenv("FEISHU_APP_ID", "cli_a939424636799bc9")
+        self.feishu_app_secret = os.getenv("FEISHU_APP_SECRET", "")
+
+        # NAS 挂载点
+        self.mount_point = self.nas_config.get("mount_point", "/Users/dianchi/nas_kb")
+        self.inbox_dir = os.path.join(
+            self.mount_point, self.watch_config.get("inbox_dir", "inbox")
+        )
+
+        # 同步状态文件
+        self.sync_state_file = os.path.join(
+            os.path.dirname(__file__), ".feishu_sync_state.json"
+        )
+
+        logger.info(f"配置加载完成: inbox_dir={self.inbox_dir}")
+
+    def validate(self):
+        """验证必要的配置"""
+        if not self.feishu_app_id:
+            raise ValueError("未设置 FEISHU_APP_ID")
+        if not self.feishu_app_secret:
+            raise ValueError("未设置 FEISHU_APP_SECRET")
+        if not os.path.exists(self.mount_point):
+            raise FileNotFoundError(f"NAS 挂载点不存在: {self.mount_point}")
+        if not os.path.exists(self.inbox_dir):
+            raise FileNotFoundError(f"inbox 目录不存在: {self.inbox_dir}")
+
+
+# ============================================================
+# 飞书 API 客户端
+# ============================================================
+class FeishuClient:
+    """飞书 Drive API 客户端"""
+
+    BASE_URL = "https://open.feishu.cn/open-apis"
+
+    def __init__(self, app_id: str, app_secret: str):
+        self.app_id = app_id
+        self.app_secret = app_secret
+        self.access_token = None
+        self.token_expire_time = 0
+        self._authenticate()
+
+    def _authenticate(self):
+        """获取访问令牌"""
+        logger.info("正在认证飞书应用...")
+
+        url = f"{self.BASE_URL}/auth/v3/app_access_token/internal"
+        payload = {"app_id": self.app_id, "app_secret": self.app_secret}
+
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("code") != 0:
+                raise Exception(f"认证失败: {data.get('msg')}")
+
+            self.access_token = data["app_access_token"]
+            self.token_expire_time = time.time() + data["expire"]
+            logger.info("认证成功")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"认证失败: {e}")
+            raise
+
+    def _ensure_token_valid(self):
+        """确保令牌有效"""
+        if time.time() >= self.token_expire_time - 60:  # 提前 1 分钟刷新
+            self._authenticate()
+
+    def _get_headers(self) -> Dict:
+        """获取请求头"""
+        self._ensure_token_valid()
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+
+    def list_drive_files(
+        self, folder_token: Optional[str] = None, page_size: int = 100
+    ) -> List[Dict]:
+        """
+        列出云空间文件
+
+        Args:
+            folder_token: 文件夹 token，为空时列出根目录
+            page_size: 每页数量
+
+        Returns:
+            文件列表
+        """
+        logger.info("正在列出飞书云文件...")
+
+        files = []
+        page_token = None
+
+        while True:
+            url = f"{self.BASE_URL}/drive/v1/files"
+            params = {"page_size": page_size, "order_by": "EditedTime"}
+
+            if folder_token:
+                params["folder_token"] = folder_token
+            if page_token:
+                params["page_token"] = page_token
+
+            try:
+                response = requests.get(
+                    url, params=params, headers=self._get_headers(), timeout=10
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                if data.get("code") != 0:
+                    logger.error(f"列表查询失败: {data.get('msg')}")
+                    break
+
+                items = data.get("data", {}).get("items", [])
+                files.extend(items)
+
+                page_token = data.get("data", {}).get("page_token")
+                if not page_token:
+                    break
+
+            except requests.exceptions.RequestException as e:
+                logger.error(f"列表查询失败: {e}")
+                break
+
+        logger.info(f"找到 {len(files)} 个文件")
+        return files
+
+    def download_file(self, file_token: str, save_path: str):
+        """
+        下载文件
+
+        Args:
+            file_token: 文件 token
+            save_path: 保存路径
+        """
+        url = f"{self.BASE_URL}/drive/v1/files/{file_token}/download"
+
+        try:
+            response = requests.get(
+                url, headers=self._get_headers(), timeout=30, stream=True
+            )
+            response.raise_for_status()
+
+            # 创建父目录
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # 下载文件
+            with open(save_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            logger.info(f"下载成功: {save_path}")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"下载失败 ({file_token}): {e}")
+            if os.path.exists(save_path):
+                os.remove(save_path)
+            raise
+
+    def export_file(self, file_token: str, file_type: str, save_path: str):
+        """
+        导出文件（用于文档类型）
+
+        Args:
+            file_token: 文件 token
+            file_type: 导出格式（pdf、markdown 等）
+            save_path: 保存路径
+        """
+        url = f"{self.BASE_URL}/drive/v1/files/{file_token}/export"
+        params = {"file_extension": file_type}
+
+        try:
+            response = requests.get(
+                url, params=params, headers=self._get_headers(), timeout=30, stream=True
+            )
+            response.raise_for_status()
+
+            # 创建父目录
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # 保存文件
+            with open(save_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            logger.info(f"导出成功: {save_path}")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"导出失败 ({file_token}): {e}")
+            if os.path.exists(save_path):
+                os.remove(save_path)
+            raise
+
+
+# ============================================================
+# 同步管理器
+# ============================================================
+class SyncManager:
+    """管理飞书文件同步"""
+
+    # 支持的文件类型映射
+    FILE_TYPE_MAP = {
+        "file": "file",  # 普通文件，直接下载
+        "docx": "markdown",  # Word 文档导出为 Markdown
+        "sheet": "csv",  # 表格导出为 CSV
+        "bitable": "csv",  # 多维表格导出为 CSV
+    }
+
+    def __init__(
+        self, config: Config, feishu_client: FeishuClient, dry_run: bool = False
+    ):
+        self.config = config
+        self.feishu = feishu_client
+        self.dry_run = dry_run
+        self.sync_state = self._load_sync_state()
+
+    def _load_sync_state(self) -> Dict:
+        """加载同步状态"""
+        if os.path.exists(self.config.sync_state_file):
+            try:
+                with open(self.config.sync_state_file, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"读取同步状态失败: {e}")
+        return {}
+
+    def _save_sync_state(self):
+        """保存同步状态"""
+        try:
+            with open(self.config.sync_state_file, "w") as f:
+                json.dump(self.sync_state, f, indent=2)
+        except Exception as e:
+            logger.error(f"保存同步状态失败: {e}")
+
+    def _get_file_hash(self, data: bytes) -> str:
+        """计算文件哈希值"""
+        return hashlib.md5(data).hexdigest()
+
+    def _is_file_supported(self, file_name: str) -> bool:
+        """检查文件类型是否支持"""
+        supported_exts = self.config.watch_config.get("supported_extensions", [])
+        _, ext = os.path.splitext(file_name)
+        return ext.lower() in [e.lower() for e in supported_exts]
+
+    def sync_once(self):
+        """执行一次同步"""
+        logger.info("=" * 60)
+        logger.info("开始同步飞书文件...")
+        logger.info("=" * 60)
+
+        try:
+            # 列出所有文件
+            files = self.feishu.list_drive_files()
+
+            synced_count = 0
+            failed_count = 0
+
+            for file_info in files:
+                try:
+                    if self._sync_file(file_info):
+                        synced_count += 1
+
+                except Exception as e:
+                    logger.error(f"同步文件失败: {file_info.get('name', 'unknown')}")
+                    failed_count += 1
+
+            self._save_sync_state()
+
+            logger.info("=" * 60)
+            logger.info(f"同步完成: 成功 {synced_count}, 失败 {failed_count}")
+            logger.info("=" * 60)
+
+        except Exception as e:
+            logger.error(f"同步失败: {e}")
+
+    def _sync_file(self, file_info: Dict) -> bool:
+        """
+        同步单个文件
+
+        Args:
+            file_info: 文件信息字典
+
+        Returns:
+            是否成功同步
+        """
+        file_token = file_info.get("file_token")
+        file_name = file_info.get("name", "unknown")
+        file_type = file_info.get("type")
+        modified_time = file_info.get("modified_time")
+
+        # 检查是否已同步且未修改
+        sync_key = file_token
+        if sync_key in self.sync_state:
+            cached = self.sync_state[sync_key]
+            if cached.get("modified_time") == modified_time:
+                logger.debug(f"文件未修改，跳过: {file_name}")
+                return False
+
+        # 检查文件类型
+        if not self._is_file_supported(file_name):
+            logger.debug(f"文件类型不支持，跳过: {file_name} ({file_type})")
+            return False
+
+        logger.info(f"正在同步: {file_name}")
+
+        # 确定保存路径
+        save_path = os.path.join(self.config.inbox_dir, file_name)
+
+        # 避免重复
+        if os.path.exists(save_path):
+            base, ext = os.path.splitext(file_name)
+            counter = 1
+            while os.path.exists(save_path):
+                save_path = os.path.join(
+                    self.config.inbox_dir, f"{base}_{counter}{ext}"
+                )
+                counter += 1
+
+        # 下载或导出文件
+        if self.dry_run:
+            logger.info(f"[测试模式] 将下载到: {save_path}")
+            return True
+
+        try:
+            # 根据文件类型选择下载方式
+            if file_type in ["docx", "sheet", "bitable"]:
+                export_type = self.FILE_TYPE_MAP.get(file_type, "pdf")
+                _, ext = os.path.splitext(file_name)
+                export_path = save_path.replace(ext, f".{export_type}")
+                self.feishu.export_file(file_token, export_type, export_path)
+                save_path = export_path
+            else:
+                self.feishu.download_file(file_token, save_path)
+
+            # 更新同步状态
+            self.sync_state[sync_key] = {
+                "name": file_name,
+                "modified_time": modified_time,
+                "synced_at": datetime.now().isoformat(),
+            }
+
+            logger.info(f"✓ 同步成功: {file_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"✗ 同步失败: {file_name} - {e}")
+            return False
+
+
+# ============================================================
+# 主程序
+# ============================================================
+def main():
+    parser = argparse.ArgumentParser(description="飞书云文档同步脚本")
+    parser.add_argument("--dry-run", action="store_true", help="测试模式，不实际下载")
+    parser.add_argument("--watch", action="store_true", help="监听模式，持续同步")
+    parser.add_argument("--interval", type=int, default=300, help="监听间隔（秒）")
+
+    args = parser.parse_args()
+
+    try:
+        # 加载配置
+        config = Config()
+        config.validate()
+
+        # 检查 FEISHU_APP_SECRET
+        if not config.feishu_app_secret:
+            logger.error("未设置 FEISHU_APP_SECRET 环境变量")
+            logger.error("请运行: export FEISHU_APP_SECRET='your_feishu_app_secret'")
+            return False
+
+        # 创建飞书客户端
+        feishu = FeishuClient(config.feishu_app_id, config.feishu_app_secret)
+
+        # 创建同步管理器
+        sync_mgr = SyncManager(config, feishu, dry_run=args.dry_run)
+
+        # 执行同步
+        if args.watch:
+            logger.info(f"进入监听模式，同步间隔: {args.interval} 秒")
+            try:
+                while True:
+                    sync_mgr.sync_once()
+                    logger.info(f"等待 {args.interval} 秒后进行下一次同步...")
+                    time.sleep(args.interval)
+            except KeyboardInterrupt:
+                logger.info("收到退出信号，停止同步")
+        else:
+            sync_mgr.sync_once()
+
+        return True
+
+    except Exception as e:
+        logger.error(f"程序错误: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    success = main()
+    sys.exit(0 if success else 1)

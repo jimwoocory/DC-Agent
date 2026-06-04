@@ -1,0 +1,34 @@
+{
+  "feature": "planning_content_sop",
+  "goal": "Keep planning-department short-video, visual brief, and campaign content production separated into source facts, creative assumptions, review checklist, and employee-ready outputs.",
+  "acceptance_criteria": [
+    {
+      "id": "planning-content-sop-001",
+      "description": "Planning short-video and image prompt requests match the dedicated planning content SOP scenario.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_planning_video_visual_brief_matches_mixed_request -q"
+    },
+    {
+      "id": "planning-content-sop-002",
+      "description": "Planning content SOP payload requires creative brief, insight, video script, storyboard, voiceover, image prompt, source citations, and review checklist.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_content_sop_payload_contains_full_media_requirements -q"
+    },
+    {
+      "id": "planning-content-sop-003",
+      "description": "Router metadata identifies planning mixed-media requests and marks missing materials before generation.",
+      "verification": "uv run pytest tests/router/test_router_core.py::test_content_sop_metadata_routes_planning_video_image_request -q"
+    },
+    {
+      "id": "planning-content-sop-004",
+      "description": "Planning short-video storyboard and brand-review requests match dedicated P0 scenarios.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_planning_p0_scenarios_match_storyboard_and_brand_review -q"
+    },
+    {
+      "id": "planning-content-sop-005",
+      "description": "Planning brand review is blocked before generation when review material, brand guideline, or usage context is missing.",
+      "verification": "uv run pytest dc_engines/tests/test_department_workflows.py::test_planning_brand_review_requires_material_and_guidelines -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "webhook_url": {
+    "type": "string",
+    "description": "Hermes 消息 Webhook URL（AstrBot → Hermes 派发普通消息）",
+    "default": "http://localhost:8644/webhooks/astrbot_qq",
+    "hint": "Hermes 那边在 hermes-config/config.yaml 的 webhook.routes.astrbot_qq 路由对应"
+  },
+  "task_webhook_url": {
+    "type": "string",
+    "description": "Hermes 任务 Webhook URL（AstrBot → Hermes 派发工作流任务）",
+    "default": "http://localhost:8644/webhooks/astrbot_task",
+    "hint": "Hermes 那边在 hermes-config/config.yaml 的 webhook.routes.astrbot_task 路由对应"
+  },
+  "secret": {
+    "type": "string",
+    "description": "HMAC-SHA256 签名密钥（必须跟 Hermes hermes-config/config.yaml 里 webhook.secret 完全一致，否则 Hermes 返回 401 Invalid signature）",
+    "default": "${HERMES_BRIDGE_SECRET}"
+  },
+  "response_port": {
+    "type": "int",
+    "description": "AstrBot 本地响应监听端口（Hermes → AstrBot 回调结果时打这个端口）",
+    "default": 8645
+  },
+  "allowed_platforms": {
+    "type": "list",
+    "description": "白名单：只在这些 platform_id 上启用 Hermes 桥接（升级派发、任务回写）",
+    "default": ["巅池-推广01", "巅池-推广 01", "巅池1号"]
+  },
+  "excluded_platforms": {
+    "type": "list",
+    "description": "黑名单：这些 platform_id 完全不走 Hermes 桥接（典型是开发/技术群）",
+    "default": ["巅池-技术"]
+  },
+  "memory_inject_enabled": {
+    "type": "bool",
+    "description": "是否把 Harness memory 注入到 Hermes 任务 prompt（提供历史上下文）",
+    "default": true
+  },
+  "memory_inject_limit": {
+    "type": "int",
+    "description": "memory_inject_enabled=true 时一次注入多少条 memory 记录",
+    "default": 5
+  },
+  "direct_chat_enabled": {
+    "type": "bool",
+    "description": "是否允许 Hermes 直接抢答（true=Hermes 处理所有 chat；false=只处理被升级的 task）",
+    "default": false
+  },
+  "topic_workflow_enabled": {
+    "type": "bool",
+    "description": "是否启用原灰度 topic 工作流（/topic new、/topic deep、/topic close 等）；普通群聊/私聊蒸馏不依赖此开关",
+    "default": false
+  },
+  "conversation_distill_enabled": {
+    "type": "bool",
+    "description": "是否记录正常群聊和私聊的会话蒸馏缓存；开启后 /chat distill 或 /私聊 distill 可查看当前会话摘要",
+    "default": true
+  },
+  "skill_admin_only": {
+    "type": "bool",
+    "description": "是否只允许管理员执行 skill 回滚、删除、恢复等运维操作",
+    "default": true
+  },
+  "skill_admin_user_ids": {
+    "type": "list",
+    "description": "额外允许执行 skill 运维操作的 sender_id/open_id 白名单；管理员仍默认允许",
+    "default": []
+  },
+  "protected_identity_names": {
+    "type": "list",
+    "description": "系统受保护身份名称；这些身份不会被生成老板/同事 skill，例如产品经理/系统创建者",
+    "default": ["蔡挺"]
+  },
+  "protected_identity_user_ids": {
+    "type": "list",
+    "description": "系统受保护身份 sender_id/open_id；这些用户自动拥有 skill 运维权限，且不能被蒸馏成普通画像",
+    "default": ["ou_129defaa7d62fdb15ffc1eab436791d6"]
+  },
+  "skill_ops_require_confirm": {
+    "type": "bool",
+    "description": "删除和回滚 skill 时是否要求在命令末尾追加 --confirm 或 确认",
+    "default": true
+  },
+  "topic_distill_enabled": {
+    "type": "bool",
+    "description": "是否启用话题/会话蒸馏摘要生成",
+    "default": true
+  },
+  "topic_discussion_limit": {
+    "type": "int",
+    "description": "每个话题或会话最多保留多少条近期消息用于蒸馏",
+    "default": 30
+  }
+}

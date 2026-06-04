@@ -1,0 +1,32 @@
+﻿{
+  "webhook_url": "http://localhost:8644/webhooks/astrbot_qq",
+  "task_webhook_url": "http://localhost:8644/webhooks/astrbot_task",
+  "secret": "${HERMES_BRIDGE_SECRET}",
+  "response_port": 8645,
+  "allowed_platforms": [
+    "巅池-推广01",
+    "巅池-推广 01",
+    "巅池1号"
+  ],
+  "excluded_platforms": [
+    "巅池-技术"
+  ],
+  "memory_inject_enabled": true,
+  "memory_inject_limit": 5,
+  "direct_chat_enabled": true,
+  "topic_workflow_enabled": false,
+  "conversation_distill_enabled": true,
+  "skill_admin_only": true,
+  "skill_admin_user_ids": [
+    "ou_129defaa7d62fdb15ffc1eab436791d6"
+  ],
+  "protected_identity_names": [
+    "蔡挺"
+  ],
+  "protected_identity_user_ids": [
+    "ou_129defaa7d62fdb15ffc1eab436791d6"
+  ],
+  "skill_ops_require_confirm": true,
+  "topic_distill_enabled": true,
+  "topic_discussion_limit": 30
+}

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.hermes.webui.thirdparty</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dianchi/DC-Agent/scripts/start_hermes_webui_thirdparty.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/dianchi/DC-Agent</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/dianchi/DC-Agent/logs/hermes-webui-thirdparty.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/dianchi/DC-Agent/logs/hermes-webui-thirdparty.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/dianchi/.local/bin</string>
+  </dict>
+</dict>
+</plist>

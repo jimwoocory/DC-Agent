@@ -1,0 +1,13 @@
+{
+  "contract_id": "assistant_distillation_loop",
+  "title": "Assistant language and intent distillation loop",
+  "scope": "Feishu DC-Agent assistant short phrase protection, humane language tuning, and natural-language intent aliases.",
+  "acceptance_criteria": [
+    "The system records safe short chitchat misses without capturing long business requests.",
+    "The distillation worker can generate pending candidates from chitchat miss logs and AI inbox feedback.",
+    "Candidates require human approval or rejection before changing runtime behavior.",
+    "Approved candidates can be applied into a hot-read override file for chitchat keywords, intent aliases, or tone templates.",
+    "The Feishu assistant runtime reads approved overrides without a restart for chitchat replies and keyword fallback routing.",
+    "Tests cover candidate generation, approval, application, rejection, and runtime hot-read behavior."
+  ]
+}

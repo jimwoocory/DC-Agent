@@ -1,0 +1,42 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用附件后台自动入库链路；开启后会无感复制附件到 NAS、解析上下文并后台导入知识库",
+    "default": true
+  },
+  "inbox_dir": {
+    "type": "string",
+    "description": "附件自动落盘目录",
+    "default": "/Users/dianchi/DC-Agent/nas/knowledge/inbox/download"
+  },
+  "kb_names": {
+    "type": "list",
+    "description": "后台导入知识库的优先顺序；会使用第一个可用知识库",
+    "default": ["nas_knowledge", "营销素材", "中台运营"]
+  },
+  "supported_suffixes": {
+    "type": "list",
+    "description": "允许自动解析和入库的文件后缀",
+    "default": [".docx", ".epub", ".md", ".markdown", ".pdf", ".pptx", ".txt", ".xls", ".xlsx"]
+  },
+  "max_file_mb": {
+    "type": "int",
+    "description": "单个附件最大处理体积 MB",
+    "default": 80
+  },
+  "context_chars": {
+    "type": "int",
+    "description": "注入当前 LLM 上下文的解析摘录最大字符数",
+    "default": 12000
+  },
+  "auto_import": {
+    "type": "bool",
+    "description": "是否后台导入完整文件到知识库",
+    "default": true
+  },
+  "inject_context": {
+    "type": "bool",
+    "description": "是否把解析摘录注入当前消息上下文，让 LLM 在同一轮可直接分析",
+    "default": true
+  }
+}

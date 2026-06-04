@@ -1,0 +1,17 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用 /pet 飞书工作宠物助手 MVP",
+    "default": true
+  },
+  "db_path": {
+    "type": "string",
+    "description": "SQLite 数据库绝对路径。留空默认 data/feishu_pet.db",
+    "default": ""
+  },
+  "h5_url": {
+    "type": "string",
+    "description": "H5 宠物房间地址，配置后会在卡片上多一个「打开小橘房间」按钮。留空则不显示该按钮",
+    "default": ""
+  }
+}

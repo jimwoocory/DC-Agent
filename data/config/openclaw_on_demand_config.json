@@ -1,0 +1,13 @@
+{
+  "openclaw_cwd": "/Users/dianchi/DC-Agent/openclaw-control-center",
+  "openclaw_port": 4312,
+  "kick_port": 9120,
+  "idle_timeout_seconds": 7200,
+  "startup_wait_seconds": 30,
+  "npm_cmd": [
+    "npm",
+    "run",
+    "dev:ui"
+  ],
+  "log_dir": "/Users/dianchi/DC-Agent/logs/openclaw-control-center"
+}

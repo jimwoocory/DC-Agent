@@ -1,0 +1,42 @@
+{
+    "feature": "content_sop_system",
+    "goal": "Keep the client/planning content SOP as an engineering subsystem with routing metadata, NAS/Obsidian context, material blocking, quality gates, media prompt normalization, and Harness validation.",
+    "acceptance_criteria": [
+        {
+            "id": "content-sop-system-001",
+            "description": "Content SOP tasks carry a quality policy and initial quality gate before generation.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_quality_gate.py::test_quality_gate_blocks_missing_materials_before_generation -q"
+        },
+        {
+            "id": "content-sop-system-002",
+            "description": "Source-backed complete content SOP outputs pass blocking gates and remain review-required before external use.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_quality_gate.py::test_quality_gate_passes_source_backed_complete_result -q"
+        },
+        {
+            "id": "content-sop-system-003",
+            "description": "Fact-sensitive content SOP outputs without source citations are blocked by Harness validation.",
+            "verification": "uv run pytest dc_engines/tests/test_harness_lifecycle.py::test_content_sop_workflow_validation_blocks_missing_sources -q"
+        },
+        {
+            "id": "content-sop-system-004",
+            "description": "NAS/Obsidian memory hits are assembled into knowledge_context and source_citations for content SOP payloads.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_context.py -q"
+        },
+        {
+            "id": "content-sop-system-005",
+            "description": "Employee training cards teach material intake instead of hard-generating unsupported final drafts.",
+            "verification": "uv run pytest tests/test_feishu_card_templates.py::test_department_lessons_and_quiz_alias_legacy_codes_to_current_departments -q"
+        },
+        {
+            "id": "content-sop-system-006",
+            "description": "Content SOP documentation covers employee start, supplement-materials, confirm-delivery, and rollback workflow.",
+            "verification": "uv run pytest tests/harness/test_content_sop_contracts.py::test_content_sop_docs_cover_operator_flow -q"
+        },
+        {
+            "id": "content-sop-system-007",
+            "description": "Ready content SOP tasks dispatch to Hermes while needs-materials tasks stay in material intake.",
+            "verification": "uv run pytest tests/test_department_workflow_plugin_content_sop.py -q"
+        }
+    ],
+    "verification": {"targeted": "scripts/agent-check.sh --profile targeted"}
+}

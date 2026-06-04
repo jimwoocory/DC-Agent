@@ -1,0 +1,50 @@
+{
+  "feature": "knowledge_base_import",
+  "goal": "Import documents into the DC-Agent knowledge base while preserving document identity, chunk content, progress reporting, and failure details.",
+  "acceptance_criteria": [
+    {
+      "id": "kb-import-001",
+      "description": "Pre-chunked TXT and Markdown documents can be imported through the dashboard API.",
+      "verification": "uv run pytest tests/test_kb_import.py::test_import_documents -q"
+    },
+    {
+      "id": "kb-import-002",
+      "description": "Embedding or upload failures are reported per file without marking the whole task as crashed.",
+      "verification": "uv run pytest tests/test_kb_import.py::test_import_documents_returns_friendly_failure_message -q"
+    },
+    {
+      "id": "kb-import-003",
+      "description": "Sparse and vector retrieval dependencies remain covered by unit tests.",
+      "verification": "uv run pytest tests/unit/test_sparse_retriever.py tests/unit/test_faiss_vec_db.py -q"
+    },
+    {
+      "id": "kb-import-004",
+      "description": "Pre-chunked imports preserve source_path metadata so later agent answers have a stable original-source citation basis.",
+      "verification": "uv run pytest tests/test_kb_import.py::test_import_documents_passes_source_path_to_kb_helper tests/test_kb_import.py::test_upload_document_persists_source_path_as_file_path -q"
+    },
+    {
+      "id": "kb-import-005",
+      "description": "Retrieval results and formatted agent context expose source_path so answers can cite original documents.",
+      "verification": "uv run pytest tests/unit/test_kb_source_citations.py -q"
+    },
+    {
+      "id": "kb-import-006",
+      "description": "Agent prompt and KB query tool instructions require answers to cite source_path when knowledge-base content is used.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestApplyKb::test_apply_kb_without_agentic_mode tests/unit/test_astr_main_agent.py::TestApplyKb::test_knowledge_base_tool_description_requires_source_citations -q"
+    },
+    {
+      "id": "kb-import-007",
+      "description": "A fixture document can move through pre-chunked import, retrieval, formatted context, and citation instruction without losing source_path.",
+      "verification": "uv run pytest tests/unit/test_kb_source_citations.py::test_fixture_import_retrieval_context_requires_source_citation -q"
+    },
+    {
+      "id": "kb-import-008",
+      "description": "Formatted knowledge-base context includes an Obsidian [[document]] wikilink derived from source_path.",
+      "verification": "uv run pytest tests/unit/test_kb_source_citations.py::test_formatted_context_includes_obsidian_wikilink_for_source_document -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

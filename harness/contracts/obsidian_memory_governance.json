@@ -1,0 +1,83 @@
+{
+  "feature": "obsidian_memory_governance",
+  "goal": "Use Obsidian as the human governance layer for DC-Agent memory, with audited sync-back and approved-only runtime recall.",
+  "acceptance_criteria": [
+    {
+      "id": "omg-001",
+      "description": "Memory candidates export from data/nas_memory.db to Obsidian governance notes with stable memory_id, source_path, source_hash, review_status, sensitivity, and governance_version frontmatter.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_export_writes_review_note_with_required_frontmatter -q"
+    },
+    {
+      "id": "omg-002",
+      "description": "Edited Obsidian governance notes import back into data/governed_memory.db idempotently without creating duplicate governed memories for the same memory_id.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_import_is_idempotent_for_same_memory_id -q"
+    },
+    {
+      "id": "omg-003",
+      "description": "Approved governed memories are promotable; rejected, merged, stale, and sensitive_blocked memories are not promoted to runtime recall by default.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_promoter_only_promotes_approved_internal_memory -q"
+    },
+    {
+      "id": "omg-004",
+      "description": "Every Obsidian import decision and runtime promotion writes an append-only audit record with actor, action, memory_id, payload, and timestamp.",
+      "verification": "uv run pytest dc_engines/tests/test_memory_governance_store.py::test_decision_and_audit_records_are_append_only -q"
+    },
+    {
+      "id": "omg-005",
+      "description": "Runtime recall defaults to approved-only governed memories and excludes need_review, rejected, merged, stale, secret, and sensitive_blocked records unless an explicit admin path asks for them.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_recall_filters_to_approved_by_default -q"
+    },
+    {
+      "id": "omg-006",
+      "description": "The production system preserves current NAS memory, Obsidian RawRefs, chat review capture, and dc_memory_context recall paths as reusable inputs instead of replacing them with an incompatible memory stack.",
+      "verification": "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_preserves_existing_memory_assets -q"
+    },
+    {
+      "id": "omg-007",
+      "description": "The first production version explicitly excludes an Obsidian native plugin, realtime Obsidian file watcher, bulk proactive review pings, and automatic deletion/forgetting from required scope.",
+      "verification": "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_records_first_version_non_goals -q"
+    }
+  ],
+  "non_goals": [
+    "Do not replace data/nas_memory.db as the raw source memory index.",
+    "Do not require a native Obsidian plugin for the first production version.",
+    "Do not require realtime file watching for Obsidian edits in the first production version.",
+    "Do not use data/agy_review_candidates as a production review queue.",
+    "Do not promote unreviewed or sensitive-blocked memory into default runtime recall.",
+    "Do not implement automatic deletion or forgetting before a retention policy exists.",
+    "Do not require full AstrBot KB write-back for assistants that can query governed NAS memory directly.",
+    "Do not add bulk proactive review pings as part of the first production version."
+  ],
+  "existing_assets_to_reuse": [
+    "data/nas_memory.db",
+    "nas_sync/dc_memory_indexer.py",
+    "ObsidianVault/00_RawRefs",
+    "ObsidianVault/10_Index",
+    "ObsidianVault/20_Bridges",
+    "dc_engines/dc_engines/obsidian_review.py",
+    "dc_engines/tests/test_obsidian_review.py",
+    "data/plugins/llm_router/dc_memory_context.py",
+    "data/config/nas_memory_overrides.json",
+    "harness/contracts/local_knowledge_base_phase2_rawrefs.json"
+  ],
+  "target_architecture": {
+    "raw_memory_index": "data/nas_memory.db",
+    "human_governance_workspace": "ObsidianVault/40_MemoryGovernance",
+    "governed_state_store": "data/governed_memory.db",
+    "production_recall": [
+      "data/plugins/llm_router/dc_memory_context.py",
+      "astrbot/core/tools/knowledge_base_tools.py",
+      "optional AstrBot KB mirror for compatibility"
+    ],
+    "promotion_outputs": [
+      "data/nas_memory.db review_status/metadata updates",
+      "data/config/nas_memory_overrides.json",
+      "runtime approved-only recall context",
+      "append-only audit log"
+    ]
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

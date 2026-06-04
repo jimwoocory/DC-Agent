@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>员工目录 · DC-Agent 接待机器人</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fb;
+      --card: #fff;
+      --border: #e4e7ec;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --kind-preference: #fef3c7;
+      --kind-skill: #dcfce7;
+      --kind-role: #dbeafe;
+      --kind-context: #f3e8ff;
+      --kind-fact: #fee2e2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --card: #1e293b;
+        --border: #334155;
+        --muted: #94a3b8;
+        --accent: #60a5fa;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC',
+                   'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: inherit;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    h1 { font-size: 20px; margin: 0; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .layout { display: flex; gap: 16px; }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+    }
+    .left { flex: 1.2; max-height: 80vh; overflow-y: auto; }
+    .right { flex: 1.6; max-height: 80vh; overflow-y: auto; }
+    .row {
+      padding: 10px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex; justify-content: space-between; gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .row:hover { background: rgba(37,99,235,.07); }
+    .row.active { background: rgba(37,99,235,.15); }
+    .row .name { font-weight: 600; }
+    .row .anon { color: var(--muted); font-style: italic; }
+    .row .tags { color: var(--muted); font-size: 12px; }
+    .badge {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 999px; font-size: 11px; font-weight: 500;
+      background: rgba(0,0,0,.06);
+    }
+    .right h2 { font-size: 16px; margin: 0 0 12px; }
+    .field { margin: 6px 0; }
+    .field label {
+      color: var(--muted); font-size: 12px; margin-right: 8px;
+    }
+    .mem {
+      padding: 8px 12px; margin: 6px 0;
+      border-radius: 8px; background: #fafbfc;
+      border: 1px solid var(--border);
+    }
+    @media (prefers-color-scheme: dark) {
+      .mem { background: #0f172a; }
+    }
+    .mem .kind {
+      display: inline-block; padding: 2px 8px;
+      border-radius: 999px; font-size: 11px; margin-right: 8px;
+    }
+    .kind-preference { background: var(--kind-preference); color: #92400e; }
+    .kind-skill { background: var(--kind-skill); color: #166534; }
+    .kind-role { background: var(--kind-role); color: #1e40af; }
+    .kind-context { background: var(--kind-context); color: #6b21a8; }
+    .kind-fact { background: var(--kind-fact); color: #991b1b; }
+    .mem .content { margin-top: 4px; }
+    .mem .meta-line {
+      font-size: 11px; color: var(--muted); margin-top: 4px;
+    }
+    .empty { color: var(--muted); padding: 16px 0; }
+    .err {
+      color: #991b1b; padding: 12px; background: #fee2e2;
+      border-radius: 8px; margin-bottom: 12px;
+    }
+  </style>
+  <script src="/api/plugin/page/bridge-sdk.js"></script>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>员工目录</h1>
+      <div class="meta" id="meta">加载中…</div>
+    </div>
+  </header>
+  <div id="err" class="err" style="display:none"></div>
+  <div class="layout">
+    <div class="panel left">
+      <div id="list">加载中…</div>
+    </div>
+    <div class="panel right">
+      <div id="detail" class="empty">点击左边一名员工查看档案 + 长期记忆</div>
+    </div>
+  </div>
+
+  <script>
+    const bridge = window.AstrBotPluginPage;
+    const $list = document.getElementById('list');
+    const $detail = document.getElementById('detail');
+    const $meta = document.getElementById('meta');
+    const $err = document.getElementById('err');
+
+    function showErr(msg) {
+      $err.style.display = 'block';
+      $err.textContent = msg;
+    }
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+    function fmtTime(iso) {
+      if (!iso) return '—';
+      try {
+        return new Date(iso).toLocaleString('zh-CN', { hour12: false });
+      } catch (_) { return iso; }
+    }
+
+    async function loadList() {
+      try {
+        const resp = await bridge.apiGet('/api/plug/employees');
+        if (!resp || resp.status !== 'ok') {
+          showErr('加载失败：' + (resp?.message || '未知错误'));
+          return;
+        }
+        const items = resp.data.employees || [];
+        $meta.textContent = `共 ${items.length} 名员工`;
+        if (!items.length) {
+          $list.innerHTML = '<div class="empty">还没有员工记录。在飞书 @bot 打招呼试试，或运行 /employees sync 同步通讯录。</div>';
+          return;
+        }
+        $list.innerHTML = items.map((e) => `
+          <div class="row" data-id="${esc(e.open_id)}">
+            <div>
+              <div class="${e.is_anonymous ? 'anon' : 'name'}">${
+                esc(e.display_name) || '(匿名)'
+              }</div>
+              <div class="tags">${[e.department, e.role].filter(Boolean).map(esc).join(' · ') || ''}</div>
+            </div>
+            <div class="badge">${e.interaction_count} 次</div>
+          </div>
+        `).join('');
+        document.querySelectorAll('.row').forEach((el) => {
+          el.addEventListener('click', () => {
+            document.querySelectorAll('.row').forEach((r) => r.classList.remove('active'));
+            el.classList.add('active');
+            loadDetail(el.dataset.id);
+          });
+        });
+      } catch (e) {
+        showErr('加载失败：' + (e?.message || e));
+      }
+    }
+
+    async function loadDetail(openId) {
+      $detail.innerHTML = '加载中…';
+      $detail.classList.remove('empty');
+      try {
+        const resp = await bridge.apiGet(
+          '/api/plug/employees/' + encodeURIComponent(openId),
+        );
+        if (!resp || resp.status !== 'ok') {
+          $detail.innerHTML = '<div class="err">' +
+            esc(resp?.message || '加载失败') + '</div>';
+          return;
+        }
+        const emp = resp.data.employee;
+        const mems = resp.data.memories || [];
+        const fields = [
+          ['open_id', emp.open_id],
+          ['名字', emp.display_name || '(未记)'],
+          ['部门', emp.department || '(未记)'],
+          ['岗位', emp.role || '(未记)'],
+          ['平台', emp.platform_id || '?'],
+          ['交互次数', emp.interaction_count],
+          ['首次接触', fmtTime(emp.first_seen_at)],
+          ['最近接触', fmtTime(emp.last_seen_at)],
+        ];
+        const tags = (emp.skill_tags || []).map(esc).join('、');
+        const prefs = Object.entries(emp.preferences || {})
+          .map(([k, v]) => `${esc(k)}=${esc(v)}`).join(', ');
+
+        $detail.innerHTML = `
+          <h2>${esc(emp.display_name || '(匿名员工)')}</h2>
+          ${fields.map(([k, v]) => `
+            <div class="field"><label>${esc(k)}</label>${esc(v)}</div>
+          `).join('')}
+          ${tags ? `<div class="field"><label>技能</label>${tags}</div>` : ''}
+          ${prefs ? `<div class="field"><label>偏好</label>${prefs}</div>` : ''}
+          <h2 style="margin-top:20px">长期记忆（${mems.length} 条）</h2>
+          ${mems.length === 0
+            ? '<div class="empty">暂无</div>'
+            : mems.map((m) => `
+                <div class="mem">
+                  <span class="kind kind-${esc(m.kind)}">${esc(m.kind)}</span>
+                  <span class="badge">rel ${m.relevance?.toFixed?.(2) ?? m.relevance}</span>
+                  <div class="content">${esc(m.content)}</div>
+                  <div class="meta-line">#${esc(m.memory_id.slice(0,8))} · ${fmtTime(m.created_at)}</div>
+                </div>
+              `).join('')}
+        `;
+      } catch (e) {
+        $detail.innerHTML = '<div class="err">加载失败：' + esc(e?.message || e) + '</div>';
+      }
+    }
+
+    (async () => {
+      try {
+        await bridge.ready();
+        await loadList();
+      } catch (e) {
+        showErr('bridge 初始化失败：' + (e?.message || e));
+      }
+    })();
+  </script>
+</body>
+</html>

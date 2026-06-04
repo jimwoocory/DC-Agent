@@ -1,0 +1,172 @@
+# ============================================================
+# JW-Bot NAS 知识库对接配置
+# ============================================================
+# 填写本文件后，运行：
+#   ./mount.sh mount       挂载 NAS
+#   python watcher.py      启动自动摄入监听
+# ============================================================
+
+nas:
+  # 协议：smb（群晖/QNAP/Windows）| nfs（Linux NAS）| webdav（群晖 WebDAV）
+  protocol: smb
+
+  # NAS 地址（群晖 DSM 管理界面：http://192.168.1.35:5000）
+  host: 192.168.1.35
+
+  # SMB 共享名（群晖共享文件夹名称）
+  share: knowledge
+
+  # NAS 账号；密码存 macOS Keychain，不写入仓库
+  username: dcwh-001
+  password_keychain_key: dc-agent-nas-password
+
+  # WebDAV 专用配置（protocol: webdav 时生效）
+  # 群晖 WebDAV 默认端口：5005（HTTP）/ 5006（HTTPS）
+  # 开启方式：DSM → 套件中心 → WebDAV Server
+  webdav_port: 5005
+  webdav_path: /knowledge
+
+  # NFS 专用配置（protocol: nfs 时生效）
+  nfs_export: /volume1/knowledge
+
+  # 本机挂载点（用户目录下，无需 sudo）
+  mount_point: /Users/dianchi/nas_kb
+
+
+# ============================================================
+# 飞书云空间 → NAS 同步配置（feishu_sync.py 使用）
+# ============================================================
+# sync_scope：
+#   company_cloud = 发现并同步公司云文档（需要飞书应用权限 search:docs:read）
+#   folder        = 只同步 folder_tokens 中列出的飞书文件夹（测试/局部同步）
+# 凭证（app_id / app_secret）由 data/feishu_whitelist.yaml 提供，由 feishu_hub 统一管理
+feishu:
+  sync_scope: folder
+
+  company_cloud:
+    # 飞书搜索接口不接受空 query；这里用 * 作为公司云文档发现的预检 query。
+    # 开通 search:docs:read 后必须验证该 query 是否能覆盖后台云空间全量。
+    queries:
+      - "*"
+    page_size: 20
+    max_items_per_run: 0
+
+  # 电子表格导出为 xlsx 时，单元格附件只会变成文件名文本；
+  # 这里额外通过 sheets values API 读取附件 fileToken，再用 drive media API 下载。
+  sheet_attachments:
+    enabled: true
+    include_hidden_sheets: true
+    # 小范围灰度：每轮只下载未完成附件中的 20 个，避免一次性拉取 792 个附件。
+    max_items_per_run: 20
+    # lark-oapi 下载超大 PPTX 时容易长时间阻塞；超出阈值先标记 failed，保留 manifest 线索后续单独处理。
+    max_download_mb: 150
+    timeout_seconds: 90
+
+  # 小范围灰度同步入口：按公司云文档后台“大小”排序队列逐个同步。
+  # 排序来源是 https://o0ain5w98jh.feishu.cn/admin/drive/cloud-space
+  # 点击“大小”后的显示顺序；身份仍以 data/watchdog/feishu_cloud_targets.json
+  # 中的 admin_row_id/token/verified URL 为准，避免 URL 类型猜错。
+  # 分类仍按项目优先归档；负责人/发起人不确定时进入 projects/_待确认。
+  manual_urls:
+    - https://o0ain5w98jh.feishu.cn/wiki/Ce8jwuC2Zi1VeVkTzy8c6yfdnO4
+
+  # folder 模式才使用；保留历史测试 token 方便排查，不作为生产同步范围。
+  folder_tokens:
+    - Cy6BfaR22l983tdE17oclM0rnU7   # DC-Agent 知识库同步测试（非公司全量）
+
+
+# ============================================================
+# 目录结构约定（相对于 mount_point）
+# ============================================================
+# /Volumes/nas_kb/
+#   inbox/      ← 新文件放这里，watcher 自动检测并摄入
+#   processed/  ← 摄入成功后文件移到这里归档
+#   archive/    ← 手动归档，不做自动处理
+# ============================================================
+watch:
+  # 监听目录（相对于 mount_point）
+  inbox_dir: inbox
+  # 摄入成功后移入的目录（相对于 mount_point）
+  processed_dir: processed
+  # 摄入失败后隔离到这里，避免同一个坏文件反复阻断定时任务
+  failed_dir: failed
+
+  # 默认只扫描 inbox；全量 NAS → KB 对账由 scripts-watchdog/knowledge_cycle.py
+  # 显式调度，避免日常入库误扫整块 NAS。
+  full_scan: false
+
+  # 扫描时排除的目录名（精确匹配）
+  exclude_dirs:
+    - "#recycle"
+    - processed
+    - archive
+    - failed
+    - .sync
+    - .DS_Store
+
+  # 支持的文件类型
+  supported_extensions:
+    - .pdf
+    - .md
+    - .txt
+    - .docx
+    - .doc
+    - .pptx
+    - .xlsx
+    - .csv
+    - .zip
+    - .mp4
+    - .mov
+    - .m4v
+    - .avi
+    - .mkv
+
+  # 文件稳定等待时间（秒）：文件写入完成前等待，防止半截摄入
+  settle_seconds: 3
+
+  # 扫描间隔（秒）：除了 watchdog 事件，还会定期扫描漏网文件
+  poll_interval: 300
+
+
+# ============================================================
+# AstrBot 知识库 API 配置
+# ============================================================
+astrbot:
+  # Dashboard API 地址
+  api_base: http://localhost:6185/api
+
+  # Dashboard 登录账号（同 AstrBot Dashboard 界面账号）
+  username: Dianchi.boss
+  # Dashboard 登录密码存 macOS Keychain，不写入仓库
+  password_keychain_key: dc-agent-dashboard-password
+
+  # 目标知识库 ID（在 AstrBot Dashboard → 知识库 页面查看）
+  # 留空则 watcher 启动时自动查找名为 nas_knowledge 的知识库
+  kb_id: ""
+
+  # 自动创建知识库时使用的 Embedding Provider ID
+  # 在 AstrBot Dashboard → LLM 提供商 → 找到 Embedding 类型的 Provider ID
+  embedding_provider_id: "openai_embedding"
+
+  # 文件夹到知识库的映射 (可选)
+  # 根据文件的相对路径前缀，自动将文件分配到不同的知识库
+  kb_mapping:
+    "中台运营项目": "106d44aa-771b-4f6f-939c-14e274c3c952"
+    "品宣运营项目": "084c0c08-52fe-471e-aab2-fb2f8477f45c"
+    "品牌规范": "e5d9756e-83ae-4663-be8f-46a70fb1a894"
+    "营销素材": "344196dd-25c6-4765-a161-e265f0e66565"
+
+  # 分块参数
+  chunk_size: 512
+  chunk_overlap: 50
+
+  # JWT Token 刷新间隔（秒），默认 1 小时
+  token_refresh_interval: 3600
+
+
+# ============================================================
+# 日志
+# ============================================================
+logging:
+  level: INFO          # DEBUG | INFO | WARNING | ERROR
+  file: nas_sync/watcher.log

@@ -1,0 +1,13 @@
+{
+  "contract_id": "ai_inbox_lark_entry",
+  "description": "飞书私聊进入 AI Inbox 前置插件时，不应因为缺少 is_group() 方法中断消息链路；员工询问拉小助手进群时应得到明确操作说明。",
+  "acceptance_criteria": [
+    "真实飞书私聊事件对象即使没有 is_group() 方法，ai_inbox_plugin._should_track 也能返回 True 并继续处理。",
+    "群聊事件仍只在 @ 小助手或唤醒命令时进入 AI Inbox，避免群内无关消息被记录。",
+    "私聊询问“怎么拉你进群”时，chat_creator_plugin 给出已有群添加机器人、新建临时群、群内邀请成员的说明。"
+  ],
+  "verification": [
+    "uv run pytest dc_engines/tests/test_ai_inbox.py dc_engines/tests/test_chat_creator_plugin.py",
+    "scripts/agent-check.sh --profile targeted"
+  ]
+}

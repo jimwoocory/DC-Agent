@@ -1,0 +1,505 @@
+{
+  "name": "local_knowledge_base_p0_qa",
+  "generated_at": "2026-06-01T17:39:27+08:00",
+  "db": "/Users/dianchi/DC-Agent/data/nas_memory.db",
+  "stats": {
+    "documents": 290,
+    "chunks": 809,
+    "need_review": 286,
+    "confirmed": 4,
+    "parsers": {
+      "pdf": 141,
+      "pptx": 131,
+      "docx": 14,
+      "xlsx": 3,
+      "md": 1
+    },
+    "doc_types": {
+      "复盘结算": 97,
+      "文案素材": 59,
+      "资料文档": 52,
+      "预算报价": 26,
+      "排期分工": 22,
+      "传播策略": 21,
+      "执行方案": 5,
+      "SOP": 4,
+      "项目总表": 4
+    }
+  },
+  "summary": {
+    "total": 8,
+    "pass": 8,
+    "warn": 0,
+    "fail": 0
+  },
+  "cases": [
+    {
+      "id": "org_public_private_sentiment_owner",
+      "question": "公私域舆情谁负责，属于哪个部门？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "0022_公私域舆情监控二阶段结算汇报-7.31",
+        "source_path": "/Users/dianchi/nas_kb/projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pdf",
+        "owner": "谭媛尹",
+        "departments": [
+          "中台",
+          "客户部",
+          "策划"
+        ],
+        "parser": "pdf",
+        "review_status": "confirmed",
+        "score": 525.0
+      },
+      "checks": [
+        "预期来源进入 Top 3",
+        "负责人=谭媛尹",
+        "部门包含 中台, 客户部, 策划"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "负责人按项目归属落到谭媛尹。",
+        "组织口径为中台统筹，客户部与策划协同。",
+        "韦欢、潘彩月、黄丽清等在 SOP 中体现为具体更新或执行角色。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "0022_公私域舆情监控二阶段结算汇报-7.31",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pdf",
+          "score": 525.0
+        },
+        {
+          "rank": 2,
+          "title": "【汇总】KOW项目-公、私域社群舆情管控执行SOP",
+          "source_path": "/Users/dianchi/nas_kb/processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+          "score": 232.0
+        },
+        {
+          "rank": 3,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15.pdf",
+          "score": 225.0
+        },
+        {
+          "rank": 4,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic.pptx",
+          "score": 225.0
+        },
+        {
+          "rank": 5,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q.pdf",
+          "score": 225.0
+        }
+      ]
+    },
+    {
+      "id": "kow_sop_flow",
+      "question": "KOW 公私域舆情管控 SOP 的主要流程是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "【汇总】KOW项目-公、私域社群舆情管控执行SOP",
+        "source_path": "/Users/dianchi/nas_kb/processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+        "owner": "谭媛尹",
+        "departments": [
+          "中台",
+          "客户部",
+          "策划"
+        ],
+        "parser": "docx",
+        "review_status": "confirmed",
+        "score": 670.0
+      },
+      "checks": [
+        "预期来源进入 Top 3",
+        "负责人=谭媛尹",
+        "部门包含 中台, 客户部, 策划"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "核心流程包括社群收集、社群仪表盘、群舆论收集、舆论收集仪表盘。",
+        "素材库、金句、玩梗和真实话术转化每日更新。",
+        "项目运行统筹、群引导排期、KOS 账号、建联和周报分别有更新负责人。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "【汇总】KOW项目-公、私域社群舆情管控执行SOP",
+          "source_path": "/Users/dianchi/nas_kb/processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+          "score": 670.0
+        },
+        {
+          "rank": 2,
+          "title": "0022_公私域舆情监控二阶段结算汇报-7.31",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pptx",
+          "score": 575.0
+        },
+        {
+          "rank": 3,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15.pptx",
+          "score": 228.0
+        },
+        {
+          "rank": 4,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic.pptx",
+          "score": 228.0
+        },
+        {
+          "rank": 5,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q.pdf",
+          "score": 225.0
+        }
+      ]
+    },
+    {
+      "id": "method_c_flow",
+      "question": "Method C 的核心流程是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "Method_C_5分钟指南",
+        "source_path": "/Users/dianchi/nas_kb/processed/Method_C_5分钟指南.docx",
+        "owner": "",
+        "departments": [],
+        "parser": "docx",
+        "review_status": "need_review",
+        "score": 125.0
+      },
+      "checks": [
+        "预期来源进入 Top 3"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "员工在飞书群组分享文档。",
+        "feishu_sync_method_c.py 监听消息并提取文档链接。",
+        "文件下载到 NAS 后由监听/索引链路进入知识库，机器人再基于索引回答。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "Method_C_5分钟指南",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_5分钟指南.docx",
+          "score": 125.0
+        },
+        {
+          "rank": 2,
+          "title": "Method_C_文件索引",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_文件索引.docx",
+          "score": 123.0
+        },
+        {
+          "rank": 3,
+          "title": "Method_C_执行清单",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_执行清单.docx",
+          "score": 106.0
+        },
+        {
+          "rank": 4,
+          "title": "Method_C_完整技术文档",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_完整技术文档.docx",
+          "score": 98.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_快速开始",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_快速开始.docx",
+          "score": 98.0
+        }
+      ]
+    },
+    {
+      "id": "feishu_to_nas_components",
+      "question": "飞书文档同步到 NAS 后，哪些组件负责下载、监听和索引？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "飞书文档自动同步系统 - 执行方案",
+        "source_path": "/Users/dianchi/nas_kb/processed/飞书文档自动同步系统 - 执行方案.pdf",
+        "owner": "",
+        "departments": [],
+        "parser": "pdf",
+        "review_status": "need_review",
+        "score": 417.0
+      },
+      "checks": [
+        "预期来源进入 Top 3"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "下载侧是飞书同步脚本，尤其是 feishu_sync_method_c.py 这条 Method C 链路。",
+        "存储侧落到 NAS 知识目录。",
+        "监听和索引侧由 watcher.py、dc_memory_indexer.py 等组件把文档纳入本地知识库。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "飞书文档自动同步系统 - 执行方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书文档自动同步系统 - 执行方案.pdf",
+          "score": 417.0
+        },
+        {
+          "rank": 2,
+          "title": "Method_C_完整技术文档",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_完整技术文档.docx",
+          "score": 137.0
+        },
+        {
+          "rank": 3,
+          "title": "飞书AI机器人对接技术方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人对接技术方案.docx",
+          "score": 122.0
+        },
+        {
+          "rank": 4,
+          "title": "飞书AI机器人功能规划方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
+          "score": 93.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_给老板的方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_给老板的方案.docx",
+          "score": 87.0
+        }
+      ]
+    },
+    {
+      "id": "feishu_ai_phases",
+      "question": "飞书 AI 机器人规划分几个阶段？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "飞书AI机器人功能规划方案",
+        "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
+        "owner": "",
+        "departments": [],
+        "parser": "docx",
+        "review_status": "need_review",
+        "score": 492.0
+      },
+      "checks": [
+        "预期来源进入 Top 3"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "规划按三个阶段逐步上线。",
+        "先从基础 AI 助手能力起步，再扩展到业务场景和复杂自动化。",
+        "原则包括零额外采购、数据内网流转、分阶段上线和效果驱动迭代。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "飞书AI机器人功能规划方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
+          "score": 492.0
+        },
+        {
+          "rank": 2,
+          "title": "飞书AI机器人对接技术方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人对接技术方案.docx",
+          "score": 384.0
+        },
+        {
+          "rank": 3,
+          "title": "脚本升级和机器人模型可行性评估",
+          "source_path": "/Users/dianchi/nas_kb/processed/脚本升级和机器人模型可行性评估.md",
+          "score": 237.0
+        },
+        {
+          "rank": 4,
+          "title": "0027_《重生之我在五菱打工》栏目规划-8.14",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/《重生之我在五菱打工》栏目规划-8.14/资料文档/0027_《重生之我在五菱打工》栏目规划-8.14.pdf",
+          "score": 108.0
+        },
+        {
+          "rank": 5,
+          "title": "0027_《重生之我在五菱打工》栏目规划-8.19",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/《重生之我在五菱打工》栏目规划-8.19/资料文档/0027_《重生之我在五菱打工》栏目规划-8.19.pptx",
+          "score": 108.0
+        }
+      ]
+    },
+    {
+      "id": "openclaw_permissions",
+      "question": "openclaw 目前已有权限能支持哪些机器人能力？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "openclaw应用API权限申请方案",
+        "source_path": "/Users/dianchi/nas_kb/processed/openclaw应用API权限申请方案.docx",
+        "owner": "",
+        "departments": [],
+        "parser": "docx",
+        "review_status": "need_review",
+        "score": 167.0
+      },
+      "checks": [
+        "预期来源进入 Top 3"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "openclaw 已配置 63 项应用身份权限。",
+        "权限主要集中在消息与群组领域。",
+        "可支撑消息收发、群组管理、卡片交互等飞书机器人核心能力。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "openclaw应用API权限申请方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/openclaw应用API权限申请方案.docx",
+          "score": 167.0
+        },
+        {
+          "rank": 2,
+          "title": "脚本升级和机器人模型可行性评估",
+          "source_path": "/Users/dianchi/nas_kb/processed/脚本升级和机器人模型可行性评估.md",
+          "score": 84.0
+        },
+        {
+          "rank": 3,
+          "title": "飞书AI机器人对接技术方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人对接技术方案.docx",
+          "score": 84.0
+        },
+        {
+          "rank": 4,
+          "title": "飞书AI机器人功能规划方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
+          "score": 81.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_5分钟指南",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_5分钟指南.docx",
+          "score": 23.0
+        }
+      ]
+    },
+    {
+      "id": "liuyi_campaign_idea",
+      "question": "六一五菱联盟鉴宝活动的核心创意和执行动作是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "六一五菱联盟鉴宝执行策划案",
+        "source_path": "/Users/dianchi/nas_kb/processed/六一五菱联盟鉴宝执行策划案.docx",
+        "owner": "",
+        "departments": [],
+        "parser": "docx",
+        "review_status": "need_review",
+        "score": 379.0
+      },
+      "checks": [
+        "预期来源进入 Top 3"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "借六一儿童节节点，把活动包装成宝宝巴士探索之旅。",
+        "邀约亲子博主和带娃用户参观五菱制造工厂。",
+        "通过工厂参观、博士讲解和话题传播激发亲子内容扩散。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "六一五菱联盟鉴宝执行策划案",
+          "source_path": "/Users/dianchi/nas_kb/processed/六一五菱联盟鉴宝执行策划案.docx",
+          "score": 379.0
+        },
+        {
+          "rank": 2,
+          "title": "0075_六一萌娃鉴宝活动结算汇报-0927",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/六一萌娃鉴宝活动结算汇报-0927/复盘结算/0075_六一萌娃鉴宝活动结算汇报-0927.pdf",
+          "score": 161.0
+        },
+        {
+          "rank": 3,
+          "title": "0131_V2宝骏招商品鉴会执行规划",
+          "source_path": "/Users/dianchi/nas_kb/inbox/策划部日常工作方案进度记录__attachments/策划方案/最新版方案/0131_V2宝骏招商品鉴会执行规划.pptx",
+          "score": 89.0
+        },
+        {
+          "rank": 4,
+          "title": "0088_大纲-五菱星光一周年活动方案1021",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/大纲-五菱星光一周年活动方案1021/预算报价/0088_大纲-五菱星光一周年活动方案1021.pdf",
+          "score": 86.0
+        },
+        {
+          "rank": 5,
+          "title": "0088_大纲-五菱星光一周年活动方案1021__feishu_DUtabZCi",
+          "source_path": "/Users/dianchi/nas_kb/projects/_待确认/大纲-五菱星光一周年活动方案1021/预算报价/0088_大纲-五菱星光一周年活动方案1021__feishu_DUtabZCi.pdf",
+          "score": 86.0
+        }
+      ]
+    },
+    {
+      "id": "script_upgrade_feasibility",
+      "question": "脚本升级和机器人模型可行性评估的结论是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "脚本升级和机器人模型可行性评估",
+        "source_path": "/Users/dianchi/nas_kb/processed/脚本升级和机器人模型可行性评估.md",
+        "owner": "",
+        "departments": [],
+        "parser": "md",
+        "review_status": "need_review",
+        "score": 81.0
+      },
+      "checks": [
+        "预期来源进入 Top 3"
+      ],
+      "warnings": [],
+      "failures": [],
+      "answer_points": [
+        "评估对象是 Method C 脚本升级和机器人模型配置。",
+        "升级重点包括识别群组附件、文件格式、下载附件、按部门分类、自动命名和去重。",
+        "结论用于判断飞书 IM/Drive 能力、权限与机器人知识库链路是否足够支撑落地。"
+      ],
+      "top_hits": [
+        {
+          "rank": 1,
+          "title": "脚本升级和机器人模型可行性评估",
+          "source_path": "/Users/dianchi/nas_kb/processed/脚本升级和机器人模型可行性评估.md",
+          "score": 81.0
+        },
+        {
+          "rank": 2,
+          "title": "飞书AI机器人功能规划方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
+          "score": 81.0
+        },
+        {
+          "rank": 3,
+          "title": "飞书AI机器人对接技术方案",
+          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人对接技术方案.docx",
+          "score": 81.0
+        },
+        {
+          "rank": 4,
+          "title": "Method_C_5分钟指南",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_5分钟指南.docx",
+          "score": 17.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_完整技术文档",
+          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_完整技术文档.docx",
+          "score": 17.0
+        }
+      ]
+    }
+  ]
+}

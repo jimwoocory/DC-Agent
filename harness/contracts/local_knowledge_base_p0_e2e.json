@@ -1,0 +1,535 @@
+{
+  "name": "local_knowledge_base_p0_e2e_memory_injection",
+  "generated_at": "2026-06-01T17:39:31+08:00",
+  "scope": "AstrBot llm_router dc_memory_context injection path",
+  "qa_contract": "/Users/dianchi/DC-Agent/harness/contracts/local_knowledge_base_p0_qa.json",
+  "summary": {
+    "total": 8,
+    "pass": 8,
+    "warn": 0,
+    "fail": 0,
+    "guard_fail": 0
+  },
+  "cases": [
+    {
+      "id": "org_public_private_sentiment_owner",
+      "question": "公私域舆情谁负责，属于哪个部门？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "0022_公私域舆情监控二阶段结算汇报-7.31",
+        "owner": "谭媛尹",
+        "departments": [
+          "中台",
+          "客户部",
+          "策划"
+        ],
+        "rel_path": "projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pdf",
+        "source_path": "/Users/dianchi/nas_kb/projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pdf",
+        "review_status": "confirmed",
+        "score": 525.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "负责人=谭媛尹",
+        "部门包含 中台, 客户部, 策划",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "0022_公私域舆情监控二阶段结算汇报-7.31",
+          "owner": "谭媛尹",
+          "rel_path": "projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pdf",
+          "score": 525.0
+        },
+        {
+          "rank": 2,
+          "title": "【汇总】KOW项目-公、私域社群舆情管控执行SOP",
+          "owner": "谭媛尹",
+          "rel_path": "processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+          "score": 232.0
+        },
+        {
+          "rank": 3,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15",
+          "owner": "",
+          "rel_path": "projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15.pdf",
+          "score": 225.0
+        },
+        {
+          "rank": 4,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic",
+          "owner": "",
+          "rel_path": "projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic.pptx",
+          "score": 225.0
+        },
+        {
+          "rank": 5,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q",
+          "owner": "",
+          "rel_path": "projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q.pdf",
+          "score": 225.0
+        }
+      ]
+    },
+    {
+      "id": "kow_sop_flow",
+      "question": "KOW 公私域舆情管控 SOP 的主要流程是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "【汇总】KOW项目-公、私域社群舆情管控执行SOP",
+        "owner": "谭媛尹",
+        "departments": [
+          "中台",
+          "客户部",
+          "策划"
+        ],
+        "rel_path": "processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+        "source_path": "/Users/dianchi/nas_kb/processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+        "review_status": "confirmed",
+        "score": 670.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "负责人=谭媛尹",
+        "部门包含 中台, 客户部, 策划",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "【汇总】KOW项目-公、私域社群舆情管控执行SOP",
+          "owner": "谭媛尹",
+          "rel_path": "processed/【汇总】KOW项目-公、私域社群舆情管控执行SOP.docx",
+          "score": 670.0
+        },
+        {
+          "rank": 2,
+          "title": "0022_公私域舆情监控二阶段结算汇报-7.31",
+          "owner": "谭媛尹",
+          "rel_path": "projects/_待确认/公私域舆情监控二阶段结算汇报-7.31/复盘结算/0022_公私域舆情监控二阶段结算汇报-7.31.pptx",
+          "score": 575.0
+        },
+        {
+          "rank": 3,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15",
+          "owner": "",
+          "rel_path": "projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15.pptx",
+          "score": 228.0
+        },
+        {
+          "rank": 4,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic",
+          "owner": "",
+          "rel_path": "projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_EUsQbGic.pptx",
+          "score": 228.0
+        },
+        {
+          "rank": 5,
+          "title": "0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q",
+          "owner": "",
+          "rel_path": "projects/_待确认/V7东风商用车公私域运营板块规划-11.15/文案素材/0089_V7东风商用车公私域运营板块规划-11.15__feishu_Z5YJbm9q.pdf",
+          "score": 225.0
+        }
+      ]
+    },
+    {
+      "id": "method_c_flow",
+      "question": "Method C 的核心流程是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "Method_C_5分钟指南",
+        "owner": "",
+        "departments": [],
+        "rel_path": "processed/Method_C_5分钟指南.docx",
+        "source_path": "/Users/dianchi/nas_kb/processed/Method_C_5分钟指南.docx",
+        "review_status": "need_review",
+        "score": 125.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "Method_C_5分钟指南",
+          "owner": "",
+          "rel_path": "processed/Method_C_5分钟指南.docx",
+          "score": 125.0
+        },
+        {
+          "rank": 2,
+          "title": "Method_C_文件索引",
+          "owner": "",
+          "rel_path": "processed/Method_C_文件索引.docx",
+          "score": 123.0
+        },
+        {
+          "rank": 3,
+          "title": "Method_C_执行清单",
+          "owner": "",
+          "rel_path": "processed/Method_C_执行清单.docx",
+          "score": 106.0
+        },
+        {
+          "rank": 4,
+          "title": "Method_C_完整技术文档",
+          "owner": "",
+          "rel_path": "processed/Method_C_完整技术文档.docx",
+          "score": 98.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_快速开始",
+          "owner": "",
+          "rel_path": "processed/Method_C_快速开始.docx",
+          "score": 98.0
+        }
+      ]
+    },
+    {
+      "id": "feishu_to_nas_components",
+      "question": "飞书文档同步到 NAS 后，哪些组件负责下载、监听和索引？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "飞书文档自动同步系统 - 执行方案",
+        "owner": "",
+        "departments": [],
+        "rel_path": "processed/飞书文档自动同步系统 - 执行方案.pdf",
+        "source_path": "/Users/dianchi/nas_kb/processed/飞书文档自动同步系统 - 执行方案.pdf",
+        "review_status": "need_review",
+        "score": 417.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "飞书文档自动同步系统 - 执行方案",
+          "owner": "",
+          "rel_path": "processed/飞书文档自动同步系统 - 执行方案.pdf",
+          "score": 417.0
+        },
+        {
+          "rank": 2,
+          "title": "Method_C_完整技术文档",
+          "owner": "",
+          "rel_path": "processed/Method_C_完整技术文档.docx",
+          "score": 137.0
+        },
+        {
+          "rank": 3,
+          "title": "飞书AI机器人对接技术方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人对接技术方案.docx",
+          "score": 122.0
+        },
+        {
+          "rank": 4,
+          "title": "飞书AI机器人功能规划方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人功能规划方案.docx",
+          "score": 93.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_给老板的方案",
+          "owner": "",
+          "rel_path": "processed/Method_C_给老板的方案.docx",
+          "score": 87.0
+        }
+      ]
+    },
+    {
+      "id": "feishu_ai_phases",
+      "question": "飞书 AI 机器人规划分几个阶段？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "飞书AI机器人功能规划方案",
+        "owner": "",
+        "departments": [],
+        "rel_path": "processed/飞书AI机器人功能规划方案.docx",
+        "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
+        "review_status": "need_review",
+        "score": 492.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "飞书AI机器人功能规划方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人功能规划方案.docx",
+          "score": 492.0
+        },
+        {
+          "rank": 2,
+          "title": "飞书AI机器人对接技术方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人对接技术方案.docx",
+          "score": 384.0
+        },
+        {
+          "rank": 3,
+          "title": "脚本升级和机器人模型可行性评估",
+          "owner": "",
+          "rel_path": "processed/脚本升级和机器人模型可行性评估.md",
+          "score": 237.0
+        },
+        {
+          "rank": 4,
+          "title": "0027_《重生之我在五菱打工》栏目规划-8.14",
+          "owner": "",
+          "rel_path": "projects/_待确认/《重生之我在五菱打工》栏目规划-8.14/资料文档/0027_《重生之我在五菱打工》栏目规划-8.14.pdf",
+          "score": 108.0
+        },
+        {
+          "rank": 5,
+          "title": "0027_《重生之我在五菱打工》栏目规划-8.19",
+          "owner": "",
+          "rel_path": "projects/_待确认/《重生之我在五菱打工》栏目规划-8.19/资料文档/0027_《重生之我在五菱打工》栏目规划-8.19.pptx",
+          "score": 108.0
+        }
+      ]
+    },
+    {
+      "id": "openclaw_permissions",
+      "question": "openclaw 目前已有权限能支持哪些机器人能力？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "openclaw应用API权限申请方案",
+        "owner": "",
+        "departments": [],
+        "rel_path": "processed/openclaw应用API权限申请方案.docx",
+        "source_path": "/Users/dianchi/nas_kb/processed/openclaw应用API权限申请方案.docx",
+        "review_status": "need_review",
+        "score": 167.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "openclaw应用API权限申请方案",
+          "owner": "",
+          "rel_path": "processed/openclaw应用API权限申请方案.docx",
+          "score": 167.0
+        },
+        {
+          "rank": 2,
+          "title": "脚本升级和机器人模型可行性评估",
+          "owner": "",
+          "rel_path": "processed/脚本升级和机器人模型可行性评估.md",
+          "score": 84.0
+        },
+        {
+          "rank": 3,
+          "title": "飞书AI机器人对接技术方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人对接技术方案.docx",
+          "score": 84.0
+        },
+        {
+          "rank": 4,
+          "title": "飞书AI机器人功能规划方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人功能规划方案.docx",
+          "score": 81.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_5分钟指南",
+          "owner": "",
+          "rel_path": "processed/Method_C_5分钟指南.docx",
+          "score": 23.0
+        }
+      ]
+    },
+    {
+      "id": "liuyi_campaign_idea",
+      "question": "六一五菱联盟鉴宝活动的核心创意和执行动作是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "六一五菱联盟鉴宝执行策划案",
+        "owner": "",
+        "departments": [],
+        "rel_path": "processed/六一五菱联盟鉴宝执行策划案.docx",
+        "source_path": "/Users/dianchi/nas_kb/processed/六一五菱联盟鉴宝执行策划案.docx",
+        "review_status": "need_review",
+        "score": 379.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "六一五菱联盟鉴宝执行策划案",
+          "owner": "",
+          "rel_path": "processed/六一五菱联盟鉴宝执行策划案.docx",
+          "score": 379.0
+        },
+        {
+          "rank": 2,
+          "title": "0075_六一萌娃鉴宝活动结算汇报-0927",
+          "owner": "韦欢",
+          "rel_path": "projects/_待确认/六一萌娃鉴宝活动结算汇报-0927/复盘结算/0075_六一萌娃鉴宝活动结算汇报-0927.pdf",
+          "score": 161.0
+        },
+        {
+          "rank": 3,
+          "title": "0131_V2宝骏招商品鉴会执行规划",
+          "owner": "",
+          "rel_path": "策划部日常工作方案进度记录__attachments/策划方案/最新版方案/0131_V2宝骏招商品鉴会执行规划.pptx",
+          "score": 89.0
+        },
+        {
+          "rank": 4,
+          "title": "0088_大纲-五菱星光一周年活动方案1021",
+          "owner": "",
+          "rel_path": "projects/_待确认/大纲-五菱星光一周年活动方案1021/预算报价/0088_大纲-五菱星光一周年活动方案1021.pdf",
+          "score": 86.0
+        },
+        {
+          "rank": 5,
+          "title": "0088_大纲-五菱星光一周年活动方案1021__feishu_DUtabZCi",
+          "owner": "",
+          "rel_path": "projects/_待确认/大纲-五菱星光一周年活动方案1021/预算报价/0088_大纲-五菱星光一周年活动方案1021__feishu_DUtabZCi.pdf",
+          "score": 86.0
+        }
+      ]
+    },
+    {
+      "id": "script_upgrade_feasibility",
+      "question": "脚本升级和机器人模型可行性评估的结论是什么？",
+      "status": "pass",
+      "hit_rank": 1,
+      "hit": {
+        "title": "脚本升级和机器人模型可行性评估",
+        "owner": "",
+        "departments": [],
+        "rel_path": "processed/脚本升级和机器人模型可行性评估.md",
+        "source_path": "/Users/dianchi/nas_kb/processed/脚本升级和机器人模型可行性评估.md",
+        "review_status": "need_review",
+        "score": 81.0
+      },
+      "checks": [
+        "memory context 已注入",
+        "消息中包含 memory marker",
+        "message_obj 已同步",
+        "预期来源进入 Top 3",
+        "注入提示中包含来源路径",
+        "注入提示包含防编造约束"
+      ],
+      "warnings": [],
+      "failures": [],
+      "top_documents": [
+        {
+          "rank": 1,
+          "title": "脚本升级和机器人模型可行性评估",
+          "owner": "",
+          "rel_path": "processed/脚本升级和机器人模型可行性评估.md",
+          "score": 81.0
+        },
+        {
+          "rank": 2,
+          "title": "飞书AI机器人功能规划方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人功能规划方案.docx",
+          "score": 81.0
+        },
+        {
+          "rank": 3,
+          "title": "飞书AI机器人对接技术方案",
+          "owner": "",
+          "rel_path": "processed/飞书AI机器人对接技术方案.docx",
+          "score": 81.0
+        },
+        {
+          "rank": 4,
+          "title": "Method_C_5分钟指南",
+          "owner": "",
+          "rel_path": "processed/Method_C_5分钟指南.docx",
+          "score": 17.0
+        },
+        {
+          "rank": 5,
+          "title": "Method_C_完整技术文档",
+          "owner": "",
+          "rel_path": "processed/Method_C_完整技术文档.docx",
+          "score": 17.0
+        }
+      ]
+    }
+  ],
+  "guards": [
+    {
+      "id": "unsupported_platform_no_injection",
+      "status": "pass",
+      "detail": "webchat 平台不在公司记忆注入白名单内"
+    },
+    {
+      "id": "idempotent_no_double_injection",
+      "status": "pass",
+      "detail": "已有 memory marker 时不会重复注入"
+    }
+  ]
+}

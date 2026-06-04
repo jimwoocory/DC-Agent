@@ -1,0 +1,37 @@
+{
+  "openclaw_cwd": {
+    "type": "string",
+    "description": "OpenClaw Control Center 项目根目录（含 package.json）",
+    "default": "/Users/dianchi/DC-Agent/openclaw-control-center"
+  },
+  "openclaw_port": {
+    "type": "int",
+    "description": "OpenClaw 真实 UI 端口（由 .env 里 UI_PORT 决定）",
+    "default": 4312
+  },
+  "kick_port": {
+    "type": "int",
+    "description": "看门狗自己监听端口（dashboard 按钮 href 跳的就是这个）",
+    "default": 9120
+  },
+  "idle_timeout_seconds": {
+    "type": "int",
+    "description": "空闲多久（无 kick）自动 kill OpenClaw（秒）。默认 2 小时",
+    "default": 7200
+  },
+  "startup_wait_seconds": {
+    "type": "int",
+    "description": "spawn 后等 OpenClaw :4312 ready 的最大秒数",
+    "default": 30
+  },
+  "npm_cmd": {
+    "type": "list",
+    "description": "spawn OpenClaw 用的命令（数组形式 argv）",
+    "default": ["npm", "run", "dev:ui"]
+  },
+  "log_dir": {
+    "type": "string",
+    "description": "stdout/stderr/PID 文件写到这里",
+    "default": "/Users/dianchi/DC-Agent/logs/openclaw-control-center"
+  }
+}

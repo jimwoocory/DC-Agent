@@ -1,0 +1,35 @@
+{
+  "feature": "media_generation_sop",
+  "goal": "Keep image and video generation behind a structured SOP brief so media tools consume reviewed prompts and all Feishu cards remain on the shared runtime gateway.",
+  "acceptance_criteria": [
+    {
+      "id": "media-generation-sop-001",
+      "description": "Router metadata marks copy plus image/video requests as mixed content and records material status.",
+      "verification": "uv run pytest tests/router/test_router_core.py::test_content_sop_metadata_routes_client_copy_image_request tests/router/test_router_core.py::test_content_sop_metadata_marks_attachment_request_partial -q"
+    },
+    {
+      "id": "media-generation-sop-002",
+      "description": "Harness content SOP validation fails when generated results omit image prompt, video script, source citations, or review checklist.",
+      "verification": "uv run pytest dc_engines/tests/test_harness_lifecycle.py::test_content_sop_workflow_validation_requires_media_outputs -q"
+    },
+    {
+      "id": "media-generation-sop-003",
+      "description": "Feishu media generation cards continue to pass the card runtime gateway health gate.",
+      "verification": "uv run pytest tests/test_feishu_card_templates.py::test_media_generation_card_covers_running_and_result_fields -q"
+    },
+    {
+      "id": "media-generation-sop-004",
+      "description": "Media generation produces a structured record with rollback hint, engine, status, structured prompt, and output reference.",
+      "verification": "uv run pytest dc_engines/tests/test_media_sop.py::test_media_generation_record_contains_rollback_hint -q"
+    },
+    {
+      "id": "media-generation-sop-005",
+      "description": "LLM router, GPT Image, and Dreamina runtime paths finalize with media_generation cards and media generation records.",
+      "verification": "uv run pytest tests/test_media_generation_runtime_paths.py -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "card_health": "scripts-tools/card-system-health.py"
+  }
+}

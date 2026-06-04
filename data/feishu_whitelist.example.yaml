@@ -1,0 +1,55 @@
+# DC-Agent 飞书资料查询白名单 + 凭证配置（W3 / 2A-3）
+# 复制到 data/feishu_whitelist.yaml 并填实际值
+
+# ── 飞书 app 凭证 ──────────────────────────────────────────────
+# 在 https://open.feishu.cn/app 创建应用拿到。需要给应用赋权：
+#   docx:document:read       读取云文档
+#   bitable:app:read         读取多维表格
+#   wiki:wiki:read           （可选）读知识库
+feishu:
+  app_id: cli_xxxxxxxxxxxxxxxxxx
+  app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  enable: true   # false → plugin 退到 v0 元信息匹配
+
+# ── 飞书云文档（docx）白名单 ───────────────────────────────────
+# doc_token 在飞书文档 URL 里：https://feishu.cn/docx/<doc_token>
+documents:
+  - doc_token: doxcXXXXXXXXXXXXXXXXXXXX
+    name: 营销策划模板库
+    domain: marketing
+    description: 各类营销 case 历史模板，含小红书 / 抖音 / 朋友圈 / 短视频脚本
+
+  - doc_token: doxcYYYYYYYYYYYYYYYYYYYY
+    name: 客户应标资料库
+    domain: client
+    description: 客户提案大纲、应标格式、行业 know-how
+
+# ── 飞书多维表格（bitable）白名单 ───────────────────────────────
+# app_token：bitable 应用 token，URL: https://feishu.cn/base/<app_token>
+# table_id：应用内某张表的 id，从 URL ?table=<table_id> 拿
+tables:
+  - app_token: bascnXXXXXXXXXXXXXXXXXXXX
+    table_id: tblXXXXXXXXXXXX
+    name: 客户档案
+    domain: client
+    description: 全部签约客户，含联系人、合同金额、跟进状态
+    primary_key: client_name
+
+  - app_token: bascnYYYYYYYYYYYYYYYYYYYY
+    table_id: tblYYYYYYYYYYYY
+    name: 项目台账
+    domain: project
+    description: 当前所有项目状态 + 负责人 + 截止时间
+
+# ── NAS KB 文件夹（沿用现有 4 路 KB）──────────────────────────
+# kb_id 是 AstrBot 的 knowledge_base 配置里的 ID
+folders:
+  - kb_id: client_archives
+    name: 客户档案 KB
+    domain: client
+    description: NAS 同步过来的客户文件归档
+
+  - kb_id: project_templates
+    name: 项目模板 KB
+    domain: project
+    description: 通用工作流 / SOP / 模板文档

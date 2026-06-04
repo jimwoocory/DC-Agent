@@ -1,0 +1,40 @@
+{
+  "feature": "truth_intake_runtime",
+  "goal": "Keep runtime Harness truth-intake tasks closed-loop from missing-material blocking through source archival, task payload updates, prompt/tool access, and safe completion behavior.",
+  "acceptance_criteria": [
+    {
+      "id": "truth-intake-001",
+      "description": "Restricted LLM file tools can read and grep the active truth-intake archive attached to the current Harness task.",
+      "verification": "uv run pytest tests/test_computer_fs_tools.py::test_restricted_member_can_read_active_truth_intake_archive tests/test_computer_fs_tools.py::test_restricted_member_grep_defaults_include_active_truth_intake_archive -q"
+    },
+    {
+      "id": "truth-intake-002",
+      "description": "Broad restricted greps under data/ narrow to the active truth-intake archive before stale temp or historical files.",
+      "verification": "uv run pytest tests/test_computer_fs_tools.py::test_restricted_member_broad_data_grep_narrows_to_active_truth_intake tests/test_computer_fs_tools.py::test_restricted_member_still_cannot_read_unrelated_data_path -q"
+    },
+    {
+      "id": "truth-intake-003",
+      "description": "Harness prompt injection exposes active truth-intake source_archive_dir and source_attachment paths and warns against data/temp historical material.",
+      "verification": "uv run pytest tests/test_harness_state_injector.py -q"
+    },
+    {
+      "id": "truth-intake-004",
+      "description": "When a blocked truth-intake task receives materials, the Harness task payload is merged with archive_dir and attachments before moving in_progress.",
+      "verification": "uv run env PYTHONPATH=.:dc_engines pytest data/plugins/llm_router/test_dc_router_path.py -k truth_intake -q"
+    },
+    {
+      "id": "truth-intake-005",
+      "description": "Harness lifecycle supports non-terminal payload merges and rejects payload mutation after terminal completion.",
+      "verification": "uv run env PYTHONPATH=.:dc_engines pytest dc_engines/tests/test_harness_lifecycle.py::test_merge_payload_updates_task_and_records_event dc_engines/tests/test_harness_lifecycle.py::test_merge_payload_rejects_terminal_task -q"
+    },
+    {
+      "id": "truth-intake-006",
+      "description": "Harness sensor blocks truth-intake tasks instead of completing them when the response says materials are missing or unverifiable.",
+      "verification": "uv run pytest dc_engines/tests/harness_sensor_plugin_truth_intake_test.py::test_sensor_classifies_missing_materials_as_insufficient dc_engines/tests/harness_sensor_plugin_truth_intake_test.py::test_sensor_blocks_instead_of_completes_when_materials_are_insufficient -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "feature": "local_knowledge_base_phase2_rawrefs",
+  "source_plan": "ObsidianVault/30_Reports/DC-Agent批量导入执行计划.md",
+  "scope": "phase_2_small_loop_rawrefs",
+  "goal": "基于 data/nas_memory.db 中已经索引的 NAS knowledge 文档，生成 Obsidian RawRefs、索引页、桥接页和验证报告，完成来源溯源小闭环。",
+  "hard_constraints": [
+    "不要删除、移动、覆盖任何 NAS 原始文件",
+    "不要扩大 NAS 全量扫描",
+    "不要写入 AstrBot data/knowledge_base",
+    "只读读取 data/nas_memory.db",
+    "只写入 ObsidianVault 和 scripts-company 中的生成器脚本"
+  ],
+  "inputs": {
+    "repository_root": "/Users/dianchi/DC-Agent",
+    "nas_share": "//dcwh-001@192.168.1.35/knowledge",
+    "nas_mount": "/Users/dianchi/nas_kb",
+    "primary_system_knowledge_index": "data/nas_memory.db",
+    "generator": "scripts-company/generate_obsidian_refs.py"
+  },
+  "outputs": [
+    "ObsidianVault/00_RawRefs/*.md",
+    "ObsidianVault/10_Index/公司知识库总索引.md",
+    "ObsidianVault/20_Bridges/*.md",
+    "ObsidianVault/20_Bridges/Projects/*.md",
+    "ObsidianVault/20_Bridges/People/*.md",
+    "ObsidianVault/20_Bridges/Departments/*.md",
+    "ObsidianVault/20_Bridges/知识图谱入口.md",
+    "ObsidianVault/30_Reports/第二阶段小闭环验证报告.md"
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "phase2-001",
+      "description": "每个 RawRef 页面都包含 source_path、rel_path、doc_key、sha256、parser、review_status 和 chunk_count。"
+    },
+    {
+      "id": "phase2-002",
+      "description": "公司知识库总索引包含 RawRef 文档数、解析器分布、复核状态和 RawRefs 链接列表。"
+    },
+    {
+      "id": "phase2-003",
+      "description": "20_Bridges 至少包含待人工确认页、知识图谱入口、按 doc_type 生成的桥接页，以及项目、人员、部门实体页。"
+    },
+    {
+      "id": "phase2-004",
+      "description": "所有 source_path 均指向 /Users/dianchi/nas_kb/ 下的 NAS knowledge 挂载路径。"
+    },
+    {
+      "id": "phase2-005",
+      "description": "第二阶段验证报告明确本阶段没有移动、删除、覆盖 NAS 原始文件，也没有写入 AstrBot 知识库。"
+    },
+    {
+      "id": "phase2-006",
+      "description": "员工在相关资料对话中顺手确认或纠正项目归属、负责人、部门、文档类型时，系统记录复核反馈，并在 Obsidian Review 桥接页展示，不进行批量打扰式追问。"
+    }
+  ],
+  "verification_commands": [
+    "python3 scripts-company/generate_obsidian_refs.py",
+    "test -f ObsidianVault/30_Reports/第二阶段小闭环验证报告.md",
+    "rg -l '^source_path:' ObsidianVault/00_RawRefs | wc -l",
+    "sqlite3 data/nas_memory.db \"select count(*) from documents where source_path not like '/Users/dianchi/nas_kb/%' or source_path = '';\"",
+    "rg -n \"RawRef 文档数|source_path|待人工确认|知识图谱入口|项目节点|人员节点|部门节点|NAS 原始文件：只读\" ObsidianVault/10_Index ObsidianVault/20_Bridges ObsidianVault/30_Reports/第二阶段小闭环验证报告.md"
+  ],
+  "next_gate": "等待用户确认后再进入下一步：人工复核 doc_type/project/owner，或选择一小批文档同步到 AstrBot KB 做问答效果验证。"
+}

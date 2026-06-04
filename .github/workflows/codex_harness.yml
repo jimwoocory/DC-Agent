@@ -1,0 +1,51 @@
+name: Codex Harness
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - 'docs/CODEX_WORKFLOW.md'
+      - 'docs/ARCHITECTURE.md'
+      - 'docs/DEVELOPMENT.md'
+      - 'docs/QUALITY.md'
+      - 'harness/**'
+      - 'scripts/agent-check.sh'
+      - 'scripts/check_test_closure.py'
+      - 'tests/harness/**'
+      - 'tests/test_computer_fs_tools.py'
+      - 'tests/test_harness_state_injector.py'
+      - 'tests/test_kb_import.py'
+      - 'astrbot/core/tools/computer_tools/fs.py'
+      - 'data/plugins/harness_sensor_plugin/**'
+      - 'data/plugins/harness_state_injector/**'
+      - 'data/plugins/llm_router/**'
+      - 'dc_engines/dc_engines/harness/**'
+      - 'dc_engines/tests/**'
+      - '.github/workflows/codex_harness.yml'
+  workflow_dispatch:
+
+jobs:
+  codex-harness:
+    name: Run targeted Codex harness checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --group dev
+
+      - name: Run targeted Codex harness
+        run: bash scripts/agent-check.sh --profile targeted

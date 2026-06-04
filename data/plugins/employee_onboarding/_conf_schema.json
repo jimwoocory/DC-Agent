@@ -1,0 +1,77 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用员工入职插件总开关；默认关闭，维护期不处理私聊、卡片回调和巡检",
+    "default": false
+  },
+  "maintenance_mode": {
+    "type": "bool",
+    "description": "维护模式；为 true 时即使 enabled=true 也不处理任何入口",
+    "default": true
+  },
+  "active_outreach_enabled": {
+    "type": "bool",
+    "description": "是否启用定期巡检，主动给未完成 onboarding 的员工私聊推送新人卡片",
+    "default": false
+  },
+  "sync_contacts_before_scan": {
+    "type": "bool",
+    "description": "巡检前是否先从飞书通讯录同步员工到 EmployeeStore；需要 contact:* 权限",
+    "default": false
+  },
+  "target_platform_id": {
+    "type": "string",
+    "description": "用于主动发卡片的 AstrBot 飞书平台 ID",
+    "default": "巅池-Agent小助手"
+  },
+  "scan_interval_seconds": {
+    "type": "int",
+    "description": "主动触达巡检间隔秒数",
+    "default": 3600
+  },
+  "initial_scan_delay_seconds": {
+    "type": "int",
+    "description": "插件启动后延迟多少秒再进行第一次巡检，避免飞书平台尚未初始化",
+    "default": 120
+  },
+  "reminder_cooldown_hours": {
+    "type": "int",
+    "description": "同一员工两次主动提醒之间的最小间隔小时数",
+    "default": 24
+  },
+  "max_reminders_per_employee": {
+    "type": "int",
+    "description": "每名员工最多主动提醒次数，防止刷屏",
+    "default": 3
+  },
+  "scan_limit": {
+    "type": "int",
+    "description": "每次从员工库读取的最大员工数量",
+    "default": 500
+  },
+  "max_outreach_per_scan": {
+    "type": "int",
+    "description": "每次巡检最多主动私聊多少人",
+    "default": 20
+  },
+  "outreach_send_delay_seconds": {
+    "type": "float",
+    "description": "主动推送卡片之间的间隔秒数，降低飞书限流风险",
+    "default": 1.0
+  },
+  "invite_link": {
+    "type": "string",
+    "description": "测试通过后展示的内测群邀请链接",
+    "default": "https://o0ain5w98jh.feishu.cn/q/...（待补真实链接）"
+  },
+  "auto_invite_to_chat": {
+    "type": "bool",
+    "description": "测试通过后是否自动调用飞书 API 把员工拉进内测群",
+    "default": false
+  },
+  "internal_test_chat_id": {
+    "type": "string",
+    "description": "内部测试群 chat_id；auto_invite_to_chat=true 时必填",
+    "default": ""
+  }
+}

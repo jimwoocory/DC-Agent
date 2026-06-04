@@ -1,0 +1,12 @@
+{
+  "admin_reviewers": {
+    "description": "允许审批小助手学习候选的飞书 open_id/user_id 列表",
+    "type": "list",
+    "default": []
+  },
+  "max_cards_per_request": {
+    "description": "每次发送的待审批候选卡片数量",
+    "type": "int",
+    "default": 5
+  }
+}

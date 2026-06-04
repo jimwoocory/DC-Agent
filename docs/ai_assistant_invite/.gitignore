@@ -1,0 +1,12 @@
+# 后续会加的视频 / 配音 / 字幕大文件不进 git
+*.mp4
+*.mp3
+*.mov
+*.wav
+
+# 视频生成中间产物
+preview_*.jpg
+preview_*.png
+html_video_frames/
+
+# 保留：所有 md / html / json / txt / srt

@@ -31,12 +31,17 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from dc_engines.card_runtime import finalize_card_via_runtime
+from dc_engines.card_runtime import finalize_card_via_runtime, send_card_via_runtime
+from dc_engines.department_workflows.memory_profiles import (
+    matching_department_memory_profiles,
+)
 from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
     build_media_generation_card,
+    ensure_streamers_on_context,
+    extract_chat_info_from_event,
     start_waiting_card_for_event,
 )
 from dc_engines.media_sop import (
@@ -50,6 +55,7 @@ from astrbot.api.event.filter import EventMessageType
 from astrbot.api.message_components import Image, Plain, Video
 from astrbot.api.star import Context, Star, register
 from astrbot.core.provider.entities import ProviderType
+from astrbot.core.runtime_context.memory_query import build_memory_retrieval_query
 
 try:
     from dc_engines.assistant_distillation import load_language_overrides
@@ -60,10 +66,10 @@ except Exception:  # noqa: BLE001
 
 # 意图 → 主模型 provider id
 # 2026-05-20: 路由层统一绕开 Gemini CLI/OAuth 链路。
-# 高频闲聊/写作走 aihubmix Gemini 3.5 Flash；深度分析临时走 aihubmix Claude。
+# 高频闲聊/写作走 aihubmix Qwen Flash；深度分析临时走 aihubmix Claude。
 INTENT_TO_PROVIDER = {
-    "casual": "aihubmix/gemini-3.5-flash",  # 日常闲聊 · 不限速、几秒出
-    "writing": "aihubmix/gemini-3.5-flash",  # 写邮件/文案 · 同上
+    "casual": "aihubmix/qwen3.6-flash",  # 日常闲聊 · 不占用 agy
+    "writing": "aihubmix/qwen3.6-flash",  # 写邮件/文案 · 不占用 agy
     "deep": "aihubmix/claude-opus-4-7",  # 深度分析 · 临时 Hermes 通道
     "realtime": "aihubmix/grok-4.3",  # 实时舆情/热点 · 无替代
     "code": "codex/gpt-5.4",  # 代码 · v1 兜底用 Codex provider
@@ -153,13 +159,37 @@ _CHITCHAT_HIT_LOG_PATH = Path("/Users/dianchi/DC-Agent/data/chitchat_guard_hits.
 _ASSISTANT_LANGUAGE_OVERRIDES_PATH = Path(
     "/Users/dianchi/DC-Agent/data/config/assistant_language_overrides.json"
 )
+_DEPARTMENT_MEMORY_PROMPT_AUDIT_PATH = Path(
+    "/Users/dianchi/DC-Agent/data/department_memory_prompt_audit.jsonl"
+)
 _CHITCHAT_LAST_HIT: dict[str, float] = {}
+_DEPARTMENT_MEMORY_PROMPT_TTL_SEC = 600.0
+_PENDING_DEPARTMENT_MEMORY_PROMPTS: dict[str, _DepartmentMemoryPromptState] = {}
 _CHITCHAT_PUNCT_RE = re.compile(
     r"[\s，。！？、~～?!\.,;；:：\"'“”‘’（）()【】\[\]{}<>《》]+"
 )
 _CHITCHAT_AT_RE = re.compile(r"^\s*(?:\[At:[^\]]+\]|@[^\s]+\s*)+")
 _CHITCHAT_NEGATIVE_RE = re.compile(
     r"(查|调|写|改|跑|算|搜|找|做|生成|优化|报错|错误|bug|任务|待办|提醒|方案|项目|资料|文件|链接|推文|群)"
+)
+_BUSINESS_TONE_RE = re.compile(
+    r"(视频|脚本|文案|分镜|拍摄|选题|传播|混剪|纪录片|采访|发布|转发|封面|"
+    r"五菱|缤果|星光|MINIEV|mini|菱骏|红标|扬光|宝骏|柳汽|东风|风行|乘龙|菱智)",
+    re.IGNORECASE,
+)
+_ASSISTANT_TONE_OPEN_MARKER = "<assistant_tone_context>"
+_ASSISTANT_TONE_CLOSE_MARKER = "</assistant_tone_context>"
+_DEPARTMENT_MEMORY_CONFIRM_RE = re.compile(
+    r"^\s*(调用记忆|带上记忆|使用记忆|用记忆|确认调用|确认|可以|好的|好|是|yes|y|ok)\s*[。！!,.，]*\s*$",
+    re.IGNORECASE,
+)
+_DEPARTMENT_MEMORY_DISMISS_RE = re.compile(
+    r"^\s*(不用|不调用|不用记忆|先不用|不要|取消|否|no|n)\s*[。！!,.，]*\s*$",
+    re.IGNORECASE,
+)
+_EXPLICIT_MEMORY_LOOKUP_RE = re.compile(
+    r"(记忆|历史|之前|查一下|找一下|有没有|是谁|是什么|负责人|资料|文件|来源|引用)",
+    re.IGNORECASE,
 )
 _CHITCHAT_RESPONSES: dict[str, dict[str, tuple[str, ...]]] = {
     "greeting": {
@@ -240,6 +270,31 @@ ROUTER_SYSTEM_PROMPT = """你是 LLM 路由判断器。
 
 _JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
+
+@dataclass(frozen=True, slots=True)
+class _DepartmentMemoryPromptState:
+    suggestion_id: str
+    conversation_id: str
+    original_text: str
+    query_text: str
+    department_ids: tuple[str, ...]
+    department_names: tuple[str, ...]
+    profile_ids: tuple[str, ...]
+    created_at: float
+    status: str = "suggested"
+
+
+@dataclass(frozen=True, slots=True)
+class _DepartmentMemoryPromptDecision:
+    stop: bool = False
+    inject_memory: bool = False
+    dismissed: bool = False
+    effective_text: str = ""
+    memory_query_text: str = ""
+    suggestion_id: str = ""
+    audit_state: _DepartmentMemoryPromptState | None = None
+
+
 # ─── dc-router 开关 ─────────────────────────────────────────────────────────
 # 配置文件: data/config/dc_router_config.json
 # enabled=false (默认) → 走以下 v1.0 逻辑（行为跟旧版完全一样）
@@ -318,12 +373,276 @@ def _should_record_chitchat_miss(text: str) -> bool:
 
 def _read_assistant_language_overrides() -> dict:
     if load_language_overrides is None:
-        return {"chitchat": {"keywords": {}, "responses": {}}, "intent_aliases": []}
+        return {
+            "chitchat": {"keywords": {}, "responses": {}},
+            "intent_aliases": [],
+            "tone_templates": [],
+        }
     try:
         return load_language_overrides(_ASSISTANT_LANGUAGE_OVERRIDES_PATH)
     except Exception as exc:  # noqa: BLE001
         logger.debug("[llm_router] assistant language overrides skipped: %s", exc)
-        return {"chitchat": {"keywords": {}, "responses": {}}, "intent_aliases": []}
+        return {
+            "chitchat": {"keywords": {}, "responses": {}},
+            "intent_aliases": [],
+            "tone_templates": [],
+        }
+
+
+def _inject_assistant_tone_context_into_event(
+    event: AstrMessageEvent,
+    query_text: str,
+) -> bool:
+    if not _should_inject_assistant_tone_context(query_text):
+        return False
+    tone_templates = _assistant_tone_templates_for_business_request(query_text)
+    if not tone_templates:
+        return False
+    current = event.message_str or ""
+    if _ASSISTANT_TONE_OPEN_MARKER in current:
+        return False
+    block = _format_assistant_tone_context(tone_templates)
+    event.message_str = f"{current}\n\n{block}" if current else block
+    try:
+        event.message_obj.message_str = event.message_str
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+def _should_inject_assistant_tone_context(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped or len(_normalize_chitchat_text(stripped)) <= _CHITCHAT_MAX_LEN:
+        return False
+    return bool(_BUSINESS_TONE_RE.search(stripped))
+
+
+def _assistant_tone_templates_for_business_request(
+    query_text: str,
+    limit: int = 4,
+) -> list[dict]:
+    selected: list[dict] = []
+    seen_names: set[str] = set()
+    for profile in matching_department_memory_profiles(query_text, limit=3):
+        name = f"department_profile:{profile.department_id}:{profile.profile_id}"
+        selected.append(
+            {
+                "name": f"{profile.display_name} / {profile.profile_id}",
+                "body": profile.tone_template,
+                "_dedupe_name": name,
+            }
+        )
+        seen_names.add(name)
+
+    templates = _read_assistant_language_overrides().get("tone_templates", [])
+    if not isinstance(templates, list):
+        return _strip_internal_template_fields(selected[:limit])
+    for template in templates:
+        if not isinstance(template, dict):
+            continue
+        name = str(template.get("name") or "").strip()
+        body = str(template.get("body") or "").strip()
+        if not name or not body or name in seen_names:
+            continue
+        selected.append({"name": name, "body": body, "_dedupe_name": name})
+        seen_names.add(name)
+        if len(selected) >= limit:
+            break
+    return _strip_internal_template_fields(selected[:limit])
+
+
+def _strip_internal_template_fields(templates: list[dict]) -> list[dict]:
+    return [
+        {"name": str(template["name"]), "body": str(template["body"])}
+        for template in templates
+    ]
+
+
+def _format_assistant_tone_context(tone_templates: list[dict]) -> str:
+    lines = [
+        _ASSISTANT_TONE_OPEN_MARKER,
+        "以下是已审批的小助手工作风格模板。仅在相关业务任务中参考，不能覆盖用户本轮明确要求：",
+    ]
+    for template in tone_templates:
+        lines.append(f"- {template['name']}: {template['body']}")
+    lines.append(_ASSISTANT_TONE_CLOSE_MARKER)
+    return "\n".join(lines)
+
+
+def _has_approved_department_memory_for_prompt(query_text: str, profiles: list) -> bool:
+    if not profiles:
+        return False
+    try:
+        from dc_memory_context import retrieve_governed_memory_context
+
+        context = retrieve_governed_memory_context(query_text, limit=8)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[llm_router] department memory prompt lookup skipped: %s", exc)
+        return False
+    memories = context.get("governed_memories") or []
+    department_ids = {getattr(profile, "department_id", "") for profile in profiles}
+    profile_names = {getattr(profile, "display_name", "") for profile in profiles}
+    for memory in memories:
+        if memory.get("review_status") != "approved":
+            continue
+        if memory.get("sensitivity") not in {"public", "internal"}:
+            continue
+        haystack = " ".join(
+            [
+                str(memory.get("owner") or ""),
+                str(memory.get("project_id") or ""),
+                " ".join(str(tag) for tag in memory.get("tags") or []),
+                str(memory.get("title") or ""),
+            ]
+        )
+        if any(
+            department_id and department_id in haystack
+            for department_id in department_ids
+        ):
+            return True
+        if any(
+            profile_name and profile_name in haystack for profile_name in profile_names
+        ):
+            return True
+    return False
+
+
+def _is_explicit_memory_lookup(text: str) -> bool:
+    return bool(_EXPLICIT_MEMORY_LOOKUP_RE.search(text or ""))
+
+
+def _is_department_memory_confirmation(text: str) -> bool:
+    return bool(_DEPARTMENT_MEMORY_CONFIRM_RE.match(text or ""))
+
+
+def _is_department_memory_dismissal(text: str) -> bool:
+    return bool(_DEPARTMENT_MEMORY_DISMISS_RE.match(text or ""))
+
+
+def _department_memory_suggestion_id(session_key: str, text: str) -> str:
+    seed = f"{session_key}:{text}:{int(time.time())}"
+    return f"dmpp_{abs(hash(seed)):x}"[:20]
+
+
+def _department_memory_prompt_text(state: _DepartmentMemoryPromptState) -> str:
+    names = "、".join(state.department_names) or "相关部门"
+    return (
+        f"我检测到这像「{names}」相关任务。\n"
+        "是否调用已通过 Obsidian 审核的部门记忆来辅助这次回答？\n"
+        f"回复「调用记忆」我会带上；回复「不用」则不调用。本次建议 ID: {state.suggestion_id}"
+    )
+
+
+def _build_department_memory_prompt_card(
+    state: _DepartmentMemoryPromptState,
+) -> dict[str, Any]:
+    names = "、".join(state.department_names) or "相关部门"
+    base_value = {
+        "source": "department_memory_prompt",
+        "suggestion_id": state.suggestion_id,
+    }
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": "blue",
+            "title": {"tag": "plain_text", "content": "是否调用部门记忆"},
+        },
+        "elements": [
+            {
+                "tag": "markdown",
+                "content": (
+                    f"检测到这像 **{names}** 相关任务。\n"
+                    "可以调用已通过 Obsidian 审核的部门记忆辅助回答。"
+                ),
+            },
+            {
+                "tag": "markdown",
+                "content": (
+                    "调用后只作为低优先级参考，不覆盖你本轮明确要求和已提供资料。"
+                ),
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "调用记忆"},
+                        "type": "primary",
+                        "value": {**base_value, "action": "confirm"},
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "不用"},
+                        "type": "default",
+                        "value": {**base_value, "action": "dismiss"},
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def _append_department_memory_prompt_audit(
+    *,
+    action: str,
+    state: _DepartmentMemoryPromptState,
+    status_before: str,
+    status_after: str,
+    actor: str = "llm_router",
+    payload: dict | None = None,
+) -> None:
+    record = {
+        "actor": actor,
+        "action": action,
+        "suggestion_id": state.suggestion_id,
+        "memory_ids": [],
+        "department_id": ",".join(state.department_ids),
+        "conversation_id": state.conversation_id,
+        "status_before": status_before,
+        "status_after": status_after,
+        "payload": payload or {},
+        "timestamp": datetime.now(UTC)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+    }
+    try:
+        _DEPARTMENT_MEMORY_PROMPT_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _DEPARTMENT_MEMORY_PROMPT_AUDIT_PATH.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[llm_router] department memory prompt audit skipped: %s", exc)
+
+
+def _is_trusted_department_memory_card_action(event: AstrMessageEvent) -> bool:
+    msg = getattr(event, "message_obj", None)
+    return (
+        getattr(event, "is_card_action", False) is True
+        or getattr(msg, "is_card_action", False) is True
+    )
+
+
+def _parse_card_action_payload(event: AstrMessageEvent) -> dict[str, Any]:
+    payload = getattr(event.message_obj, "card_action_payload", None)
+    if isinstance(payload, dict):
+        return payload
+    text = (event.message_str or "").strip()
+    if not text.startswith("__card_action__:"):
+        return {}
+    try:
+        parsed = json.loads(text[len("__card_action__:") :])
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _department_memory_card_action_value(event: AstrMessageEvent) -> dict[str, Any]:
+    payload = _parse_card_action_payload(event)
+    value = payload.get("value", {}) if isinstance(payload, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    if value.get("source") != "department_memory_prompt":
+        return {}
+    return value
 
 
 MediaRouteKind = Literal["image", "text2video", "image2video"]
@@ -549,6 +868,229 @@ class LLMRouterPlugin(Star):
             event.unified_msg_origin,
         )
         return True
+
+    def _try_handle_department_memory_activation_prompt(
+        self,
+        event: AstrMessageEvent,
+        *,
+        raw_text: str,
+        query_text: str,
+        send_prompt_response: bool = True,
+    ) -> _DepartmentMemoryPromptDecision:
+        card_action = _department_memory_card_action_value(event)
+        if card_action and not _is_trusted_department_memory_card_action(event):
+            event.should_call_llm(False)
+            event.set_result(
+                MessageEventResult().message("").use_t2i(False).stop_event()
+            )
+            return _DepartmentMemoryPromptDecision(stop=True)
+
+        if self._is_group_event(event) and not getattr(
+            event, "is_at_or_wake_command", False
+        ):
+            return _DepartmentMemoryPromptDecision()
+
+        session_key = self._sender_rate_key(event)
+        pending = _PENDING_DEPARTMENT_MEMORY_PROMPTS.get(session_key)
+        if pending is not None:
+            age = time.monotonic() - pending.created_at
+            if age > _DEPARTMENT_MEMORY_PROMPT_TTL_SEC:
+                _PENDING_DEPARTMENT_MEMORY_PROMPTS.pop(session_key, None)
+                _append_department_memory_prompt_audit(
+                    action="expire",
+                    state=pending,
+                    status_before=pending.status,
+                    status_after="expired",
+                    payload={"age_sec": round(age, 3)},
+                )
+                return _DepartmentMemoryPromptDecision()
+            card_suggestion_id = str(card_action.get("suggestion_id") or "").strip()
+            card_action_name = str(card_action.get("action") or "").strip()
+            card_matches_pending = bool(
+                card_action
+                and card_suggestion_id
+                and card_suggestion_id == pending.suggestion_id
+            )
+            wants_confirm = _is_department_memory_confirmation(raw_text) or (
+                card_matches_pending and card_action_name == "confirm"
+            )
+            wants_dismiss = _is_department_memory_dismissal(raw_text) or (
+                card_matches_pending and card_action_name == "dismiss"
+            )
+            if card_action and not card_matches_pending:
+                event.should_call_llm(False)
+                event.set_result(
+                    MessageEventResult()
+                    .message("这条部门记忆建议已经失效，请重新发起当前需求。")
+                    .use_t2i(False)
+                    .stop_event()
+                )
+                return _DepartmentMemoryPromptDecision(stop=True)
+            if wants_confirm:
+                _PENDING_DEPARTMENT_MEMORY_PROMPTS.pop(session_key, None)
+                confirmed = _DepartmentMemoryPromptState(
+                    suggestion_id=pending.suggestion_id,
+                    conversation_id=pending.conversation_id,
+                    original_text=pending.original_text,
+                    query_text=pending.query_text,
+                    department_ids=pending.department_ids,
+                    department_names=pending.department_names,
+                    profile_ids=pending.profile_ids,
+                    created_at=pending.created_at,
+                    status="confirmed",
+                )
+                _append_department_memory_prompt_audit(
+                    action="confirm",
+                    state=confirmed,
+                    status_before=pending.status,
+                    status_after="confirmed",
+                )
+                event.message_str = pending.original_text
+                try:
+                    event.message_obj.message_str = pending.original_text
+                except Exception:  # noqa: BLE001
+                    pass
+                return _DepartmentMemoryPromptDecision(
+                    inject_memory=True,
+                    effective_text=pending.original_text,
+                    memory_query_text=pending.query_text,
+                    suggestion_id=pending.suggestion_id,
+                    audit_state=confirmed,
+                )
+            if wants_dismiss:
+                _PENDING_DEPARTMENT_MEMORY_PROMPTS.pop(session_key, None)
+                _append_department_memory_prompt_audit(
+                    action="dismiss",
+                    state=pending,
+                    status_before=pending.status,
+                    status_after="dismissed",
+                )
+                event.message_str = pending.original_text
+                try:
+                    event.message_obj.message_str = pending.original_text
+                except Exception:  # noqa: BLE001
+                    pass
+                return _DepartmentMemoryPromptDecision(
+                    dismissed=True,
+                    effective_text=pending.original_text,
+                    memory_query_text=pending.query_text,
+                    suggestion_id=pending.suggestion_id,
+                )
+
+        if card_action:
+            event.should_call_llm(False)
+            event.set_result(
+                MessageEventResult()
+                .message("这条部门记忆建议已经失效，请重新发起当前需求。")
+                .use_t2i(False)
+                .stop_event()
+            )
+            return _DepartmentMemoryPromptDecision(stop=True)
+
+        if _is_explicit_memory_lookup(raw_text):
+            return _DepartmentMemoryPromptDecision(
+                inject_memory=True,
+                effective_text=raw_text,
+                memory_query_text=query_text,
+            )
+
+        profiles = matching_department_memory_profiles(raw_text, limit=3)
+        if not profiles:
+            return _DepartmentMemoryPromptDecision(
+                inject_memory=True,
+                effective_text=raw_text,
+                memory_query_text=query_text,
+            )
+        if not _has_approved_department_memory_for_prompt(query_text, profiles):
+            return _DepartmentMemoryPromptDecision(effective_text=raw_text)
+
+        state = _DepartmentMemoryPromptState(
+            suggestion_id=_department_memory_suggestion_id(session_key, raw_text),
+            conversation_id=session_key,
+            original_text=raw_text,
+            query_text=query_text,
+            department_ids=tuple(profile.department_id for profile in profiles),
+            department_names=tuple(profile.display_name for profile in profiles),
+            profile_ids=tuple(profile.profile_id for profile in profiles),
+            created_at=time.monotonic(),
+        )
+        _PENDING_DEPARTMENT_MEMORY_PROMPTS[session_key] = state
+        _append_department_memory_prompt_audit(
+            action="suggest",
+            state=state,
+            status_before="",
+            status_after="suggested",
+            payload={"profile_ids": list(state.profile_ids)},
+        )
+        if send_prompt_response:
+            self._set_department_memory_prompt_fallback(event, state)
+        logger.info(
+            "[llm_router] department memory prompt suggested platform=%s departments=%s",
+            event.get_platform_id() or "",
+            ",".join(state.department_names),
+        )
+        return _DepartmentMemoryPromptDecision(
+            stop=True,
+            effective_text=raw_text,
+            memory_query_text=query_text,
+            suggestion_id=state.suggestion_id,
+            audit_state=state,
+        )
+
+    def _set_department_memory_prompt_fallback(
+        self,
+        event: AstrMessageEvent,
+        state: _DepartmentMemoryPromptState,
+    ) -> None:
+        event.should_call_llm(False)
+        event.set_result(
+            MessageEventResult()
+            .message(_department_memory_prompt_text(state))
+            .use_t2i(False)
+            .stop_event()
+        )
+
+    async def _send_department_memory_prompt_response(
+        self,
+        event: AstrMessageEvent,
+        state: _DepartmentMemoryPromptState,
+    ) -> None:
+        sent = await self._try_send_department_memory_prompt_card(event, state)
+        if sent:
+            event.should_call_llm(False)
+            event.set_result(
+                MessageEventResult().message("").use_t2i(False).stop_event()
+            )
+            return
+        self._set_department_memory_prompt_fallback(event, state)
+
+    async def _try_send_department_memory_prompt_card(
+        self,
+        event: AstrMessageEvent,
+        state: _DepartmentMemoryPromptState,
+    ) -> bool:
+        if (getattr(event, "get_platform_name", lambda: "")() or "").lower() != "lark":
+            return False
+        streamer = ensure_streamers_on_context(self.context).get(
+            event.get_platform_id() or ""
+        )
+        if streamer is None:
+            return False
+        chat_id, receive_id_type = extract_chat_info_from_event(event)
+        if not chat_id:
+            return False
+        card = _build_department_memory_prompt_card(state)
+        stream = await send_card_via_runtime(
+            streamer,
+            card_type="daily_response",
+            chat_id=chat_id,
+            receive_id_type=receive_id_type,
+            card=card,
+            platform_id=event.get_platform_id() or "",
+            event="start",
+            detail=f"department memory prompt {state.suggestion_id}",
+        )
+        return stream is not None
 
     async def _run_dreamina_command(
         self,
@@ -1109,29 +1651,56 @@ class LLMRouterPlugin(Star):
 
         text = event.message_str or ""
         raw_user_text = text
+        card_action_resumed = False
+        department_memory_prompt_dismissed = False
         if text.startswith("__card_action__:"):
-            try:
-                self._ensure_plugin_path()
-                from dc_router_adapter import maybe_handle_antigravity_queue_card_action
-
-                handled = await maybe_handle_antigravity_queue_card_action(
-                    self.context, event
+            department_memory_card_decision = (
+                self._try_handle_department_memory_activation_prompt(
+                    event,
+                    raw_text=raw_user_text,
+                    query_text=raw_user_text,
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("[llm_router] 排队卡按钮处理失败: %s", exc)
-                # 异常时直接退出，避免把异常状态带入下游 LLM 路由
-                return
-            if handled:
-                # 是 antigravity 排队卡，已被 adapter 处理（含 stop_event/set_result）
-                return
-            # 不是 antigravity 卡（pet / 其他自定义卡）→ dc-router 不接管，
-            # 但也绝不能让卡片回调进入下游 LLM 路由（否则被分类为 casual 走 LLM）。
-            # 直接 return 让事件落到其他 plugin 的 @filter.regex("^__card_action__:") handler。
-            logger.debug(
-                "[llm_router] 非 antigravity 卡片回调，让其他 plugin 接管: %s",
-                text[:80],
             )
-            return
+            if department_memory_card_decision.stop:
+                return
+            if department_memory_card_decision.inject_memory:
+                raw_user_text = department_memory_card_decision.effective_text
+                text = raw_user_text
+                card_action_resumed = True
+            elif department_memory_card_decision.dismissed:
+                raw_user_text = department_memory_card_decision.effective_text
+                text = raw_user_text
+                card_action_resumed = True
+                department_memory_prompt_dismissed = True
+            else:
+                if _department_memory_card_action_value(event):
+                    return
+
+            if not card_action_resumed:
+                try:
+                    self._ensure_plugin_path()
+                    from dc_router_adapter import (
+                        maybe_handle_antigravity_queue_card_action,
+                    )
+
+                    handled = await maybe_handle_antigravity_queue_card_action(
+                        self.context, event
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[llm_router] 排队卡按钮处理失败: %s", exc)
+                    # 异常时直接退出，避免把异常状态带入下游 LLM 路由
+                    return
+                if handled:
+                    # 是 antigravity 排队卡，已被 adapter 处理（含 stop_event/set_result）
+                    return
+                # 不是 antigravity 卡（pet / 其他自定义卡）→ dc-router 不接管，
+                # 但也绝不能让卡片回调进入下游 LLM 路由（否则被分类为 casual 走 LLM）。
+                # 直接 return 让事件落到其他 plugin 的 @filter.regex("^__card_action__:") handler。
+                logger.debug(
+                    "[llm_router] 非 antigravity 卡片回调，让其他 plugin 接管: %s",
+                    text[:80],
+                )
+                return
 
         if _should_enter_dc_router(platform_id) and self._try_handle_chitchat_guard(
             event,
@@ -1147,7 +1716,50 @@ class LLMRouterPlugin(Star):
 
                 if await maybe_handle_truth_intake(self.context, event, _dc_cfg):
                     return
-                if inject_memory_context_into_event(event):
+                memory_query_text = await build_memory_retrieval_query(
+                    self.context,
+                    event,
+                )
+                if department_memory_prompt_dismissed:
+                    memory_prompt_decision = _DepartmentMemoryPromptDecision(
+                        effective_text=raw_user_text,
+                        memory_query_text=memory_query_text,
+                    )
+                else:
+                    memory_prompt_decision = (
+                        self._try_handle_department_memory_activation_prompt(
+                            event,
+                            raw_text=raw_user_text,
+                            query_text=memory_query_text,
+                            send_prompt_response=False,
+                        )
+                    )
+                if memory_prompt_decision.stop:
+                    if memory_prompt_decision.audit_state is not None:
+                        await self._send_department_memory_prompt_response(
+                            event,
+                            memory_prompt_decision.audit_state,
+                        )
+                    return
+                if memory_prompt_decision.effective_text:
+                    raw_user_text = memory_prompt_decision.effective_text
+                    text = raw_user_text
+                if (
+                    memory_prompt_decision.inject_memory
+                    and inject_memory_context_into_event(
+                        event,
+                        query_text=memory_prompt_decision.memory_query_text
+                        or memory_query_text,
+                    )
+                ):
+                    if memory_prompt_decision.audit_state is not None:
+                        _append_department_memory_prompt_audit(
+                            action="apply",
+                            state=memory_prompt_decision.audit_state,
+                            status_before="confirmed",
+                            status_after="confirmed",
+                            payload={"applied": True},
+                        )
                     get_extra = getattr(event, "get_extra", None)
                     hits = (
                         get_extra("dc_agent_memory_hits") if callable(get_extra) else {}
@@ -1159,7 +1771,12 @@ class LLMRouterPlugin(Star):
                         hits.get("documents", 0),
                         hits.get("project_items", 0),
                     )
-                text = event.message_str or ""
+                if _inject_assistant_tone_context_into_event(event, raw_user_text):
+                    logger.info(
+                        "[llm_router] assistant tone context injected platform=%s",
+                        platform_id,
+                    )
+                text = raw_user_text
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "[llm_router] truth intake guard 失败，继续路由: %s", exc
@@ -1181,9 +1798,27 @@ class LLMRouterPlugin(Star):
                 if not _dc_cfg["dry_run"]:
                     self._start_dc_queue_recovery()
 
-                handled = await route_via_dc_router(
-                    self.context, event, dry_run=_dc_cfg["dry_run"]
+                memory_injected_text = event.message_str
+                memory_injected_message_obj_text = getattr(
+                    event.message_obj,
+                    "message_str",
+                    None,
                 )
+                event.message_str = raw_user_text
+                try:
+                    event.message_obj.message_str = raw_user_text
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    handled = await route_via_dc_router(
+                        self.context, event, dry_run=_dc_cfg["dry_run"]
+                    )
+                finally:
+                    event.message_str = memory_injected_text
+                    try:
+                        event.message_obj.message_str = memory_injected_message_obj_text
+                    except Exception:  # noqa: BLE001
+                        pass
                 if handled:
                     return  # dc-router 已接管，停止后续 v1.0 逻辑
                 # dry_run 模式下 handled 永远为 False（让 v1.0 实际处理 + dc-router 已写日志）

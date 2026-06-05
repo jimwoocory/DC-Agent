@@ -1,0 +1,68 @@
+{
+    "feature": "department_memory_proactive_prompting",
+    "goal": "Let DC-Agent proactively suggest relevant department memories during business conversations without silently injecting memory into the user prompt before explicit confirmation.",
+    "depends_on": [
+        "obsidian_memory_governance",
+        "short_term_context_priority",
+        "planning_content_sop",
+        "client_content_sop"
+    ],
+    "acceptance_criteria": [
+        {
+            "id": "dmpp-001",
+            "description": "Department memory suggestions are approved-only: candidates must come from governed approved public/internal memory and must exclude need_review, rejected, merged, stale, secret, and sensitive_blocked records.",
+            "verification": "uv run pytest tests/harness/test_department_memory_proactive_prompting_contract.py -q"
+        },
+        {
+            "id": "dmpp-002",
+            "description": "Natural department keywords may create a suggested state, but the runtime must not auto-inject memory into the current user prompt, conversation history, or <dc_agent_memory_context> before explicit confirmation.",
+            "verification": "uv run pytest data/plugins/llm_router/test_dc_router_path.py::test_department_memory_keyword_prompts_before_injection data/plugins/llm_router/test_dc_router_path.py::test_department_memory_confirmation_injects_original_request data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_confirms_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_dismisses_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_rejects_untrusted_payload data/plugins/llm_router/test_dc_router_path.py::test_department_memory_prompt_sends_confirm_card_when_lark data/plugins/llm_router/test_dc_router_path.py::test_explicit_memory_lookup_skips_department_prompt -q"
+        },
+        {
+            "id": "dmpp-003",
+            "description": "After explicit confirmation for the pending suggestion_id in the same conversation, the original request is resumed and the approved-only memory context may be applied as a transient reference.",
+            "verification": "uv run pytest data/plugins/llm_router/test_dc_router_path.py::test_department_memory_keyword_prompts_before_injection data/plugins/llm_router/test_dc_router_path.py::test_department_memory_confirmation_injects_original_request data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_confirms_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_dismisses_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_rejects_untrusted_payload data/plugins/llm_router/test_dc_router_path.py::test_department_memory_prompt_sends_confirm_card_when_lark data/plugins/llm_router/test_dc_router_path.py::test_explicit_memory_lookup_skips_department_prompt -q"
+        },
+        {
+            "id": "dmpp-004",
+            "description": "Explicit memory lookup requests skip the proactive prompt and keep the existing approved-only direct recall path.",
+            "verification": "uv run pytest data/plugins/llm_router/test_dc_router_path.py::test_department_memory_keyword_prompts_before_injection data/plugins/llm_router/test_dc_router_path.py::test_department_memory_confirmation_injects_original_request data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_confirms_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_dismisses_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_rejects_untrusted_payload data/plugins/llm_router/test_dc_router_path.py::test_department_memory_prompt_sends_confirm_card_when_lark data/plugins/llm_router/test_dc_router_path.py::test_explicit_memory_lookup_skips_department_prompt -q"
+        },
+        {
+            "id": "dmpp-005",
+            "description": "The suggestion lifecycle must support suggested, confirmed, dismissed, expired, and blocked states, and each suggest/confirm/dismiss/expire/apply transition writes an append-only audit record.",
+            "verification": "uv run pytest tests/harness/test_department_memory_proactive_prompting_contract.py -q"
+        }
+    ],
+    "runtime_policy": {
+        "state_machine": ["suggested", "confirmed", "dismissed", "expired", "blocked"],
+        "audit_fields": [
+            "actor",
+            "action",
+            "suggestion_id",
+            "memory_ids",
+            "department_id",
+            "conversation_id",
+            "status_before",
+            "status_after",
+            "payload",
+            "timestamp"
+        ],
+        "save_policy": "Suggestions and transient memory references are not saved as ordinary user content.",
+        "priority_policy": "Confirmed department memory is lower-priority reference context and must not override the user's current prompt, supplied source material, or verified facts."
+    },
+    "non_goals": [
+        "Do not implement bulk proactive review pings.",
+        "Do not recall unapproved or sensitive-blocked memory.",
+        "Do not automatically update SOP, routing, or department profiles from suggestions.",
+        "Do not require an Obsidian realtime watcher for this runtime step.",
+        "Do not treat generic confirmation text as valid unless there is an active same-conversation suggestion."
+    ],
+    "verification": {
+        "targeted": "scripts/agent-check.sh --profile targeted",
+        "manual": [
+            "uv run pytest tests/harness/test_department_memory_proactive_prompting_contract.py -q",
+            "uv run pytest data/plugins/llm_router/test_dc_router_path.py::test_department_memory_keyword_prompts_before_injection data/plugins/llm_router/test_dc_router_path.py::test_department_memory_confirmation_injects_original_request data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_confirms_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_dismisses_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_rejects_untrusted_payload data/plugins/llm_router/test_dc_router_path.py::test_department_memory_prompt_sends_confirm_card_when_lark data/plugins/llm_router/test_dc_router_path.py::test_explicit_memory_lookup_skips_department_prompt -q"
+        ]
+    }
+}

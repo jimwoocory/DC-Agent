@@ -1,0 +1,12 @@
+{
+  "profiles": [
+    {
+      "profile_id": "finance_budget_workflow",
+      "department_id": "finance",
+      "display_name": "财务部",
+      "aliases": ["财务部", "财务"],
+      "trigger_keywords": ["预算", "报销", "发票", "费用"],
+      "tone_template": "涉及预算、报销和发票时，先核对金额、票据、审批口径和缺失材料；不要替用户编造票据、审批人或财务规则。"
+    }
+  ]
+}

@@ -42,7 +42,9 @@ MEMORY_HINT_RE = re.compile(
     r"(项目|方案|策划|执行|SOP|负责人|谁负责|发起人|部门|同事|员工|文案|脚本|"
     r"预算|报价|排期|复盘|结算|舆情|KOW|KOS|五菱|菱听|鉴宝|归档|资料|文件|"
     r"飞书|链接|推文|素材|星光|缤果|宏光|宝骏|柳汽|东风|之光|之前|历史|记忆|"
-    r"查一下|找一下|有没有|是什么|是谁)",
+    r"中台|提案|活动|传播|共创|反馈|邀约|触达|内容中心|用户运营|企微内容库|"
+    r"账号运营|栏目|直播|礼品|物料|客户活动|答谢会|家宴|研讨会|事实边界|"
+    r"之光EV|长尾期|长尾|查一下|找一下|有没有|是什么|是谁)",
     re.IGNORECASE,
 )
 
@@ -65,6 +67,37 @@ STOP_WORDS = {
     "检索",
 }
 
+MEMORY_TRIGGER_TERMS = (
+    "中台",
+    "中台策划",
+    "中台-策划",
+    "提案",
+    "事实边界",
+    "客户可见",
+    "活动",
+    "传播",
+    "之光EV",
+    "长尾期",
+    "长尾",
+    "内容中心",
+    "用户运营",
+    "企微内容库",
+    "账号运营",
+    "栏目",
+    "直播",
+    "礼品",
+    "物料",
+    "客户活动",
+    "答谢会",
+    "家宴",
+    "研讨会",
+    "复盘",
+    "共创",
+    "反馈",
+    "邀约",
+    "触达",
+)
+
 
 def _clean_text(text: str) -> str:
     text = re.sub(
@@ -73,10 +106,15 @@ def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _compact(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
 def _candidate_terms(text: str) -> list[str]:
     clean = _clean_text(text)
     terms: list[str] = []
     terms.extend(re.findall(r"[A-Za-z0-9_-]{2,}", clean))
+    terms.extend(term for term in MEMORY_TRIGGER_TERMS if term in clean)
     chinese_chunks = re.findall(r"[\u4e00-\u9fff]{2,18}", clean)
     terms.extend(chinese_chunks)
     for chunk in chinese_chunks:
@@ -196,20 +234,15 @@ def retrieve_governed_memory_context(text: str, *, limit: int = 5) -> dict[str, 
         return {"governed_memories": [], "documents": [], "project_items": []}
 
     store = MemoryGovernanceStore(GOVERNED_MEMORY_DB)
-    memories = []
-    seen_memory_ids: set[str] = set()
-    for query in [_clean_text(text), *_candidate_terms(text)]:
-        if not query:
-            continue
-        for memory in list_recall_memories(store=store, query=query, limit=limit):
-            if memory.memory_id in seen_memory_ids:
-                continue
-            seen_memory_ids.add(memory.memory_id)
-            memories.append(memory)
-            if len(memories) >= limit:
-                break
-        if len(memories) >= limit:
-            break
+    clean_text = _clean_text(text)
+    terms = _candidate_terms(text)
+    scored_memories = [
+        (score, memory)
+        for memory in list_recall_memories(store=store, query="", limit=10000)
+        if (score := _governed_memory_score(memory, clean_text, terms)) > 0
+    ]
+    scored_memories.sort(key=lambda item: (-item[0], item[1].memory_id))
+    memories = [memory for _, memory in scored_memories[:limit]]
     if not memories:
         return {"governed_memories": [], "documents": [], "project_items": []}
     return {
@@ -234,6 +267,34 @@ def retrieve_governed_memory_context(text: str, *, limit: int = 5) -> dict[str, 
         "documents": [],
         "project_items": [],
     }
+
+
+def _governed_memory_score(memory: Any, query: str, terms: list[str]) -> int:
+    haystack = _compact(
+        " ".join(
+            [
+                memory.title,
+                memory.summary,
+                memory.canonical_text,
+                memory.owner,
+                memory.project_id,
+                " ".join(memory.tags),
+            ]
+        )
+    ).lower()
+    compact_query = _compact(query).lower()
+    score = 0
+    if compact_query and compact_query in haystack:
+        score += 20
+    seen_terms: set[str] = set()
+    for term in terms:
+        compact_term = _compact(term).lower()
+        if len(compact_term) < 2 or compact_term in seen_terms:
+            continue
+        seen_terms.add(compact_term)
+        if compact_term in haystack:
+            score += 2 + min(len(compact_term), 8)
+    return score
 
 
 def retrieve_memory_context_legacy(text: str, *, limit: int = 5) -> dict[str, Any]:
@@ -378,14 +439,14 @@ def format_memory_context(context: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def inject_memory_context_into_event(event) -> bool:
+def inject_memory_context_into_event(event, query_text: str | None = None) -> bool:
     platform_id = event.get_platform_id() or ""
     if platform_id not in SUPPORTED_PLATFORM_IDS:
         return False
     text = event.message_str or ""
     if MEMORY_MARKER in text:
         return False
-    context = retrieve_memory_context(text)
+    context = retrieve_memory_context(query_text or text)
     block = format_memory_context(context)
     if not block:
         return False

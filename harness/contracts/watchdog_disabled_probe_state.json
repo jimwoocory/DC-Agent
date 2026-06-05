@@ -1,0 +1,31 @@
+{
+  "feature": "watchdog_disabled_probe_state",
+  "goal": "Disabled watchdog probes must not leave stale fail states in data/watchdog/state.json or dashboard status surfaces.",
+  "acceptance_criteria": [
+    {
+      "id": "wd-disabled-001",
+      "description": "dc-watchdog records explicitly disabled probes as disabled with a reason, replacing older fail:stale heartbeat states.",
+      "verification": "uv run pytest tests/test_watchdog_disabled_probe_state.py -q"
+    },
+    {
+      "id": "wd-disabled-002",
+      "description": "watchdogctl exposes paused NAS/Feishu heartbeat probes as disabled, not enabled success and not active failures.",
+      "verification": "uv run pytest tests/test_watchdog_disabled_probe_state.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "disabled_status": "disabled",
+    "disabled_probe_keys": [
+      "nas_watchdog_heartbeat",
+      "feishu_sync_heartbeat"
+    ],
+    "state_policy": "Disabled probes remain visible for operator clarity but cannot count as current failures."
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "manual": [
+      "uv run pytest tests/test_watchdog_disabled_probe_state.py -q",
+      "bash scripts-watchdog/dc-watchdog.sh"
+    ]
+  }
+}

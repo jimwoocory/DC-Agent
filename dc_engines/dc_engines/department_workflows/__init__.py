@@ -15,6 +15,12 @@ from .contracts import (
 )
 from .defaults import DEFAULT_DEPARTMENT_WORKFLOWS
 from .materials import assess_material_intake
+from .memory_profiles import (
+    DEFAULT_DEPARTMENT_MEMORY_PROFILES,
+    DepartmentMemoryProfile,
+    load_department_memory_profiles,
+    matching_department_memory_profiles,
+)
 from .quality_gate import (
     CONTENT_SOP_QUALITY_GATES,
     ContentSopQualityResult,
@@ -36,10 +42,12 @@ from .request_builder import (
 
 __all__ = [
     "DEFAULT_DEPARTMENT_WORKFLOWS",
+    "DEFAULT_DEPARTMENT_MEMORY_PROFILES",
     "DEFAULT_REGISTRY",
     "ContentSopSourceContext",
     "ContentSopQualityResult",
     "CONTENT_SOP_QUALITY_GATES",
+    "DepartmentMemoryProfile",
     "DepartmentWorkflow",
     "DepartmentWorkflowMatch",
     "DepartmentWorkflowRegistry",
@@ -57,6 +65,8 @@ __all__ = [
     "build_department_workflow_request",
     "evaluate_content_sop_payload",
     "get_default_registry",
+    "load_department_memory_profiles",
+    "matching_department_memory_profiles",
     "match_department_workflow",
     "strip_internal_memory_context",
     "workflow_catalog",

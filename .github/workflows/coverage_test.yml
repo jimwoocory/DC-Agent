@@ -29,6 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio pytest-cov
           pip install --editable .
+          pip install --editable ./dc_engines
 
       - name: Run tests
         run: |
@@ -37,7 +38,7 @@ jobs:
           mkdir -p data/temp
           export TESTING=true
           export ZHIPU_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          pytest --cov=astrbot -v -o log_cli=true -o log_level=DEBUG
+          pytest ./tests --cov=astrbot -v -o log_cli=true -o log_level=DEBUG
 
       - name: Upload results to Codecov
         if: github.repository == 'AstrBotDevs/AstrBot'

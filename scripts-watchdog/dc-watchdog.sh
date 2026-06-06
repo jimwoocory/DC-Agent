@@ -140,6 +140,12 @@ json.dump(d, open(p, 'w'), indent=2)
 "
 }
 
+state_set_disabled() {
+    local key="$1" reason="$2" since="$3"
+    "$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_state.py" \
+        mark-disabled "$STATE_FILE" "$key" "$reason" "$since"
+}
+
 state_set_maintenance_deferred() {
     local key="$1" status="$2" since="$3" deferred_ts="$4" reason="$5"
     python3 - "$STATE_FILE" "$key" "$status" "$since" "$deferred_ts" "$reason" <<'PY'
@@ -356,6 +362,16 @@ SERVICES=(
     # NAS/飞书/知识库统一知识循环：由总 watchdog tick 调度，具体任务后台运行。
     "knowledge_cycle|knowledge_cycle|cron_tick"
 )
+
+DISABLED_SERVICES=(
+    "nas_watchdog_heartbeat|NAS/Feishu sync jobs paused by operator request on 2026-06-04"
+    "feishu_sync_heartbeat|NAS/Feishu sync jobs paused by operator request on 2026-06-04"
+)
+
+for entry in "${DISABLED_SERVICES[@]}"; do
+    IFS='|' read -r name reason <<< "$entry"
+    state_set_disabled "$name" "$reason" "$(now_iso)"
+done
 
 for entry in "${SERVICES[@]}"; do
     IFS='|' read -r name kind target <<< "$entry"

@@ -5,16 +5,16 @@ The router is the single decision surface for DC-Agent model and workflow routin
 Run the focused router tests with:
 
 ```bash
-uv run pytest tests/router -q
+uv run pytest tests/dc_router -q
 ```
 
 For coverage on the router package:
 
 ```bash
-uv run pytest tests/router -q --cov=router
+uv run pytest tests/dc_router -q --cov=dc_router
 ```
 
-The key entrypoint is `router.entrypoint.DCRouter.decide()`. It switches between:
+The key entrypoint is `dc_router.entrypoint.DCRouter.decide()`. It switches between:
 
 - business routing for normal employee-facing platforms
 - ops routing when `MessageEnvelope.metadata["platform_id"]` is `巅池-技术（DevOps）` or `巅池-技术`

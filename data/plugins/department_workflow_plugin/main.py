@@ -23,7 +23,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
-from router.content_sop import infer_content_sop_metadata
+from dc_router.content_sop import infer_content_sop_metadata
 
 _TRIGGER_KEYWORDS: tuple[str, ...] = (
     "部门工作流",

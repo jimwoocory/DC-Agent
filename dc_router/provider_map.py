@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from router.taxonomy import RouteAction, RouteDepth, RouterIntent
+from dc_router.taxonomy import RouteAction, RouteDepth, RouterIntent
 
 AIHUBMIX_GEMINI_FLASH = "aihubmix/gemini-3.5-flash"
 AIHUBMIX_GEMINI_PRO = "aihubmix/gemini-3.1-pro-preview"
+AIHUBMIX_QWEN_FLASH = "aihubmix/qwen3.6-flash"
+AIHUBMIX_DEEPSEEK_PRO = "aihubmix/deepseek-v4-pro"
 AIHUBMIX_GROK = "aihubmix/grok-4.3"
 AIHUBMIX_CLAUDE_SONNET_4_6 = "aihubmix/claude-sonnet-4-6"
 AIHUBMIX_CLAUDE_OPUS_4_7 = "aihubmix/claude-opus-4-7"
+AIHUBMIX_CLAUDE_OPUS_4_8 = "aihubmix/claude-opus-4-8"
 ANTIGRAVITY_CLI_FLASH = "cli/antigravity/gemini-3.5-flash"
 CLI_GROK_BUILD = "cli/grok-build"
 CLI_CODEX_GPT_5_4 = "cli/codex/gpt-5.4"
@@ -35,16 +38,24 @@ class ProviderRoute:
 DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
     RouterIntent.CASUAL: ProviderRoute(
         intent=RouterIntent.CASUAL,
+        provider_id=AIHUBMIX_QWEN_FLASH,
+        target_model="qwen3.6-flash",
+        depth=RouteDepth.DIRECT,
+        action=RouteAction.ANSWER,
+        description="Casual chat through AIHubMix Qwen Flash.",
+    ),
+    RouterIntent.WORK_PREFLIGHT: ProviderRoute(
+        intent=RouterIntent.WORK_PREFLIGHT,
         provider_id=ANTIGRAVITY_CLI_FLASH,
         target_model="gemini-3.5-flash",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Casual chat through Antigravity CLI, with AIHubMix fallback.",
+        description="Work preflight and lightweight copy through Antigravity CLI, with AIHubMix fallback.",
     ),
     RouterIntent.OPS_WRITING: ProviderRoute(
         intent=RouterIntent.OPS_WRITING,
-        provider_id=AIHUBMIX_GEMINI_FLASH,
-        target_model="gemini-3.5-flash",
+        provider_id=AIHUBMIX_QWEN_FLASH,
+        target_model="qwen3.6-flash",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
         description="Office writing and routine operational drafts.",
@@ -59,11 +70,11 @@ DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
     ),
     RouterIntent.REALTIME: ProviderRoute(
         intent=RouterIntent.REALTIME,
-        provider_id=AIHUBMIX_GEMINI_FLASH,
+        provider_id=ANTIGRAVITY_CLI_FLASH,
         target_model="gemini-3.5-flash",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Light realtime and search-like questions.",
+        description="Realtime and search-like questions through Antigravity CLI, with AIHubMix Gemini fallback.",
     ),
     RouterIntent.PUBLIC_OPINION: ProviderRoute(
         intent=RouterIntent.PUBLIC_OPINION,
@@ -83,43 +94,43 @@ DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
     ),
     RouterIntent.CREATIVE: ProviderRoute(
         intent=RouterIntent.CREATIVE,
-        provider_id=AIHUBMIX_GEMINI_PRO,
-        target_model="gemini-3.1-pro-preview",
+        provider_id=AIHUBMIX_DEEPSEEK_PRO,
+        target_model="deepseek-v4-pro",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="High-value marketing copy, slogans, and scripts through AIHubMix Gemini Pro.",
+        description="High-value marketing copy, slogans, and scripts through AIHubMix DeepSeek Pro.",
     ),
     RouterIntent.INSIGHT: ProviderRoute(
         intent=RouterIntent.INSIGHT,
-        provider_id=AIHUBMIX_GEMINI_PRO,
-        target_model="gemini-3.1-pro-preview",
-        depth=RouteDepth.DIRECT,
-        action=RouteAction.ANSWER,
-        description="Brand strategy and user insight through AIHubMix Gemini Pro.",
-    ),
-    RouterIntent.DEEP_CREATIVE: ProviderRoute(
-        intent=RouterIntent.DEEP_CREATIVE,
         provider_id=AIHUBMIX_CLAUDE_SONNET_4_6,
         target_model="claude-sonnet-4-6",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Temporary Hermes deep creative path through AIHubMix Claude Sonnet 4.6.",
+        description="Brand strategy and user insight through AIHubMix Claude Sonnet 4.6.",
     ),
-    RouterIntent.DEEP_INSIGHT: ProviderRoute(
-        intent=RouterIntent.DEEP_INSIGHT,
+    RouterIntent.DEEP_CREATIVE: ProviderRoute(
+        intent=RouterIntent.DEEP_CREATIVE,
         provider_id=AIHUBMIX_CLAUDE_OPUS_4_7,
         target_model="claude-opus-4-7",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Temporary Hermes deep analysis path through AIHubMix Claude Opus 4.7.",
+        description="Deep creative planning through AIHubMix Claude Opus 4.7.",
+    ),
+    RouterIntent.DEEP_INSIGHT: ProviderRoute(
+        intent=RouterIntent.DEEP_INSIGHT,
+        provider_id=AIHUBMIX_CLAUDE_OPUS_4_8,
+        target_model="claude-opus-4-8",
+        depth=RouteDepth.DIRECT,
+        action=RouteAction.ANSWER,
+        description="Deep insight and strategic analysis through AIHubMix Claude Opus 4.8.",
     ),
     RouterIntent.FALLBACK: ProviderRoute(
         intent=RouterIntent.FALLBACK,
-        provider_id=AIHUBMIX_GEMINI_FLASH,
+        provider_id=ANTIGRAVITY_CLI_FLASH,
         target_model="gemini-3.5-flash",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Light fallback for unclear short messages; explicit deep tasks use deep routes.",
+        description="Fallback for unclear non-garbage messages through Antigravity CLI, with AIHubMix Gemini fallback.",
     ),
 }
 

@@ -5,6 +5,54 @@
       "type": "openai_chat_completion",
       "model": "gpt-4o-mini",
       "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/qwen3.6-flash",
+      "type": "aihubmix_chat_completion",
+      "model": "qwen3.6-flash",
+      "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/deepseek-v4-pro",
+      "type": "aihubmix_chat_completion",
+      "model": "deepseek-v4-pro",
+      "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/gemini-3.5-flash",
+      "type": "aihubmix_chat_completion",
+      "model": "gemini-3.5-flash",
+      "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/grok-4.3",
+      "type": "aihubmix_chat_completion",
+      "model": "grok-4.3",
+      "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/claude-sonnet-4-6",
+      "type": "aihubmix_chat_completion",
+      "model": "claude-sonnet-4-6",
+      "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/claude-opus-4-7",
+      "type": "aihubmix_chat_completion",
+      "model": "claude-opus-4-7",
+      "key": ["test-key"]
+    },
+    {
+      "id": "aihubmix/claude-opus-4-8",
+      "type": "aihubmix_chat_completion",
+      "model": "claude-opus-4-8",
+      "key": ["test-key"]
+    },
+    {
+      "id": "codex/gpt-5.5-xhigh",
+      "type": "codex_cli",
+      "model": "gpt-5.5-xhigh",
+      "key": ["test-key"]
     }
   ],
   "platform": [],

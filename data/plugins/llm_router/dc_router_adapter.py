@@ -1,11 +1,11 @@
 # ruff: noqa: E402, I001
 """dc-router adapter for AstrBot plugin.
 
-边界层：把 AstrBot 的 AstrMessageEvent ↔ router.MessageEnvelope 互转，
-并把 router.RouterDecision 翻译成 AstrBot 的实际动作（set_provider / 后续派发）。
+边界层：把 AstrBot 的 AstrMessageEvent ↔ dc_router.MessageEnvelope 互转，
+并把 dc_router.RouterDecision 翻译成 AstrBot 的实际动作（set_provider / 后续派发）。
 
 设计原则：
-- router/ 和 harness/ 包跟 AstrBot 完全解耦（router/__init__.py 注释）
+- dc_router/ 和 harness/ 包跟 AstrBot 完全解耦（router/__init__.py 注释）
 - adapter 是 plugin <-> router 包的唯一接口
 - 任何异常都让上层 fallback 到 v1.0，不抛出
 - 步骤 3 只实现 depth=DIRECT 路径（answer / preprocess）
@@ -23,8 +23,8 @@ import sys
 import time
 from pathlib import Path
 
-# 让 `from router import ...` 和 `from harness import ...` 能从 DC-Agent 顶层 import
-_DC_AGENT_ROOT = Path("/Users/dianchi/DC-Agent")
+# 让 `from dc_router import ...` 和 `from harness import ...` 能从 DC-Agent 顶层 import
+_DC_AGENT_ROOT = Path(__file__).resolve().parents[3]
 if str(_DC_AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DC_AGENT_ROOT))
 
@@ -72,6 +72,36 @@ MULTIMODAL_PREPROCESS_PROMPT = """\
 """
 _CLASSIFIER_JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 _QUEUE_RECOVERY_TASK: asyncio.Task | None = None
+_LOCAL_CASUAL_ACKS = {
+    "嗯",
+    "嗯嗯",
+    "哦",
+    "哦哦",
+    "啊",
+    "哈哈",
+    "哈哈哈",
+    "hh",
+    "hhh",
+    "6",
+    "66",
+    "666",
+    "ok",
+    "okay",
+    "收到",
+    "好的",
+    "好",
+    "行",
+    "可以",
+}
+
+
+def _is_local_casual_ack(text: str, *, has_attachments: bool) -> bool:
+    if has_attachments:
+        return False
+    normalized = re.sub(r"[\s，。！？!?,.、~～…]+", "", text).lower()
+    return (
+        bool(normalized) and len(normalized) <= 8 and normalized in _LOCAL_CASUAL_ACKS
+    )
 
 
 def _format_wait_minutes_from_eta(eta_at: float | None) -> str:
@@ -179,6 +209,28 @@ def _build_cli_prompt(event: AstrMessageEvent, decision) -> str:
         return (
             "你是巅池-Agent小助手，负责飞书里的日常闲聊和轻量协助。\n"
             "请用自然、简短、亲切的中文回复，不要提到模型名，不要解释过程。\n\n"
+            f"用户消息：{text}"
+        )
+    if decision.intent == "work_preflight":
+        return (
+            "你是巅池-Agent小助手，负责工作前置判断、需求澄清和轻量文案草稿。\n"
+            "请先判断用户是要澄清问题、整理思路、改一句短文案，还是应该转入正式工作流。\n"
+            "能直接给短草稿就直接给；信息不足时用 2-4 个问题补齐；不要硬做复杂终稿。\n"
+            "中文回复，简短、具体、可执行，不要提到模型名。\n\n"
+            f"用户消息：{text}"
+        )
+    if decision.intent == "realtime":
+        return (
+            "你是巅池-Agent小助手，负责轻量实时信息判断和热点问题快速回应。\n"
+            "请优先给当前可判断的结论；如果需要外部事实但当前无法确认，请明确说明需要核实，"
+            "不要编造具体时间、价格、排名或新闻细节。中文回复，简短、具体，不要提到模型名。\n\n"
+            f"用户消息：{text}"
+        )
+    if decision.intent == "fallback":
+        return (
+            "你是巅池-Agent小助手，负责处理不明确但不是垃圾闲聊的短消息。\n"
+            "请用中文给一个简短、有帮助的回应；如果用户意图不清，先帮他整理可能的方向，"
+            "必要时只问 1-2 个澄清问题。不要提到模型名。\n\n"
             f"用户消息：{text}"
         )
     if decision.intent == "public_opinion":
@@ -514,12 +566,12 @@ class AstrBotRouterClassifier:
         self.context = context
 
     async def classify(self, text: str):
-        from router.classifier import (
+        from dc_router.classifier import (
             ROUTER_CLASSIFIER_PROVIDER_ID,
             ROUTER_CLASSIFIER_SYSTEM_PROMPT,
             ClassifierResult,
         )
-        from router.taxonomy import RouterIntent
+        from dc_router.taxonomy import RouterIntent
 
         provider = _get_provider_by_id(self.context, ROUTER_CLASSIFIER_PROVIDER_ID)
         if provider is None:
@@ -568,6 +620,7 @@ async def _direct_cli_answer(_context, event: AstrMessageEvent, decision) -> boo
                 antigravity_allowed,
                 mark_antigravity_failure,
                 mark_antigravity_success,
+                record_antigravity_circuit_fallback,
             )
             from cli_runner import CliRunner
             from dc_quota_runtime import get_quota_gate
@@ -575,6 +628,9 @@ async def _direct_cli_answer(_context, event: AstrMessageEvent, decision) -> boo
 
             allowed, health_reason, health_state = antigravity_allowed()
             if not allowed:
+                record_antigravity_circuit_fallback(
+                    reason=health_reason, state=health_state
+                )
                 available = {p.meta().id for p in _context.get_all_providers()}
                 if ANTIGRAVITY_FALLBACK_PROVIDER_ID in available:
                     await _context.provider_manager.set_provider(
@@ -2248,11 +2304,11 @@ async def _enqueue_or_run_harness_cli(
 
 
 def event_to_envelope(event: AstrMessageEvent):
-    """AstrMessageEvent → router.MessageEnvelope。
+    """AstrMessageEvent → dc_router.MessageEnvelope。
 
     出错时返回最小 envelope（只含 text），让 DCRouter 至少能跑关键词 + classifier。
     """
-    from router import AttachmentKind, MessageEnvelope
+    from dc_router import AttachmentKind, MessageEnvelope
 
     attachment_kinds: list = []
     try:
@@ -2289,7 +2345,7 @@ async def apply_decision(context, event: AstrMessageEvent, decision) -> bool:
         True  - dc-router 已处理（plugin 应停止，不走 v1 兜底）
         False - dc-router 没接管（plugin 应 fallback 到 v1.0）
     """
-    from router import RouteDepth
+    from dc_router import RouteDepth
 
     provider_id = decision.provider_id
     intent = decision.intent
@@ -2386,17 +2442,35 @@ async def route_via_dc_router(
         False - 让 plugin 走 v1.0 兜底（dry_run=True 时永远返回 False）
     """
     try:
-        from router import DCRouter
+        from dc_router import DCRouter
 
         envelope = event_to_envelope(event)
+
+        if _is_local_casual_ack(
+            envelope.text.strip(), has_attachments=envelope.has_attachments
+        ):
+            if dry_run:
+                logger.info(
+                    "[dc-router · DRY-RUN] would handle local casual ack without provider"
+                )
+                return False
+            event.should_call_llm(False)
+            event.set_extra("llm_router_intent", "local_casual_ack")
+            event.set_extra("llm_router_source", "local_rule")
+            event.set_extra("llm_router_provider", "local/no_llm")
+            event.set_result(
+                MessageEventResult().message("").use_t2i(False).stop_event()
+            )
+            logger.info("[dc-router] local casual ack handled without provider")
+            return True
 
         # 太短或空消息直接放弃（跟 v1.0 行为一致）
         if not envelope.text.strip() or len(envelope.text.strip()) < 2:
             if not envelope.has_attachments:
                 return False  # 没文本没附件 → 让 v1 自己处理（v1 也会跳过）
 
-        router = DCRouter(classifier=AstrBotRouterClassifier(context))
-        decision = await router.decide(envelope)
+        dc_router = DCRouter(classifier=AstrBotRouterClassifier(context))
+        decision = await dc_router.decide(envelope)
 
         # ─── dry-run 分支：只 log 不动 ───
         if dry_run:
@@ -2421,7 +2495,7 @@ async def route_via_dc_router(
                 return False
             _merge_attachment_summary_into_event(event, summary)
             envelope = event_to_envelope(event)
-            decision = await router.decide(envelope)
+            decision = await dc_router.decide(envelope)
 
         # 正式模式：真切 provider / 真派
         return await apply_decision(context, event, decision)

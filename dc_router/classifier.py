@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from router.provider_map import GEMINI_3_1_PRO
-from router.taxonomy import RouterIntent
+from dc_router.provider_map import GEMINI_3_1_PRO
+from dc_router.taxonomy import RouterIntent
 
 ROUTER_CLASSIFIER_PROVIDER_ID = GEMINI_3_1_PRO
 

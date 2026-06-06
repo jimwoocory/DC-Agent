@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from router.ops_taxonomy import OpsIntent
-from router.taxonomy import RouteAction, RouteDepth
+from dc_router.ops_taxonomy import OpsIntent
+from dc_router.taxonomy import RouteAction, RouteDepth
 
 OPS_CODEX_CLI = "cli/codex/gpt-5.4"
 

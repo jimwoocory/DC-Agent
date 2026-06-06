@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from router.classifier import ClassifierResult
-from router.decision import RouterDecision
-from router.entrypoint import DCRouter, MessageEnvelope
-from router.ops_taxonomy import OpsIntent
-from router.provider_map import get_provider_route
-from router.rules import match_document_link, match_keywords, match_prefix
-from router.taxonomy import AttachmentKind, RouterIntent
+from dc_router.classifier import ClassifierResult
+from dc_router.decision import RouterDecision
+from dc_router.entrypoint import DCRouter, MessageEnvelope
+from dc_router.ops_taxonomy import OpsIntent
+from dc_router.provider_map import get_provider_route
+from dc_router.rules import match_document_link, match_keywords, match_prefix
+from dc_router.taxonomy import AttachmentKind, RouterIntent
 
 
 @pytest.mark.parametrize(
@@ -66,6 +66,7 @@ def test_feishu_document_link_routes_to_multimodal_preprocess() -> None:
 def test_router_intent_enum_is_explicit_and_complete() -> None:
     assert {intent.value for intent in RouterIntent} == {
         "casual",
+        "work_preflight",
         "ops_writing",
         "multimodal",
         "realtime",
@@ -119,9 +120,9 @@ async def test_business_router_uses_classifier_when_rules_are_uncertain() -> Non
             reason="mock creative",
         )
     )
-    router = DCRouter(classifier=classifier)
+    dc_router = DCRouter(classifier=classifier)
 
-    decision = await router.decide(
+    decision = await dc_router.decide(
         MessageEnvelope(
             text="给这个活动想几个方向",
             attachment_summary="目标用户是年轻家庭",
@@ -138,19 +139,30 @@ async def test_business_router_uses_classifier_when_rules_are_uncertain() -> Non
 
 @pytest.mark.asyncio
 async def test_business_router_falls_back_when_classifier_returns_none() -> None:
-    router = DCRouter(classifier=FakeClassifier(None))
+    dc_router = DCRouter(classifier=FakeClassifier(None))
 
-    decision = await router.decide("这个事你怎么看")
+    decision = await dc_router.decide("这个事你怎么看")
 
     assert decision.intent == RouterIntent.FALLBACK.value
     assert decision.source == "fallback"
+    assert decision.provider_id == "cli/antigravity/gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_realtime_routes_to_antigravity_first() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("今天行业有什么热点")
+
+    assert decision.intent == RouterIntent.REALTIME.value
+    assert decision.provider_id == "cli/antigravity/gemini-3.5-flash"
 
 
 @pytest.mark.asyncio
 async def test_attachment_without_summary_requires_multimodal_preprocess() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide(
+    decision = await dc_router.decide(
         MessageEnvelope(
             text="看这张图",
             attachment_kinds=(AttachmentKind.IMAGE,),
@@ -166,9 +178,9 @@ async def test_attachment_without_summary_requires_multimodal_preprocess() -> No
 
 @pytest.mark.asyncio
 async def test_prefix_overrides_keyword_after_attachment_summary_exists() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide(
+    decision = await dc_router.decide(
         MessageEnvelope(
             text="#创意 这个舆情危机怎么回应",
             attachment_summary="截图里是负面评论",
@@ -182,9 +194,9 @@ async def test_prefix_overrides_keyword_after_attachment_summary_exists() -> Non
 
 @pytest.mark.asyncio
 async def test_ops_platform_uses_ops_router_without_classifier() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide(
+    decision = await dc_router.decide(
         MessageEnvelope(
             text="#队列 看一下失败任务",
             metadata={"platform_id": "巅池-技术（DevOps）"},
@@ -198,9 +210,9 @@ async def test_ops_platform_uses_ops_router_without_classifier() -> None:
 
 @pytest.mark.asyncio
 async def test_ops_keyword_priority_prefers_quota_gate_view() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide(
+    decision = await dc_router.decide(
         MessageEnvelope(
             text="队列和凭证池现在怎么样",
             metadata={"platform_id": "巅池-技术"},
@@ -213,9 +225,9 @@ async def test_ops_keyword_priority_prefers_quota_gate_view() -> None:
 
 @pytest.mark.asyncio
 async def test_content_sop_metadata_routes_client_copy_image_request() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide("帮我写客户邀约文案并配图，用在私域活动触达")
+    decision = await dc_router.decide("帮我写客户邀约文案并配图，用在私域活动触达")
 
     assert decision.intent == RouterIntent.DEEP_CREATIVE.value
     assert decision.source == "content_sop"
@@ -228,9 +240,9 @@ async def test_content_sop_metadata_routes_client_copy_image_request() -> None:
 
 @pytest.mark.asyncio
 async def test_content_sop_metadata_routes_planning_video_image_request() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide("策划部做一个短视频脚本和生图 prompt")
+    decision = await dc_router.decide("策划部做一个短视频脚本和生图 prompt")
 
     assert decision.intent == RouterIntent.DEEP_CREATIVE.value
     assert decision.source == "content_sop"
@@ -242,9 +254,9 @@ async def test_content_sop_metadata_routes_planning_video_image_request() -> Non
 
 @pytest.mark.asyncio
 async def test_content_sop_copy_only_routes_creative_with_guard_metadata() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide("帮我写老客户复联话术，用在微信私域")
+    decision = await dc_router.decide("帮我写老客户复联话术，用在微信私域")
 
     assert decision.intent == RouterIntent.CREATIVE.value
     assert decision.source == "content_sop"
@@ -255,9 +267,9 @@ async def test_content_sop_copy_only_routes_creative_with_guard_metadata() -> No
 
 @pytest.mark.asyncio
 async def test_content_sop_metadata_marks_attachment_request_partial() -> None:
-    router = DCRouter(classifier=ExplodingClassifier())
+    dc_router = DCRouter(classifier=ExplodingClassifier())
 
-    decision = await router.decide(
+    decision = await dc_router.decide(
         MessageEnvelope(
             text="帮我写客户邀约文案并配图",
             attachment_kinds=(AttachmentKind.FILE,),

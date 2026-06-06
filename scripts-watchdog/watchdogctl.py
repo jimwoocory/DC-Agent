@@ -22,8 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-DC_ROOT = Path("/Users/dianchi/DC-Agent")
-HOME = Path("/Users/dianchi")
+DC_ROOT = Path(os.environ.get("DC_AGENT_ROOT", Path(__file__).resolve().parents[1]))
+HOME = Path(os.environ.get("HOME", str(Path.home())))
 UID = os.getuid()
 
 
@@ -268,7 +268,24 @@ def set_codex_status(job: CodexAutomation, status: str) -> bool:
 
 def probe_enabled(name: str) -> bool:
     script = DC_ROOT / "scripts-watchdog/dc-watchdog.sh"
-    return script.exists() and name in script.read_text(errors="ignore")
+    if not script.exists():
+        return False
+    text = script.read_text(errors="ignore")
+    active_services = re.search(r"SERVICES=\((.*?)\n\)", text, flags=re.DOTALL)
+    if not active_services:
+        return False
+    for line in active_services.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped.startswith('"'):
+            continue
+        match = re.match(r'"([^"\n]+)"', stripped)
+        if not match:
+            continue
+        entry = match.group(1)
+        service_name = entry.split("|", 1)[0]
+        if service_name == name:
+            return True
+    return False
 
 
 def in_group(groups: tuple[str, ...], selected: str) -> bool:

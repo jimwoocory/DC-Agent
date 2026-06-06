@@ -29,12 +29,12 @@ import pytest
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if _PLUGIN_DIR not in sys.path:
     sys.path.insert(0, _PLUGIN_DIR)
-_DC_AGENT_ROOT = "/Users/dianchi/DC-Agent"
-if _DC_AGENT_ROOT not in sys.path:
-    sys.path.insert(0, _DC_AGENT_ROOT)
-_DC_ENGINES_ROOT = "/Users/dianchi/DC-Agent/dc_engines"
-if _DC_ENGINES_ROOT not in sys.path:
-    sys.path.insert(0, _DC_ENGINES_ROOT)
+_DC_AGENT_ROOT = Path(__file__).resolve().parents[3]
+if str(_DC_AGENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DC_AGENT_ROOT))
+_DC_ENGINES_ROOT = _DC_AGENT_ROOT / "dc_engines"
+if str(_DC_ENGINES_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DC_ENGINES_ROOT))
 
 
 def _load_llm_router_plugin_main():
@@ -71,10 +71,8 @@ def isolated_antigravity_health(tmp_path):
 
 def test_config_current_state_active() -> None:
     """当前配置只校验字段类型，具体开关由部署环境决定。"""
-    cfg_path = Path(_DC_AGENT_ROOT) / "data" / "config" / "dc_router_config.json"
-    assert cfg_path.exists(), "配置文件应该存在"
-    with cfg_path.open() as f:
-        data = json.load(f)
+    plugin_main = _load_llm_router_plugin_main()
+    data = plugin_main._read_dc_router_config()
     assert isinstance(data["enabled"], bool), "enabled 必须是 bool"
     assert isinstance(data["dry_run"], bool), "dry_run 必须是 bool"
     assert data["fallback_on_error"] is True, "默认 fallback_on_error=true"
@@ -130,7 +128,9 @@ def test_config_broken_json_safe_default() -> None:
 
 def test_default_cmd_config_contains_dc_router_providers() -> None:
     """默认配置必须包含 dc-router 正式接管会用到的 provider ID。"""
-    cfg_path = Path(_DC_AGENT_ROOT) / "data" / "cmd_config.json"
+    cfg_path = (
+        _DC_AGENT_ROOT / "tests" / "fixtures" / "configs" / "test_cmd_config.json"
+    )
     with cfg_path.open(encoding="utf-8-sig") as f:
         data = json.load(f)
 

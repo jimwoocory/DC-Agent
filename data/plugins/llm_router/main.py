@@ -304,7 +304,10 @@ class _DepartmentMemoryPromptDecision:
 # 默认状态由人手动改 JSON 控制；Claude 不会自动打开此开关（硬规则）。
 import os
 
-_DC_ROUTER_CONFIG_PATH = "/Users/dianchi/DC-Agent/data/config/dc_router_config.json"
+_DC_AGENT_ROOT = Path(__file__).resolve().parents[3]
+_DC_ROUTER_CONFIG_PATH = str(
+    _DC_AGENT_ROOT / "data" / "config" / "dc_router_config.json"
+)
 _DC_ROUTER_PLATFORM_IDS = {"巅池-Agent小助手", "巅池-技术（DevOps）", "巅池-技术"}
 
 

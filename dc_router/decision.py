@@ -12,8 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from router.provider_map import ProviderRoute
-from router.taxonomy import RouteAction, RouteDepth
+from dc_router.provider_map import ProviderRoute
+from dc_router.taxonomy import RouteAction, RouteDepth
 
 
 class RouterDecision(BaseModel):

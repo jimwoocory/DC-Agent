@@ -14,6 +14,13 @@ _STATE_PATH = Path(
         "/Users/dianchi/DC-Agent/data/antigravity_health.json",
     )
 )
+_HISTORY_PATH = Path(
+    os.environ.get(
+        "DC_ANTIGRAVITY_HEALTH_HISTORY_PATH",
+        "/Users/dianchi/DC-Agent/data/antigravity_health_events.jsonl",
+    )
+)
+_HISTORY_LIMIT = 200
 
 _TERMINAL_CODES = {
     "auth_required",
@@ -51,6 +58,50 @@ def _save_state(state: dict[str, Any]) -> None:
     except Exception:
         # Health state must never break the chat path.
         pass
+
+
+def _append_history_event(event_type: str, state: dict[str, Any]) -> None:
+    try:
+        _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        event = {
+            "ts": time.time(),
+            "event": event_type,
+            "status": state.get("status", ""),
+            "available": bool(state.get("available", False)),
+            "reason": state.get("reason", ""),
+            "error_code": state.get("last_error_code", ""),
+            "error": state.get("last_error", ""),
+            "consecutive_failures": int(state.get("consecutive_failures") or 0),
+            "remaining_seconds": int(state.get("remaining_seconds") or 0),
+        }
+        if event_type == "success":
+            event["elapsed_sec"] = round(
+                float(state.get("last_success_elapsed_sec") or 0.0), 3
+            )
+        with _HISTORY_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception:
+        # Observability must never break the chat path.
+        pass
+
+
+def _read_history(limit: int = _HISTORY_LIMIT) -> list[dict[str, Any]]:
+    try:
+        lines = _HISTORY_PATH.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    except Exception:
+        return []
+
+    events: list[dict[str, Any]] = []
+    for line in lines[-max(1, limit) :]:
+        try:
+            item = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+    return events
 
 
 def get_antigravity_health() -> dict[str, Any]:
@@ -92,6 +143,7 @@ def mark_antigravity_success(*, elapsed_sec: float = 0.0) -> dict[str, Any]:
         }
     )
     _save_state(state)
+    _append_history_event("success", state)
     return state
 
 
@@ -135,4 +187,33 @@ def mark_antigravity_failure(
         }
     )
     _save_state(state)
+    _append_history_event("failure", state)
     return state
+
+
+def record_antigravity_circuit_fallback(
+    *, reason: str | None = None, state: dict[str, Any] | None = None
+) -> None:
+    snapshot = dict(state or get_antigravity_health())
+    if reason:
+        snapshot["reason"] = reason
+    _append_history_event("circuit_fallback", snapshot)
+
+
+def summarize_antigravity_history(limit: int = _HISTORY_LIMIT) -> dict[str, Any]:
+    events = _read_history(limit=limit)
+    event_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    for event in events:
+        event_name = str(event.get("event") or "unknown")
+        reason = str(event.get("reason") or event.get("error_code") or "")
+        event_counts[event_name] = event_counts.get(event_name, 0) + 1
+        if reason:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    return {
+        "history_path": str(_HISTORY_PATH),
+        "event_count": len(events),
+        "event_counts": event_counts,
+        "reason_counts": reason_counts,
+        "recent_events": events[-10:],
+    }

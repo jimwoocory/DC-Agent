@@ -11,10 +11,10 @@ the new path is enabled.
 两套路由表完全独立, 输出共用 RouterDecision 契约。
 """
 
-from router.decision import RouterDecision
-from router.entrypoint import DCRouter, MessageEnvelope
-from router.ops_taxonomy import OpsIntent
-from router.taxonomy import AttachmentKind, RouteAction, RouteDepth, RouterIntent
+from dc_router.decision import RouterDecision
+from dc_router.entrypoint import DCRouter, MessageEnvelope
+from dc_router.ops_taxonomy import OpsIntent
+from dc_router.taxonomy import AttachmentKind, RouteAction, RouteDepth, RouterIntent
 
 __all__ = [
     "AttachmentKind",

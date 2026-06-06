@@ -7,6 +7,7 @@ from enum import Enum
 
 class RouterIntent(str, Enum):
     CASUAL = "casual"
+    WORK_PREFLIGHT = "work_preflight"
     OPS_WRITING = "ops_writing"
     MULTIMODAL = "multimodal"
     REALTIME = "realtime"

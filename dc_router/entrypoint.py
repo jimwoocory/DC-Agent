@@ -1,8 +1,8 @@
 """Single-entry router facade for the new DC path.
 
 按 envelope.metadata['platform_id'] 自动切 business / ops:
-- "巅池-技术（DevOps）" → ops 路由表 (router/ops_*.py)
-- 其他 platform_id  → business 路由表 (router/taxonomy.py 等)
+- "巅池-技术（DevOps）" → ops 路由表 (dc_router/ops_*.py)
+- 其他 platform_id  → business 路由表 (dc_router/taxonomy.py 等)
 参考 memory: project-dual-bot-router-architecture
 """
 
@@ -11,15 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from router.classifier import NoopRouterClassifier, RouterClassifier
-from router.content_sop import infer_content_sop_metadata
-from router.decision import RouterDecision
-from router.ops_provider_map import get_ops_provider_route
-from router.ops_rules import OpsRuleMatch, match_ops_keywords, match_ops_prefix
-from router.ops_taxonomy import OpsIntent
-from router.provider_map import get_provider_route
-from router.rules import RuleMatch, match_document_link, match_keywords, match_prefix
-from router.taxonomy import AttachmentKind, RouterIntent
+from dc_router.classifier import NoopRouterClassifier, RouterClassifier
+from dc_router.content_sop import infer_content_sop_metadata
+from dc_router.decision import RouterDecision
+from dc_router.ops_provider_map import get_ops_provider_route
+from dc_router.ops_rules import OpsRuleMatch, match_ops_keywords, match_ops_prefix
+from dc_router.ops_taxonomy import OpsIntent
+from dc_router.provider_map import get_provider_route
+from dc_router.rules import RuleMatch, match_document_link, match_keywords, match_prefix
+from dc_router.taxonomy import AttachmentKind, RouterIntent
 
 
 @dataclass(slots=True)
@@ -96,6 +96,12 @@ class DCRouter:
             RouterIntent.SIMPLE_CODE,
             RouterIntent.REALTIME,
         }:
+            return self._decision_for(
+                keyword_match,
+                metadata=self._metadata(envelope),
+            )
+
+        if keyword_match and keyword_match.intent == RouterIntent.OPS_WRITING:
             return self._decision_for(
                 keyword_match,
                 metadata=self._metadata(envelope),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from router.taxonomy import RouterIntent
+from dc_router.taxonomy import RouterIntent
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +19,8 @@ PREFIX_RULES: tuple[tuple[str, RouterIntent, str], ...] = (
     ("#深度", RouterIntent.DEEP_INSIGHT, "User forced a deep task."),
     ("#PRD", RouterIntent.DEEP_INSIGHT, "User forced a PRD or deep planning task."),
     ("#prd", RouterIntent.DEEP_INSIGHT, "User forced a PRD or deep planning task."),
+    ("#前置", RouterIntent.WORK_PREFLIGHT, "User forced work preflight routing."),
+    ("#轻文案", RouterIntent.WORK_PREFLIGHT, "User forced lightweight copy routing."),
     ("#洞察", RouterIntent.INSIGHT, "User forced insight routing."),
     ("#创意", RouterIntent.CREATIVE, "User forced creative routing."),
     ("#舆情", RouterIntent.PUBLIC_OPINION, "User forced public opinion routing."),
@@ -97,6 +99,26 @@ KEYWORD_RULES: tuple[tuple[RouterIntent, tuple[str, ...], str], ...] = (
             "脚本报错",
         ),
         "Matched simple code keywords.",
+    ),
+    (
+        RouterIntent.WORK_PREFLIGHT,
+        (
+            "帮我看看这个怎么处理",
+            "这个怎么处理",
+            "帮我想一下",
+            "帮我想想",
+            "我有个事情想问",
+            "我有个问题想问",
+            "先帮我理一下",
+            "先帮我梳理",
+            "帮我润色一句",
+            "按钮文案",
+            "页面文案",
+            "前端文案",
+            "短话术",
+            "轻文案",
+        ),
+        "Matched work preflight or lightweight copy keywords.",
     ),
     (
         RouterIntent.CREATIVE,

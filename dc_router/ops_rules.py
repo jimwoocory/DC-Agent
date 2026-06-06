@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from router.ops_taxonomy import OpsIntent
+from dc_router.ops_taxonomy import OpsIntent
 
 
 @dataclass(frozen=True, slots=True)

@@ -22,8 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-DC_ROOT = Path("/Users/dianchi/DC-Agent")
-HOME = Path("/Users/dianchi")
+DC_ROOT = Path(os.environ.get("DC_AGENT_ROOT", Path(__file__).resolve().parents[1]))
+HOME = Path(os.environ.get("HOME", str(Path.home())))
 UID = os.getuid()
 
 

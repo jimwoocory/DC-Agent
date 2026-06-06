@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,7 @@ from quart import request
 from .route import Response, Route, RouteContext
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+UTC = timezone.utc
 
 
 class MemoryGovernanceRoute(Route):

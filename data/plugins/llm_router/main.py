@@ -29,7 +29,7 @@ import re
 import time
 import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -48,6 +48,8 @@ from dc_engines.media_sop import (
     build_media_generation_record,
     build_structured_media_prompt,
 )
+
+UTC = timezone.utc
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult, filter

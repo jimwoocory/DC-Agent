@@ -70,7 +70,7 @@ uv run python -m harness.evaluator.kb_import_contract --contract harness/contrac
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/content_sop_system.json
 
 echo "==> Validating Feishu card system contract"
-scripts-tools/card-system-health.py
+uv run python scripts-tools/card-system-health.py
 
 echo "==> Running targeted harness tests"
 uv run pytest \

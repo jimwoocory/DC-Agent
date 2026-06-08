@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from dc_engines.feishu_card_streamer import build_quiz_result_card
+
+DC_ENGINES_PATH = Path(__file__).resolve().parents[1] / "dc_engines"
+if str(DC_ENGINES_PATH) not in sys.path:
+    sys.path.insert(0, str(DC_ENGINES_PATH))
+
+from dc_engines.feishu_card_streamer import build_quiz_result_card  # noqa: E402
 
 
 def _load_onboarding_module():
@@ -52,8 +58,24 @@ def _make_event(
         is_card_action=trusted_card_action,
     )
     event.set_result = MagicMock()
+    event.send = AsyncMock()
+    event.plain_result = MagicMock(side_effect=lambda text: SimpleNamespace(text=text))
     event.stop_event = MagicMock()
     return event
+
+
+class _EmployeeStore:
+    def __init__(self, employee: Any) -> None:
+        self.employee = employee
+        self.updated_preferences: dict[str, Any] | None = None
+
+    async def get_employee(self, open_id: str) -> Any:
+        return self.employee
+
+    async def update_profile(self, open_id: str, **updates: Any) -> None:
+        if "preferences" in updates:
+            self.employee.preferences = updates["preferences"]
+            self.updated_preferences = updates["preferences"]
 
 
 @pytest.mark.asyncio
@@ -133,3 +155,207 @@ def test_quiz_result_placeholder_invite_link_is_not_rendered() -> None:
     assert "群链接稍后开放" in card_text
     assert "或直接复制群链接" not in card_text
     assert "https://o0ain5w98jh.feishu.cn/q/" not in card_text
+
+
+@pytest.mark.asyncio
+async def test_auto_invite_failure_with_placeholder_link_keeps_onboarding_done() -> None:
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "auto_invite_to_chat": True,
+            "internal_test_chat_id": "oc_real_chat",
+        }
+    )
+    plugin._chat_creator = SimpleNamespace(
+        invite_members=AsyncMock(return_value=(0, [], "feishu_api_error"))
+    )
+
+    next_stage, note, err = await plugin._invite_after_pass("ou_test_user")
+
+    assert next_stage == "done"
+    assert err == "feishu_api_error"
+    assert "下方链接" not in note
+    assert "正常使用" in note
+
+
+@pytest.mark.asyncio
+async def test_quiz_result_with_auto_invite_failure_still_marks_done() -> None:
+    employee = SimpleNamespace(
+        display_name="测试同学",
+        preferences={
+            "_onboarding": {
+                "stage": "quiz_active",
+                "quiz_correct_count": 6,
+                "quiz_total": 6,
+            }
+        },
+    )
+    store = _EmployeeStore(employee)
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "auto_invite_to_chat": True,
+            "internal_test_chat_id": "oc_real_chat",
+        },
+        store=store,
+    )
+    plugin._chat_creator = SimpleNamespace(
+        invite_members=AsyncMock(return_value=(0, [], "feishu_api_error"))
+    )
+    plugin._send_card = AsyncMock(return_value="msg_result")
+
+    await plugin._show_quiz_result(_make_event("看结果"))
+
+    state = employee.preferences["_onboarding"]
+    assert state["stage"] == "done"
+    assert state["invite_error"] == "feishu_api_error"
+    assert await plugin._is_onboarded("ou_test_user") is True
+    card = plugin._send_card.call_args.args[1]
+    card_text = json.dumps(card, ensure_ascii=False)
+    assert "https://o0ain5w98jh.feishu.cn/q/" not in card_text
+    assert "下方链接" not in card_text
+
+
+@pytest.mark.asyncio
+async def test_valid_invite_link_result_card_failure_still_marks_done() -> None:
+    employee = SimpleNamespace(
+        display_name="测试同学",
+        preferences={
+            "_onboarding": {
+                "stage": "quiz_active",
+                "quiz_correct_count": 6,
+                "quiz_total": 6,
+            }
+        },
+    )
+    store = _EmployeeStore(employee)
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "invite_link": "https://example.feishu.cn/share/base/form/real",
+        },
+        store=store,
+    )
+    plugin._send_card = AsyncMock(return_value=None)
+
+    await plugin._show_quiz_result(_make_event("看结果"))
+
+    state = employee.preferences["_onboarding"]
+    assert state["stage"] == "done"
+    assert state["invite_error"] is None
+    assert "invite_message_id" not in state
+    assert await plugin._is_onboarded("ou_test_user") is True
+
+
+@pytest.mark.asyncio
+async def test_valid_invite_link_is_optional_after_done() -> None:
+    employee = SimpleNamespace(
+        display_name="测试同学",
+        preferences={
+            "_onboarding": {
+                "stage": "quiz_active",
+                "quiz_correct_count": 6,
+                "quiz_total": 6,
+            }
+        },
+    )
+    store = _EmployeeStore(employee)
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "invite_link": "https://example.feishu.cn/share/base/form/real",
+        },
+        store=store,
+    )
+    plugin._send_card = AsyncMock(return_value="msg_invite")
+
+    await plugin._show_quiz_result(_make_event("看结果"))
+
+    state = employee.preferences["_onboarding"]
+    assert state["stage"] == "done"
+    assert state["invite_link"] == "https://example.feishu.cn/share/base/form/real"
+    assert state["invite_message_id"] == "msg_invite"
+    assert state["invite_delivered_at"]
+    assert await plugin._is_onboarded("ou_test_user") is True
+
+
+@pytest.mark.asyncio
+async def test_auto_invite_success_marks_joined() -> None:
+    employee = SimpleNamespace(
+        display_name="测试同学",
+        preferences={
+            "_onboarding": {
+                "stage": "quiz_active",
+                "quiz_correct_count": 6,
+                "quiz_total": 6,
+            }
+        },
+    )
+    store = _EmployeeStore(employee)
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "auto_invite_to_chat": True,
+            "internal_test_chat_id": "oc_real_chat",
+        },
+        store=store,
+    )
+    plugin._chat_creator = SimpleNamespace(
+        invite_members=AsyncMock(return_value=(1, [], None))
+    )
+    plugin._send_card = AsyncMock(return_value=None)
+
+    await plugin._show_quiz_result(_make_event("看结果"))
+
+    state = employee.preferences["_onboarding"]
+    assert state["stage"] == "joined"
+    assert await plugin._is_onboarded("ou_test_user") is True
+
+
+@pytest.mark.asyncio
+async def test_auto_invite_invalid_member_still_marks_done() -> None:
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "auto_invite_to_chat": True,
+            "internal_test_chat_id": "oc_real_chat",
+            "invite_link": "https://example.feishu.cn/share/base/form/real",
+        }
+    )
+    plugin._chat_creator = SimpleNamespace(
+        invite_members=AsyncMock(return_value=(0, ["ou_test_user"], None))
+    )
+
+    next_stage, note, err = await plugin._invite_after_pass("ou_test_user")
+
+    assert next_stage == "done"
+    assert err == "invalid_or_already_member"
+    assert "下方链接" not in note
+    assert "正常使用" in note
+
+
+@pytest.mark.asyncio
+async def test_legacy_invite_pending_allows_private_messages() -> None:
+    employee = SimpleNamespace(
+        display_name="测试同学",
+        preferences={"_onboarding": {"stage": "invite_pending"}},
+    )
+    store = _EmployeeStore(employee)
+    plugin = _make_plugin(
+        {"enabled": True, "maintenance_mode": False},
+        store=store,
+    )
+    plugin._start_onboarding = AsyncMock()
+    event = _make_event("我可以开始用了吗")
+
+    await plugin.on_lark_private(event)
+
+    plugin._start_onboarding.assert_not_called()
+    event.stop_event.assert_not_called()
+    event.send.assert_not_called()

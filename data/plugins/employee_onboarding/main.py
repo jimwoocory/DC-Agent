@@ -54,8 +54,20 @@ from astrbot.api.star import Context, Star, register
 
 # 只在 lark 私聊触发 onboarding（群里员工不该被引导）
 LARK_PLATFORMS = {"巅池-Agent小助手"}  # 内测主要走小助手
-COMPLETED_STAGES = {"done", "passed", "invited", "joined"}
+COMPLETED_STAGES = {"done", "joined"}
+INVITE_HOLD_STAGES = {"passed", "invited", "invite_pending", "invite_blocked"}
 ONBOARDING_PREF_KEY = "_onboarding"
+INVITE_STATUS_QUERY_KEYWORDS = (
+    "进群",
+    "入群",
+    "内测群",
+    "群入口",
+    "入口",
+    "邀请",
+    "群链接",
+    "群聊",
+    "加群",
+)
 
 # onboarding 自家发出的卡片按钮 action 白名单。
 # 其它 plugin（如 feishu_pet_assistant）的卡片回调不应被这里 stop_event。
@@ -218,13 +230,47 @@ class EmployeeOnboardingPlugin(Star):
             or getattr(msg, "is_card_action", False) is True
         )
 
-    def _valid_invite_link(self) -> str:
-        link = self.invite_link.strip()
+    @staticmethod
+    def _valid_invite_link_value(value: Any) -> str:
+        link = str(value or "").strip()
         if not link:
             return ""
         if "…" in link or "..." in link or "（待补" in link or "(待补" in link:
             return ""
         return link
+
+    def _valid_invite_link(self) -> str:
+        return self._valid_invite_link_value(self.invite_link)
+
+    def _is_completed_state(self, state: dict[str, Any]) -> bool:
+        stage = str(state.get("stage") or "").strip()
+        return stage in COMPLETED_STAGES
+
+    @staticmethod
+    def _is_invite_hold_stage(stage: str) -> bool:
+        return stage in INVITE_HOLD_STAGES
+
+    def _invite_hold_message(self, state: dict[str, Any]) -> str:
+        stage = str(state.get("stage") or "").strip()
+        if stage == "invite_blocked":
+            return "你已通过入职测试，但飞书没有确认入群成功。请联系管理员处理后再使用业务功能。"
+        if stage == "invited":
+            return "你的入群入口交付记录不完整，请联系管理员重新发送真实入口。"
+        return "你已通过入职测试，但内测群入口还未准备好或未成功发送。请联系管理员邀请进群。"
+
+    @staticmethod
+    def _is_invite_status_query(text: str) -> bool:
+        normalized = (text or "").strip()
+        if not normalized:
+            return False
+        return any(keyword in normalized for keyword in INVITE_STATUS_QUERY_KEYWORDS)
+
+    async def _reply_invite_hold(
+        self,
+        event: AstrMessageEvent,
+        state: dict[str, Any],
+    ) -> None:
+        await event.send(event.plain_result(self._invite_hold_message(state)))
 
     def _is_lark(self, event: AstrMessageEvent) -> bool:
         platform_id = event.get_platform_id() or ""
@@ -313,7 +359,7 @@ class EmployeeOnboardingPlugin(Star):
 
     async def _is_onboarded(self, open_id: str) -> bool:
         state = await self._get_onboarding_state(open_id)
-        return state.get("stage") in COMPLETED_STAGES
+        return self._is_completed_state(state)
 
     def _state_for(self, emp: Employee) -> dict[str, Any]:
         prefs = emp.preferences or {}
@@ -430,7 +476,7 @@ class EmployeeOnboardingPlugin(Star):
             return False
         state = self._state_for(emp)
         stage = str(state.get("stage") or "").strip()
-        if stage in COMPLETED_STAGES:
+        if self._is_completed_state(state) or self._is_invite_hold_stage(stage):
             return False
         if state.get("paused") or stage == "do_not_contact":
             return False
@@ -552,9 +598,14 @@ class EmployeeOnboardingPlugin(Star):
         if text == "__bot_p2p_chat_entered__":
             state = await self._get_onboarding_state(open_id)
             stage = str(state.get("stage") or "").strip()
-            if stage not in COMPLETED_STAGES:
-                await self._start_onboarding(event)
+            if self._is_completed_state(state):
+                return
+            if self._is_invite_hold_stage(stage):
+                await self._reply_invite_hold(event, state)
                 event.stop_event()
+                return
+            await self._start_onboarding(event)
+            event.stop_event()
             return
 
         # 1) 卡片按钮回调
@@ -608,11 +659,18 @@ class EmployeeOnboardingPlugin(Star):
             return
 
         # 已 onboarded → 放行（其他插件正常处理）
-        if stage in COMPLETED_STAGES:
+        if self._is_completed_state(state):
+            return
+        if self._is_invite_hold_stage(str(stage or "").strip()):
+            if self._is_invite_status_query(text):
+                await self._reply_invite_hold(event, state)
+                event.stop_event()
             return
 
         # ─── 没有任何 onboarding 状态 → 启动新流程 ───
-        needs_onboarding = emp is None or not state or stage not in COMPLETED_STAGES
+        needs_onboarding = (
+            emp is None or not state or not self._is_completed_state(state)
+        )
         if needs_onboarding:
             await self._start_onboarding(event)
             event.stop_event()
@@ -739,10 +797,13 @@ class EmployeeOnboardingPlugin(Star):
         emp, _ = await store.get_or_create(open_id, platform_id=platform_id)
         state = self._state_for(emp)
         stage = str(state.get("stage") or "").strip()
-        if stage in COMPLETED_STAGES:
+        if self._is_completed_state(state):
             await event.send(
                 event.plain_result("你已经完成入职培训和答题，可以正常使用小助手功能。")
             )
+            return
+        if self._is_invite_hold_stage(stage):
+            await self._reply_invite_hold(event, state)
             return
 
         message_id = await self._send_entry_card_to_event(
@@ -1191,47 +1252,80 @@ class EmployeeOnboardingPlugin(Star):
         display_name = (emp.display_name if emp else "同学") or "同学"
         missed_lessons = list(state.get("missed_lessons") or [])
         invite_note = ""
+        invite_error: str | None = None
+        next_stage = "quiz_failed"
+        invite_link_to_send: str | None = None
 
         if passed:
             next_stage, invite_note, invite_error = await self._invite_after_pass(
                 open_id
             )
-            await self._set_onboarding_state(
-                open_id,
-                stage=next_stage,
-                passed_at=self._now_iso(),
-                invite_note=invite_note,
-                invite_error=invite_error,
+            if next_stage != "joined":
+                invite_link_to_send = self._valid_invite_link()
+
+        card = build_quiz_result_card(
+            display_name=display_name,
+            correct_count=correct_count,
+            total=total,
+            invite_link=invite_link_to_send,
+            invite_note=invite_note,
+            missed_lesson_ids=missed_lessons if not passed else None,
+        )
+        message_id: str | None = None
+        send_error: str | None = None
+        try:
+            message_id = await self._send_card(
+                event,
+                card,
+                card_type="training_quiz",
+                detail="employee onboarding quiz result",
             )
+        except Exception as exc:  # noqa: BLE001
+            send_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("[onboarding] 测试结果卡发送失败：%s", exc)
+
+        if passed:
+            now = self._now_iso()
+            final_stage = next_stage
+            final_note = invite_note
+            final_error = invite_error
+            updates: dict[str, Any] = {
+                "stage": final_stage,
+                "passed_at": now,
+                "invite_note": final_note,
+                "invite_error": final_error,
+            }
+            if message_id:
+                updates["result_message_id"] = message_id
+            elif send_error:
+                updates["result_card_error"] = send_error
+
+            if message_id and invite_link_to_send:
+                updates["invite_link"] = invite_link_to_send
+                updates["invite_message_id"] = message_id
+                updates["invite_delivered_at"] = now
+
+            await self._set_onboarding_state(open_id, **updates)
             logger.info(
                 "[onboarding] 员工 %s 测试通过 %s/%s stage=%s",
                 display_name,
                 correct_count,
                 total,
-                next_stage,
+                final_stage,
             )
         else:
-            await self._set_onboarding_state(
-                open_id,
-                stage="quiz_failed",
-                failed_at=self._now_iso(),
-            )
-
-        await self._send_card(
-            event,
-            build_quiz_result_card(
-                display_name=display_name,
-                correct_count=correct_count,
-                total=total,
-                invite_link=self._valid_invite_link() if passed else None,
-                invite_note=invite_note,
-                missed_lesson_ids=missed_lessons if not passed else None,
-            ),
-            card_type="training_quiz",
-            detail="employee onboarding quiz result",
-        )
+            updates = {
+                "stage": "quiz_failed",
+                "failed_at": self._now_iso(),
+            }
+            if message_id:
+                updates["result_message_id"] = message_id
+            elif send_error:
+                updates["result_card_error"] = send_error
+            await self._set_onboarding_state(open_id, **updates)
 
     async def _invite_after_pass(self, open_id: str) -> tuple[str, str, str | None]:
+        valid_invite_link = self._valid_invite_link()
         if self.auto_invite_to_chat and self.internal_test_chat_id:
             creator = self._chat_creator or ChatCreator()
             ok, invalid, err = await creator.invite_members(
@@ -1239,21 +1333,20 @@ class EmployeeOnboardingPlugin(Star):
                 [open_id],
             )
             if err:
-                note = "已通过测试，但自动拉群失败。请用下方链接进群，或等管理员处理。"
-                return "invited" if self.invite_link else "passed", note, err
+                if valid_invite_link:
+                    note = (
+                        "已通过测试，可以正常使用小助手。自动拉群失败；如需进内测群，可用下方链接或等管理员处理。"
+                    )
+                    return "done", note, err
+                note = "已通过测试，可以正常使用小助手。内测群入口后续由管理员单独处理。"
+                return "done", note, err
             if ok > 0 and open_id not in invalid:
                 return "joined", "已通过测试，我已经自动把你拉进内测群。", None
-            note = (
-                "已通过测试，但飞书返回未成功入群。请用下方链接进群，或等管理员处理。"
-            )
-            return (
-                "invited" if self._valid_invite_link() else "passed",
-                note,
-                "invalid_or_already_member",
-            )
-        if self._valid_invite_link():
-            return "invited", "已通过测试，请点击下方入口加入内测群。", None
-        return "passed", "已通过测试，请联系管理员邀请进群。", None
+            note = "已通过测试，可以正常使用小助手。飞书返回未成功入群，内测群后续由管理员单独处理。"
+            return "done", note, "invalid_or_already_member"
+        if valid_invite_link:
+            return "done", "已通过测试，可以正常使用小助手。如需进内测群，可点击下方入口。", None
+        return "done", "已通过测试，可以正常使用小助手。", None
 
     # ─────────────────── Admin command ───────────────────
 

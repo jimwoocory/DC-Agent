@@ -95,6 +95,16 @@ const MainRoutes = {
       component: () => import('@/views/MemoryGovernancePage.vue')
     },
     {
+      name: 'ContentSopOps',
+      path: '/content-sop-ops',
+      component: () => import('@/views/ContentSopOpsPage.vue')
+    },
+    {
+      name: 'EmployeeInsight',
+      path: '/employee-insight',
+      component: () => import('@/views/EmployeeInsightPage.vue')
+    },
+    {
       name: 'CronJobs',
       path: '/cron',
       component: () => import('@/views/CronJobPage.vue')

@@ -1,0 +1,138 @@
+{
+  "contract_id": "employee_insight_loop",
+  "feature": "employee_insight_loop",
+  "goal": "Use Lark private-message task coaching to learn employee onboarding friction, distill governed insight candidates, route them through Obsidian review, and expose management dashboard metrics without allowing unapproved feedback to modify runtime behavior.",
+  "depends_on": [
+    "ai_inbox_lark_entry",
+    "lark_chat_memory_watermarks",
+    "assistant_distillation_loop",
+    "obsidian_memory_governance",
+    "obsidian_governance_activation",
+    "department_memory_proactive_prompting",
+    "harness_lifecycle_state_machine",
+    "hermes_deep_runtime_registry"
+  ],
+  "runtime_surfaces": {
+    "employee_channel": "lark_dm",
+    "management_surface": "dashboard",
+    "governance_surface": "ObsidianVault/40_MemoryGovernance/EmployeeInsight",
+    "execution_surfaces": [
+      "AstrBot",
+      "router",
+      "template_library",
+      "Hermes",
+      "knowledge_base_candidates"
+    ]
+  },
+  "state_machines": {
+    "outreach": [
+      "pending",
+      "sent",
+      "opened",
+      "engaged",
+      "completed",
+      "skipped",
+      "muted",
+      "failed",
+      "blocked"
+    ],
+    "task": [
+      "created",
+      "collecting_inputs",
+      "running",
+      "result_delivered",
+      "completed",
+      "blocked",
+      "abandoned"
+    ],
+    "governance": [
+      "review_required",
+      "approved",
+      "rejected",
+      "merged",
+      "stale",
+      "sensitive_blocked",
+      "released",
+      "validated"
+    ]
+  },
+  "acceptance_criteria": [
+    {
+      "id": "eil-000",
+      "description": "The employee insight loop contract remains valid, has unique acceptance criteria, documents runtime surfaces, and records closed-loop safety boundaries.",
+      "verification": "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q"
+    },
+    {
+      "id": "eil-001",
+      "description": "Lark private messages can create employee insight sessions with lark_dm channel, employee identity, department, scenario, and outreach_frequency_limit metadata.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-002",
+      "description": "Each outreach session supports opt_out, pause, skip, failed, engaged, blocked, and completed states, and illegal state transitions are rejected.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-003",
+      "description": "Employee coaching stores structured employee_insight_events instead of treating raw chat text as the only data model.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-004",
+      "description": "Harness distillation creates review_required insight candidates for needs, templates, skills, router improvements, knowledge gaps, onboarding fixes, and Hermes deep dives.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-005",
+      "description": "Unapproved candidates are approved-only blocked and must not modify router, must not auto-publish skill, must not write production knowledge, and must not change AstrBot runtime prompts.",
+      "verification": "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q"
+    },
+    {
+      "id": "eil-006",
+      "description": "Candidate notes export to Obsidian with stable insight_id, review_status mapped to need_review, candidate_type, source evidence, sensitivity, and governance_version.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-007",
+      "description": "Dashboard snapshots expose outreach, effective conversations, completed sessions, blocked sessions, top scenarios, friction points, pending approvals, and released improvements.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-008",
+      "description": "Repeated multi-employee or cross-department candidates can create Hermes deep-dive task payloads, but Hermes output must return to harness and Obsidian review before runtime changes.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-009",
+      "description": "Every session, candidate, governance export, approval, release, rollback, and validation transition writes append-only audit events.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-010",
+      "description": "The employee-facing first version excludes employee WebUI, employee task center, mass all-company outreach, and unreviewed self-learning release.",
+      "verification": "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "employee_channel": "lark_dm",
+    "outreach_frequency_limit": "At most one proactive private-message outreach per active pilot employee per day; reduce to every three days after two unanswered outreaches.",
+    "opt_out": "Employees can reply pause, later, stop, or exit equivalents to pause or exit pilot outreach.",
+    "save_policy": "Structured events and short summaries may be stored; full chat archives follow lark_chat_memory_watermarks and are not default LLM prompt context.",
+    "governance_policy": "All distillation outputs default to review_required and are blocked from runtime mutation until approved in Obsidian.",
+    "release_policy": "Approved runtime patches start with pilot rollout scope and append-only audit. Router and skill changes require tests before release."
+  },
+  "non_goals": [
+    "Do not build an employee WebUI or employee task center in the first version.",
+    "Do not implement all-company proactive outreach before pilot metrics and opt-out handling are proven.",
+    "Do not let unreviewed employee feedback change production router rules.",
+    "Do not auto-publish skill from employee feedback or Hermes output.",
+    "Do not write production knowledge base entries before Obsidian governance approval.",
+    "Do not bypass approved-only memory governance.",
+    "Do not send full employee chat archives to an LLM prompt by default."
+  ],
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q",
+    "engine": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q",
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

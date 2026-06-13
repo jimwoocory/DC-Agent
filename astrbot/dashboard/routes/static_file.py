@@ -24,6 +24,9 @@ class StaticFileRoute(Route):
             "/about",
             "/extension-marketplace",
             "/conversation",
+            "/memory-governance",
+            "/content-sop-ops",
+            "/employee-insight",
             "/tool-use",
         ]
         for i in index_:

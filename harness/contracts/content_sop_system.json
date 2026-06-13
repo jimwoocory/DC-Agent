@@ -36,6 +36,16 @@
             "id": "content-sop-system-007",
             "description": "Ready content SOP tasks dispatch to Hermes while needs-materials tasks stay in material intake.",
             "verification": "uv run pytest tests/test_department_workflow_plugin_content_sop.py -q"
+        },
+        {
+            "id": "content-sop-system-008",
+            "description": "Content SOP operations dashboard reports runtime override status from real config files and never treats missing runtime config as active or available.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_ops_dashboard_summarizes_full_content_sop_chain dc_engines/tests/test_content_sop_ops.py::test_ops_dashboard_reports_active_runtime_overrides_only_from_real_config dc_engines/tests/test_content_sop_ops.py::test_ops_dashboard_reports_empty_runtime_config_without_active_status dc_engines/tests/test_content_sop_ops.py::test_ops_reminders_warn_when_runtime_overrides_are_missing dc_engines/tests/test_content_sop_ops.py::test_production_config_confirmation_requires_real_runtime_artifacts -q"
+        },
+        {
+            "id": "content-sop-system-009",
+            "description": "Content SOP operations route surfaces missing runtime override config as missing instead of a successful runtime state.",
+            "verification": "uv run pytest tests/test_content_sop_ops_route.py::test_content_sop_ops_dashboard_route_reads_runtime_store tests/test_content_sop_ops_route.py::test_content_sop_ops_frontend_does_not_default_runtime_to_ok -q"
         }
     ],
     "verification": {"targeted": "scripts/agent-check.sh --profile targeted"}

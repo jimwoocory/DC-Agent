@@ -4,6 +4,7 @@ from .content_context import (
     assemble_content_sop_source_context,
     strip_internal_memory_context,
 )
+from .content_rule_proposals import ContentSopRuleProposalStore
 from .contracts import (
     DepartmentWorkflow,
     DepartmentWorkflowMatch,
@@ -51,6 +52,7 @@ __all__ = [
     "DepartmentWorkflow",
     "DepartmentWorkflowMatch",
     "DepartmentWorkflowRegistry",
+    "ContentSopRuleProposalStore",
     "MaterialIntakeAssessment",
     "MaterialStatus",
     "OutputSpec",

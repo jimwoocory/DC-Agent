@@ -1,0 +1,23 @@
+{
+  "admin_reviewers": {
+    "description": "Allowed reviewer open_id list for content SOP rule proposals.",
+    "hint": "Only these users can list, approve, apply, or roll back content SOP runtime rules.",
+    "type": "list",
+    "default": []
+  },
+  "max_cards_per_request": {
+    "description": "Maximum pending proposal cards sent for one list command.",
+    "type": "int",
+    "default": 5
+  },
+  "db_path": {
+    "description": "Optional SQLite path for content SOP rule proposals.",
+    "type": "string",
+    "default": ""
+  },
+  "rule_overrides_path": {
+    "description": "Optional JSON path for content SOP runtime rule overrides.",
+    "type": "string",
+    "default": ""
+  }
+}

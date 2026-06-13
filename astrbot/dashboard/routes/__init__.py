@@ -5,8 +5,10 @@ from .chat import ChatRoute
 from .chatui_project import ChatUIProjectRoute
 from .command import CommandRoute
 from .config import ConfigRoute
+from .content_sop_ops import ContentSopOpsRoute
 from .conversation import ConversationRoute
 from .cron import CronRoute
+from .employee_insight import EmployeeInsightRoute
 from .file import FileRoute
 from .knowledge_base import KnowledgeBaseRoute
 from .log import LogRoute
@@ -31,8 +33,10 @@ __all__ = [
     "ChatUIProjectRoute",
     "CommandRoute",
     "ConfigRoute",
+    "ContentSopOpsRoute",
     "ConversationRoute",
     "CronRoute",
+    "EmployeeInsightRoute",
     "FileRoute",
     "KnowledgeBaseRoute",
     "LogRoute",

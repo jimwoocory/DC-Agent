@@ -122,6 +122,16 @@ const sidebarItem: menu[] = [
         to: '/memory-governance'
       },
       {
+        title: 'core.navigation.contentSopOps',
+        icon: 'mdi-clipboard-pulse-outline',
+        to: '/content-sop-ops'
+      },
+      {
+        title: 'core.navigation.employeeInsight',
+        icon: 'mdi-account-search-outline',
+        to: '/employee-insight'
+      },
+      {
         title: 'core.navigation.dashboard',
         icon: 'mdi-view-dashboard',
         to: '/dashboard/default'

@@ -1,0 +1,17 @@
+{
+  "enabled": {
+    "description": "是否启用员工需求洞察闭环插件",
+    "type": "bool",
+    "default": true
+  },
+  "pilot_only": {
+    "description": "是否仅面向试点员工；第一期建议保持开启",
+    "type": "bool",
+    "default": true
+  },
+  "daily_outreach_limit": {
+    "description": "每名员工每日最多主动触达次数",
+    "type": "int",
+    "default": 1
+  }
+}

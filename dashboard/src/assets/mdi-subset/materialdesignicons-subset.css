@@ -1,4 +1,4 @@
-/* Auto-generated MDI subset – 269 icons */
+/* Auto-generated MDI subset – 275 icons */
 /* Do not edit manually. Run: pnpm run subset-icons */
 
 @font-face {
@@ -38,6 +38,10 @@
 
 .mdi-account-heart::before {
   content: "\F0899";
+}
+
+.mdi-account-search-outline::before {
+  content: "\F0935";
 }
 
 .mdi-account-voice::before {
@@ -230,6 +234,14 @@
 
 .mdi-circle-small::before {
   content: "\F09DF";
+}
+
+.mdi-clipboard-clock-outline::before {
+  content: "\F16E3";
+}
+
+.mdi-clipboard-pulse-outline::before {
+  content: "\F085E";
 }
 
 .mdi-clock-outline::before {
@@ -450,6 +462,10 @@
 
 .mdi-file-excel-box::before {
   content: "\F021C";
+}
+
+.mdi-file-export-outline::before {
+  content: "\F102E";
 }
 
 .mdi-file-music-outline::before {
@@ -722,6 +738,10 @@
 
 .mdi-message-text::before {
   content: "\F0369";
+}
+
+.mdi-message-text-clock-outline::before {
+  content: "\F1174";
 }
 
 .mdi-microphone::before {
@@ -1022,6 +1042,10 @@
 
 .mdi-timer-outline::before {
   content: "\F051B";
+}
+
+.mdi-toggle-switch-outline::before {
+  content: "\F0A1A";
 }
 
 .mdi-tools::before {

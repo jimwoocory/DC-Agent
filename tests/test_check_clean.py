@@ -64,6 +64,7 @@ def test_reviewed_live_configs_are_allowed_when_staged() -> None:
         violation_for("data/config/system_entries_config.json", source="staged")
         is None
     )
+    assert violation_for("data/config/knowledge_cycle.env", source="staged") is None
     assert (
         violation_for("data/config/system_entries_config.json", source="status") is None
     )

@@ -1,0 +1,47 @@
+{
+  "feature": "obsidian_governance_activation",
+  "goal": "Keep the Obsidian memory governance loop (export -> human review -> import -> promote) running on the watchdog schedule, feed harness task outcomes into it, and pull stale approved memories back to review when their NAS source content drifts.",
+  "acceptance_criteria": [
+    {
+      "id": "oga-001",
+      "description": "Harness task_outcome memories export to Obsidian governance Inbox as need_review candidates with stable memory ids, harness source provenance, and domain ownership.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_task_outcome_export.py::test_export_writes_need_review_note_for_task_outcome -q"
+    },
+    {
+      "id": "oga-002",
+      "description": "Task outcome export is idempotent per task_id and never overwrites an existing review decision.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_task_outcome_export.py::test_export_is_idempotent_and_preserves_review_decisions -q"
+    },
+    {
+      "id": "oga-003",
+      "description": "An approved NAS-backed memory whose source sha256 has drifted is marked stale, its governance note is rewritten for re-review, and an append-only marked_stale audit record is written.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_staleness.py::test_changed_source_hash_marks_memory_stale_and_rewrites_note -q"
+    },
+    {
+      "id": "oga-004",
+      "description": "Memories whose NAS source disappeared from the index are reported as missing_source but never auto-marked stale, and non-NAS sources are skipped by the stale scan.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_staleness.py::test_missing_source_is_reported_not_marked dc_engines/tests/test_obsidian_memory_staleness.py::test_non_nas_sources_are_skipped -q"
+    },
+    {
+      "id": "oga-005",
+      "description": "The knowledge_cycle scheduler exposes export, export_tasks, stale_scan, import, and promote governance steps, with declarative switches loaded from data/config/knowledge_cycle.env before STEP_CONFIG is frozen.",
+      "verification": "uv run pytest tests/harness/test_obsidian_governance_activation_contract.py::test_knowledge_cycle_wires_governance_steps -q"
+    }
+  ],
+  "non_goals": [
+    "Do not auto-approve any exported candidate; human review in Obsidian stays mandatory.",
+    "Do not auto-delete or auto-forget stale memories; stale only re-enters the review queue.",
+    "Do not mark memories stale when the NAS source merely disappeared from the index.",
+    "Do not bypass the existing import/promote chain with a second write path into governed_memory.db."
+  ],
+  "activation": {
+    "switch_file": "data/config/knowledge_cycle.env",
+    "scheduler": "scripts-watchdog/knowledge_cycle.py ticked every minute by scripts-watchdog/dc-watchdog.sh (cron)",
+    "activated_at": "2026-06-13"
+  },
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_obsidian_governance_activation_contract.py -q",
+    "engines": "uv run pytest dc_engines/tests/test_obsidian_memory_staleness.py dc_engines/tests/test_obsidian_task_outcome_export.py -q",
+    "live_status": "uv run python scripts-tools/obsidian_memory_governance.py status"
+  }
+}

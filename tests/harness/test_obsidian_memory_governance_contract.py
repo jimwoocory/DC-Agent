@@ -11,9 +11,7 @@ CONTRACT = Path("harness/contracts/obsidian_memory_governance.json")
 
 def _criteria_by_id() -> dict[str, dict]:
     contract = load_contract(CONTRACT)
-    return {
-        criterion["id"]: criterion for criterion in contract["acceptance_criteria"]
-    }
+    return {criterion["id"]: criterion for criterion in contract["acceptance_criteria"]}
 
 
 def test_obsidian_memory_governance_contract_is_valid() -> None:
@@ -53,9 +51,10 @@ def test_contract_requires_observable_full_stack_boundaries() -> None:
         == "ObsidianVault/40_MemoryGovernance"
     )
     assert architecture["governed_state_store"] == "data/governed_memory.db"
-    assert "data/plugins/llm_router/dc_memory_context.py" in architecture[
-        "production_recall"
-    ]
+    assert (
+        "data/plugins/dc_router/memory_injection.py"
+        in architecture["production_recall"]
+    )
     assert "append-only audit log" in architecture["promotion_outputs"]
 
 
@@ -69,7 +68,7 @@ def test_contract_preserves_existing_memory_assets() -> None:
         "ObsidianVault/10_Index",
         "ObsidianVault/20_Bridges",
         "dc_engines/dc_engines/obsidian_review.py",
-        "data/plugins/llm_router/dc_memory_context.py",
+        "data/plugins/dc_router/memory_injection.py",
         "data/config/nas_memory_overrides.json",
         "harness/contracts/local_knowledge_base_phase2_rawrefs.json",
     }

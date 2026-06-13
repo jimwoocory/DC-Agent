@@ -44,6 +44,7 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 REVIEWED_LIVE_CONFIGS = {
+    "data/config/knowledge_cycle.env",
     "data/config/openclaw_on_demand_config.json",
     "data/config/system_entries_config.json",
 }

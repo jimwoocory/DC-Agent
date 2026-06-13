@@ -31,9 +31,39 @@ STATE_PATH = WD_ROOT / "knowledge_cycle_state.json"
 STATE_LOCK_PATH = WD_ROOT / "knowledge_cycle_state.lock"
 LOG_PATH = WD_ROOT / "knowledge_cycle.log"
 ENV_PATH = Path.home() / ".dc-agent.env"
+STEP_ENV_PATH = DC_ROOT / "data" / "config" / "knowledge_cycle.env"
 
 VENV_PYTHON = DC_ROOT / ".venv" / "bin" / "python"
 PYTHON = VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable)
+
+
+def _bootstrap_step_env() -> None:
+    """在 STEP_CONFIG 固化前加载声明式开关。
+
+    cron 调用时没有交互 shell 环境，KNOWLEDGE_* 开关必须有一个可热编辑的
+    单一来源（data/config/knowledge_cycle.env）。真实环境变量优先
+    （setdefault 不覆盖），便于临时用 env 压制。~/.dc-agent.env 仍只作为
+    子进程 secrets（见 load_dotenv_env），不在这里读。
+    """
+    if not STEP_ENV_PATH.exists():
+        return
+    try:
+        for raw_line in STEP_ENV_PATH.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                os.environ.setdefault(key, value)
+    except OSError:
+        pass
+
+
+_bootstrap_step_env()
 
 STEP_CONFIG: dict[str, dict[str, Any]] = {
     "mount": {
@@ -70,6 +100,35 @@ STEP_CONFIG: dict[str, dict[str, Any]] = {
         "max_runtime_sec": 900,
         "enabled": os.getenv("KNOWLEDGE_ENABLE_OBSIDIAN_GOVERNANCE_EXPORT", "0") == "1",
         "limit": int(os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_LIMIT", "50")),
+    },
+    "obsidian_governance_export_tasks": {
+        "interval_sec": int(
+            os.getenv(
+                "KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS_INTERVAL_SEC", "3600"
+            )
+        ),
+        "timeout_sec": int(
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS_TIMEOUT_SEC", "300")
+        ),
+        "max_runtime_sec": 900,
+        "enabled": os.getenv("KNOWLEDGE_ENABLE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS", "0")
+        == "1",
+        "limit": int(
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS_LIMIT", "20")
+        ),
+    },
+    "obsidian_governance_stale_scan": {
+        "interval_sec": int(
+            os.getenv(
+                "KNOWLEDGE_OBSIDIAN_GOVERNANCE_STALE_SCAN_INTERVAL_SEC", "21600"
+            )
+        ),
+        "timeout_sec": int(
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_STALE_SCAN_TIMEOUT_SEC", "300")
+        ),
+        "max_runtime_sec": 900,
+        "enabled": os.getenv("KNOWLEDGE_ENABLE_OBSIDIAN_GOVERNANCE_STALE_SCAN", "0")
+        == "1",
     },
     "obsidian_governance_import": {
         "interval_sec": int(
@@ -276,6 +335,8 @@ def status_snapshot() -> dict[str, Any]:
                 "dc_memory",
                 "obsidian_refs",
                 "obsidian_governance_export",
+                "obsidian_governance_export_tasks",
+                "obsidian_governance_stale_scan",
                 "obsidian_governance_import",
                 "obsidian_governance_promote",
                 "mount",
@@ -432,6 +493,26 @@ def command_for_step(step: str) -> list[str] | None:
             "export",
             "--limit",
             str(STEP_CONFIG["obsidian_governance_export"]["limit"]),
+        ]
+    if step == "obsidian_governance_export_tasks":
+        if not STEP_CONFIG["obsidian_governance_export_tasks"]["enabled"]:
+            return None
+        return [
+            str(PYTHON),
+            str(DC_ROOT / "scripts-tools" / "obsidian_memory_governance.py"),
+            "export-tasks",
+            "--limit",
+            str(STEP_CONFIG["obsidian_governance_export_tasks"]["limit"]),
+        ]
+    if step == "obsidian_governance_stale_scan":
+        if not STEP_CONFIG["obsidian_governance_stale_scan"]["enabled"]:
+            return None
+        return [
+            str(PYTHON),
+            str(DC_ROOT / "scripts-tools" / "obsidian_memory_governance.py"),
+            "stale-scan",
+            "--actor",
+            "knowledge_cycle",
         ]
     if step == "obsidian_governance_import":
         if not STEP_CONFIG["obsidian_governance_import"]["enabled"]:
@@ -633,6 +714,8 @@ def tick() -> int:
 
     for step in (
         "obsidian_governance_export",
+        "obsidian_governance_export_tasks",
+        "obsidian_governance_stale_scan",
         "obsidian_governance_import",
         "obsidian_governance_promote",
     ):

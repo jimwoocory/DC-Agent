@@ -21,8 +21,10 @@ class ImportResult:
     imported_count: int = 0
     decision_count: int = 0
     audit_count: int = 0
+    rule_proposal_count: int = 0
     memory_ids: list[str] = field(default_factory=list)
     note_paths: list[Path] = field(default_factory=list)
+    rule_proposal_ids: list[str] = field(default_factory=list)
 
 
 def import_governance_notes(
@@ -31,6 +33,8 @@ def import_governance_notes(
     store: MemoryGovernanceStore,
     now: str,
     actor: str = "obsidian-governance-import",
+    rule_proposal_store: Any | None = None,
+    rule_proposal_min_support: int = 3,
 ) -> ImportResult:
     """Import all governance notes from an Obsidian vault."""
 
@@ -85,6 +89,20 @@ def import_governance_notes(
             )
             store.record_decision(decision)
             result.decision_count += 1
+
+    if rule_proposal_store is not None:
+        from dc_engines.spiral_evolution import (
+            draft_content_sop_rule_proposals_from_governed_memory,
+        )
+
+        proposals = draft_content_sop_rule_proposals_from_governed_memory(
+            memory_store=store,
+            proposal_store=rule_proposal_store,
+            min_support=rule_proposal_min_support,
+            actor=actor,
+        )
+        result.rule_proposal_count = len(proposals)
+        result.rule_proposal_ids = [proposal.proposal_id for proposal in proposals]
 
     return result
 

@@ -104,6 +104,7 @@ data/config/*.key
 !data/config/*.example.json
 !data/config/*.example.yaml
 !data/config/*.example.yml
+!data/config/knowledge_cycle.env
 !data/config/openclaw_on_demand_config.json
 !data/config/system_entries_config.json
 

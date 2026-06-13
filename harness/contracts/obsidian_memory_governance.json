@@ -29,7 +29,7 @@
     },
     {
       "id": "omg-006",
-      "description": "The production system preserves current NAS memory, Obsidian RawRefs, chat review capture, and dc_memory_context recall paths as reusable inputs instead of replacing them with an incompatible memory stack.",
+      "description": "The production system preserves current NAS memory, Obsidian RawRefs, chat review capture, and dc_router memory_injection recall paths as reusable inputs instead of replacing them with an incompatible memory stack.",
       "verification": "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_preserves_existing_memory_assets -q"
     },
     {
@@ -56,7 +56,7 @@
     "ObsidianVault/20_Bridges",
     "dc_engines/dc_engines/obsidian_review.py",
     "dc_engines/tests/test_obsidian_review.py",
-    "data/plugins/llm_router/dc_memory_context.py",
+    "data/plugins/dc_router/memory_injection.py",
     "data/config/nas_memory_overrides.json",
     "harness/contracts/local_knowledge_base_phase2_rawrefs.json"
   ],
@@ -65,7 +65,7 @@
     "human_governance_workspace": "ObsidianVault/40_MemoryGovernance",
     "governed_state_store": "data/governed_memory.db",
     "production_recall": [
-      "data/plugins/llm_router/dc_memory_context.py",
+      "data/plugins/dc_router/memory_injection.py",
       "astrbot/core/tools/knowledge_base_tools.py",
       "optional AstrBot KB mirror for compatibility"
     ],

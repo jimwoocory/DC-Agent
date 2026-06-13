@@ -362,6 +362,7 @@ class HarnessTaskStore:
         *,
         result: dict | None = None,
         event_payload: dict | None = None,
+        expected_status: HarnessTaskStatus | None = None,
     ) -> HarnessTask:
         await self.initialize()
 
@@ -373,19 +374,40 @@ class HarnessTaskStore:
         next_result = result if result is not None else existing.result
 
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                UPDATE harness_tasks
-                SET status = ?, result_json = ?, updated_at = ?
-                WHERE task_id = ?
-                """,
-                (
+            if expected_status is None:
+                where_clause = "WHERE task_id = ?"
+                params: tuple[object, ...] = (
                     status,
                     json.dumps(next_result, ensure_ascii=False, sort_keys=True),
                     now,
                     task_id,
-                ),
+                )
+            else:
+                where_clause = "WHERE task_id = ? AND status = ?"
+                params = (
+                    status,
+                    json.dumps(next_result, ensure_ascii=False, sort_keys=True),
+                    now,
+                    task_id,
+                    expected_status,
+                )
+            cursor = await db.execute(
+                f"""
+                UPDATE harness_tasks
+                SET status = ?, result_json = ?, updated_at = ?
+                {where_clause}
+                """,
+                params,
             )
+            if expected_status is not None and cursor.rowcount != 1:
+                await db.rollback()
+                current = await self.get_task(task_id)
+                current_status = current.status if current is not None else "missing"
+                raise RuntimeError(
+                    "task status changed before update: "
+                    f"{task_id!r} expected {expected_status!r}, "
+                    f"current {current_status!r}"
+                )
             await db.execute(
                 """
                 INSERT INTO harness_task_events (

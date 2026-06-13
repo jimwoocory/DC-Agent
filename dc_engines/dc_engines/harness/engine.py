@@ -11,7 +11,44 @@ from .contracts import (
 )
 from .guardrails import assess_harness_guardrails
 from .memory_promotion import HarnessMemoryPromoter
+from .source_provenance_guard import assert_completion_source_provenance
 from .task_store import HarnessTaskStore
+
+ALLOWED_HARNESS_STATUS_TRANSITIONS: dict[HarnessTaskStatus, set[HarnessTaskStatus]] = {
+    "pending": {
+        "pending",
+        "in_progress",
+        "blocked",
+        "review_required",
+        "completed",
+        "cancelled",
+        "failed",
+    },
+    "in_progress": {
+        "in_progress",
+        "blocked",
+        "review_required",
+        "completed",
+        "cancelled",
+        "failed",
+    },
+    "blocked": {
+        "blocked",
+        "in_progress",
+        "cancelled",
+        "failed",
+    },
+    "review_required": {
+        "review_required",
+        "blocked",
+        "completed",
+        "cancelled",
+        "failed",
+    },
+    "completed": set(),
+    "cancelled": set(),
+    "failed": set(),
+}
 
 
 class HarnessEngine:
@@ -87,7 +124,7 @@ class HarnessEngine:
         *,
         note: str | None = None,
     ) -> HarnessTask:
-        return await self.store.update_task_status(
+        return await self._transition_task_status(
             task_id,
             "in_progress",
             event_payload={"note": note} if note else None,
@@ -100,7 +137,7 @@ class HarnessEngine:
         reviewer_note: str | None = None,
         result: dict | None = None,
     ) -> HarnessTask:
-        return await self.store.update_task_status(
+        return await self._transition_task_status(
             task_id,
             "review_required",
             result=result,
@@ -113,7 +150,8 @@ class HarnessEngine:
         *,
         result: dict | None = None,
     ) -> HarnessTask:
-        task = await self.store.update_task_status(
+        await self._assert_completion_allowed(task_id, result)
+        task = await self._transition_task_status(
             task_id,
             "completed",
             result=result,
@@ -127,7 +165,7 @@ class HarnessEngine:
         *,
         reason: str,
     ) -> HarnessTask:
-        return await self.store.update_task_status(
+        return await self._transition_task_status(
             task_id,
             "failed",
             event_payload={"reason": reason},
@@ -176,7 +214,9 @@ class HarnessEngine:
         result: dict | None = None,
         event_payload: dict | None = None,
     ) -> HarnessTask:
-        return await self.store.update_task_status(
+        if status == "completed":
+            await self._assert_completion_allowed(task_id, result)
+        return await self._transition_task_status(
             task_id,
             status,
             result=result,
@@ -193,6 +233,12 @@ class HarnessEngine:
         task = await self.store.get_task(task_id)
         if task is None:
             raise LookupError(f"task {task_id!r} not found")
+        if task.status != "review_required":
+            raise RuntimeError(
+                "cannot approve task "
+                f"{task_id!r} while status is {task.status!r}; "
+                "task must be review_required"
+            )
 
         review = await self.store.create_review(
             task_id,
@@ -221,6 +267,12 @@ class HarnessEngine:
         task = await self.store.get_task(task_id)
         if task is None:
             raise LookupError(f"task {task_id!r} not found")
+        if task.status != "review_required":
+            raise RuntimeError(
+                "cannot reject task "
+                f"{task_id!r} while status is {task.status!r}; "
+                "task must be review_required"
+            )
 
         review = await self.store.create_review(
             task_id,
@@ -228,7 +280,7 @@ class HarnessEngine:
             "rejected",
             note,
         )
-        await self.store.update_task_status(
+        await self._transition_task_status(
             task_id,
             "blocked",
             event_payload={
@@ -278,6 +330,98 @@ class HarnessEngine:
         if isinstance(snapshot, dict):
             return snapshot
         return {"value": snapshot}
+
+    async def _assert_completion_allowed(
+        self,
+        task_id: str,
+        result: dict | None,
+    ) -> None:
+        existing_task = await self.store.get_task(task_id)
+        if existing_task is None:
+            raise LookupError(f"task {task_id!r} not found")
+        await self._assert_transition_allowed(existing_task, "completed")
+        await self._assert_default_review_gate_satisfied(existing_task)
+        if existing_task.status == "review_required":
+            await self._assert_approved_review_exists(existing_task)
+        try:
+            assert_completion_source_provenance(existing_task, result)
+        except RuntimeError as exc:
+            await self.store.append_event(
+                task_id,
+                "source_provenance_completion_blocked",
+                {"reason": str(exc)},
+            )
+            raise
+
+    async def _transition_task_status(
+        self,
+        task_id: str,
+        status: HarnessTaskStatus,
+        *,
+        result: dict | None = None,
+        event_payload: dict | None = None,
+    ) -> HarnessTask:
+        existing_task = await self.store.get_task(task_id)
+        if existing_task is None:
+            raise LookupError(f"task {task_id!r} not found")
+        await self._assert_transition_allowed(existing_task, status)
+        return await self.store.update_task_status(
+            task_id,
+            status,
+            result=result,
+            event_payload=event_payload,
+            expected_status=existing_task.status,
+        )
+
+    async def _assert_transition_allowed(
+        self,
+        task: HarnessTask,
+        next_status: HarnessTaskStatus,
+    ) -> None:
+        allowed = ALLOWED_HARNESS_STATUS_TRANSITIONS.get(task.status, set())
+        if next_status in allowed:
+            return
+        reason = (
+            f"illegal harness task status transition: {task.status} -> {next_status}"
+        )
+        await self.store.append_event(
+            task.task_id,
+            "status_transition_blocked",
+            {
+                "from_status": task.status,
+                "to_status": next_status,
+                "reason": reason,
+            },
+        )
+        raise RuntimeError(reason)
+
+    async def _assert_default_review_gate_satisfied(self, task: HarnessTask) -> None:
+        if not task.payload.get("review_required_by_default"):
+            return
+        if task.status == "review_required":
+            return
+        reason = (
+            "review_required_by_default task must enter review_required before "
+            "completion"
+        )
+        await self.store.append_event(
+            task.task_id,
+            "review_default_completion_blocked",
+            {"reason": reason, "status": task.status},
+        )
+        raise RuntimeError(reason)
+
+    async def _assert_approved_review_exists(self, task: HarnessTask) -> None:
+        reviews = await self.store.list_reviews(task.task_id)
+        if any(review.decision == "approved" for review in reviews):
+            return
+        reason = "review_required task cannot complete without an approved review"
+        await self.store.append_event(
+            task.task_id,
+            "review_completion_blocked",
+            {"reason": reason},
+        )
+        raise RuntimeError(reason)
 
     async def _maybe_promote_memory(self, task: HarnessTask) -> None:
         if self.memory_promoter is None:

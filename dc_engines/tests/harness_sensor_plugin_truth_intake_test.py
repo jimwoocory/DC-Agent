@@ -80,6 +80,17 @@ def test_sensor_classifies_missing_materials_as_insufficient() -> None:
     assert quality == "insufficient_materials"
 
 
+def test_sensor_classifies_no_hits_and_whitelist_missing_as_insufficient() -> None:
+    module = _load_harness_sensor_module()
+
+    quality = module._classify_response_quality(
+        None,
+        "检索未命中，资料库白名单未配置，无法返回资料查询结果。",
+    )
+
+    assert quality == "insufficient_materials"
+
+
 async def test_sensor_blocks_instead_of_completes_when_materials_are_insufficient() -> (
     None
 ):

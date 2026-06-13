@@ -331,7 +331,16 @@ class TaskCliPlugin(Star):
         result: dict = {"source": "task_cli_plugin/done"}
         if summary.strip():
             result["summary"] = summary.strip()[:200]
-        updated = await engine.complete_task(task.task_id, result=result)
+        try:
+            updated = await engine.complete_task(task.task_id, result=result)
+        except RuntimeError as exc:
+            self._reply(
+                event,
+                "任务无法完成：Harness 已阻断本次完成请求。\n"
+                f"原因：{exc}\n"
+                "请先补齐真实资料、来源引用或完成必要审批后再重试。",
+            )
+            return
         inbox_store = getattr(self.context, "ai_inbox_store", None)
         if inbox_store is not None:
             try:

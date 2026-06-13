@@ -13,8 +13,12 @@ from typing import Any
 from harness.callbacks import TaskCallbackPayload, TaskCallbackSink
 from harness.quota_gate import QuotaGate
 from harness.resources import DEFAULT_RESOURCE_CONFIGS, ResourceConfig, ResourceKey
+from harness.runtime_registry import RuntimeRegistry
+from harness.source_provenance_guard import assert_payload_completion_source_provenance
 
 logger = logging.getLogger(__name__)
+
+EXECUTABLE_RUNTIMES = frozenset({"claude_cli", "codex_cli"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,22 +71,26 @@ class HermesBridge:
         callback_sink: TaskCallbackSink | None = None,
         resource_configs: dict[str, ResourceConfig] | None = None,
         cwd: str | Path | None = None,
+        runtime_registry: RuntimeRegistry | None = None,
     ) -> None:
         self.quota_gate = quota_gate
         self.callback_sink = callback_sink or _NullCallbackSink()
         self.resource_configs = resource_configs or DEFAULT_RESOURCE_CONFIGS
         self.cwd = Path(cwd) if cwd is not None else None
+        self.runtime_registry = runtime_registry or RuntimeRegistry.from_env(os.environ)
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def submit(self, request: HermesTaskRequest) -> str:
         runtime = self._resolve_target_runtime(request)
-        if runtime not in ("claude_cli", "codex_cli"):
-            msg = (
-                f"HermesBridge runtime {runtime!r} is not implemented yet. "
-                "Implemented runtimes: claude_cli, codex_cli (dpr protocol). "
-                "TODO runtimes: claude_oauth, anthropic_api, gemini_cli, hermes_agent."
+        status = self.runtime_registry.get(runtime)
+        if not status.implemented or not status.enabled:
+            raise NotImplementedError(
+                f"HermesBridge runtime {runtime!r} unavailable: {status.reason}"
             )
-            raise NotImplementedError(msg)
+        if not status.adapter_wired or runtime not in EXECUTABLE_RUNTIMES:
+            raise NotImplementedError(
+                f"HermesBridge runtime {runtime!r} unavailable: adapter_not_wired"
+            )
 
         task = asyncio.create_task(
             self._run_request(request),
@@ -100,6 +108,7 @@ class HermesBridge:
 
     async def _run_request(self, request: HermesTaskRequest) -> None:
         runtime = self._resolve_target_runtime(request)
+        await self._notify_running(request, runtime)
         try:
             if runtime == "codex_cli":
                 result = await self._run_codex_cli(request)
@@ -135,10 +144,28 @@ class HermesBridge:
                 "raw": raw,
                 "runtime": runtime,
             }
+            payload.update(self._result_provenance(raw))
             await self._finish_completed(request, payload)
             return
 
         await self._finish_failed(request, err)
+
+    async def _notify_running(self, request: HermesTaskRequest, runtime: str) -> None:
+        try:
+            await self.callback_sink.send(
+                TaskCallbackPayload(
+                    job_id=request.queue_job_id,
+                    session_id=request.payload.get("session_id"),
+                    status="running",
+                    result={"runtime": runtime},
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "HermesBridge running callback failed for %s: %s",
+                request.queue_job_id,
+                exc,
+            )
 
     async def _run_claude_cli(self, request: HermesTaskRequest) -> ClaudeCliResult:
         prompt = self._prompt_for_request(request)
@@ -231,27 +258,19 @@ class HermesBridge:
         )
 
     async def _run_codex_cli(self, request: HermesTaskRequest) -> CodexCliResult:
-        """Run deep task via Codex CLI using its dpr protocol (stream-json or app-server events).
+        """Run deep task via Codex CLI using non-interactive JSONL events.
 
-        Mirrors _run_claude_cli but invokes the `codex` binary (from Codex.app or PATH).
-        The exact wire format for Codex "dpr" (Responses or internal event stream) is
-        parsed with the same line-delimited JSON reader; result extraction falls back
-        to common keys. Extend _extract_text / event handling as needed for full dpr shapes.
+        `codex exec --json <prompt>` emits line-delimited JSON events. Stdin,
+        when present, is appended by the CLI to the prompt as an input block.
         """
         prompt = self._prompt_for_request(request)
-        # Codex CLI often supports similar -p + output flags; adjust if dpr uses
-        # different (e.g. codex exec or specific --format dpr / responses).
         args = [
             "codex",
-            "-p",
+            "exec",
+            "--json",
             prompt,
-            "--output-format",
-            "stream-json",
-            "--verbose",
         ]
         stdin_text = self._stdin_jsonl_for_request(request)
-        if stdin_text:
-            args.extend(["--input-format", "stream-json"])
 
         env = self._subprocess_env_for_codex()
         started = await asyncio.create_subprocess_exec(
@@ -336,6 +355,15 @@ class HermesBridge:
         request: HermesTaskRequest,
         result: dict[str, Any],
     ) -> None:
+        try:
+            assert_payload_completion_source_provenance(
+                request.queue_job_id,
+                request.payload,
+                result,
+            )
+        except RuntimeError as exc:
+            await self._finish_failed(request, str(exc))
+            return
         if self.quota_gate is not None:
             await self.quota_gate.complete(request.queue_job_id, result=result)
         await self.callback_sink.send(
@@ -545,6 +573,25 @@ class HermesBridge:
             if text:
                 return text
         return ""
+
+    def _result_provenance(self, raw_events: list[dict[str, Any]]) -> dict[str, Any]:
+        provenance: dict[str, Any] = {}
+        for event in reversed(raw_events):
+            if event.get("type") != "result":
+                continue
+            for key in (
+                "source_citations",
+                "hits",
+                "knowledge_sources",
+                "sources",
+                "provenance",
+            ):
+                value = event.get(key)
+                if value:
+                    provenance[key] = value
+            if provenance:
+                return provenance
+        return provenance
 
     def _extract_text(self, event: dict[str, Any]) -> str:
         for key in ("result", "text", "response", "message", "content"):

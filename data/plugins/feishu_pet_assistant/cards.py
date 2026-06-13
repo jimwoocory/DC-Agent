@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+NO_REAL_TASKS_TEXT = "当前没有从真实任务源同步到待办；请先接入 Harness 或业务任务源。"
+
 
 def _btn(text: str, value: dict[str, Any], btn_type: str = "default") -> dict[str, Any]:
     return {
@@ -111,14 +113,14 @@ def build_tasks_card(
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "今天没有待办了，小橘可以躺着晒太阳 🌞",
+                    "content": NO_REAL_TASKS_TEXT,
                 },
             },
         ]
         if h5_url:
             elements.append({"tag": "hr"})
             elements.append({"tag": "action", "actions": _h5_button(h5_url)})
-        return _card_envelope("green", "今日清空", elements)
+        return _card_envelope("orange", "待办未接入", elements)
 
     lines = "\n".join(f"{i}. {task['title']}" for i, task in enumerate(tasks, start=1))
     task_buttons = [
@@ -212,7 +214,7 @@ def render_status_text(pet: dict[str, Any], stats: dict[str, int]) -> str:
 
 def render_tasks_text(tasks: list[dict[str, Any]]) -> str:
     if not tasks:
-        return "今天没有待办了，小橘可以躺着晒太阳 🌞"
+        return NO_REAL_TASKS_TEXT
     lines = "\n".join(f"{i}. {task['title']}" for i, task in enumerate(tasks, start=1))
     return f"今天小橘帮你叼来了 {len(tasks)} 个事项\n\n{lines}\n\n回复 /done 1 可以完成第 1 个。"
 

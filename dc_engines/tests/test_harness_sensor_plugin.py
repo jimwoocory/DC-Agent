@@ -48,6 +48,31 @@ class _FakeStore:
         return self.tasks.get(task_id)
 
 
+class _FakeEngine:
+    def __init__(self, tasks: dict[str, object]) -> None:
+        self.store = _FakeStore(tasks)
+        self.completed: list[tuple[str, dict]] = []
+        self.status_changes: list[tuple[str, str, dict | None]] = []
+
+    async def complete_task(self, task_id: str, *, result: dict):
+        self.completed.append((task_id, result))
+
+    async def set_status(
+        self,
+        task_id: str,
+        status: str,
+        *,
+        event_payload: dict | None = None,
+    ):
+        self.status_changes.append((task_id, status, event_payload))
+        return self.store.tasks[task_id]
+
+
+class _FakeContextWithEngine(_FakeContext):
+    def __init__(self, engine: _FakeEngine) -> None:
+        self.harness_engine = engine
+
+
 async def test_sensor_does_not_fallback_without_event_task_id() -> None:
     module = _load_harness_sensor_module()
     plugin = module.HarnessSensorPlugin(_FakeContext())
@@ -107,3 +132,108 @@ async def test_sensor_requires_auto_complete_allowed_task() -> None:
     )
 
     assert [task.task_id for task in tasks] == ["allowed", "legacy_allowed"]
+
+
+async def test_sensor_excludes_review_required_from_auto_complete() -> None:
+    module = _load_harness_sensor_module()
+    plugin = module.HarnessSensorPlugin(_FakeContext())
+    review_task = SimpleNamespace(
+        task_id="review_task",
+        status="review_required",
+        payload={"auto_complete_on_response": True},
+    )
+    in_progress_task = SimpleNamespace(
+        task_id="in_progress_task",
+        status="in_progress",
+        payload={"auto_complete_on_response": True},
+    )
+    store = _FakeStore(
+        {
+            "review_task": review_task,
+            "in_progress_task": in_progress_task,
+        }
+    )
+    engine = SimpleNamespace(store=store)
+
+    tasks = await plugin._load_target_tasks(
+        _FakeEvent(
+            {
+                "workflow_intent_task_id": [
+                    "review_task",
+                    "in_progress_task",
+                ]
+            }
+        ),
+        engine,
+        allowed_statuses={"pending", "in_progress"},
+    )
+
+    assert [task.task_id for task in tasks] == ["in_progress_task"]
+
+
+async def test_sensor_settle_skips_review_required_success_response() -> None:
+    module = _load_harness_sensor_module()
+    task = SimpleNamespace(
+        task_id="review_task",
+        status="review_required",
+        payload={"auto_complete_on_response": True},
+    )
+    engine = _FakeEngine({"review_task": task})
+    plugin = module.HarnessSensorPlugin(_FakeContextWithEngine(engine))
+
+    await plugin._settle_active_tasks(
+        _FakeEvent({"workflow_intent_task_id": "review_task"}),
+        text="已完成，请查看。",
+        quality="success",
+        source="harness_sensor_plugin",
+        role=None,
+    )
+
+    assert engine.completed == []
+    assert engine.status_changes == []
+
+
+async def test_sensor_excludes_review_required_by_default_auto_complete() -> None:
+    module = _load_harness_sensor_module()
+    plugin = module.HarnessSensorPlugin(_FakeContext())
+    review_default = SimpleNamespace(
+        task_id="review_default",
+        status="in_progress",
+        payload={
+            "auto_complete_on_response": True,
+            "review_required_by_default": True,
+        },
+    )
+    normal = SimpleNamespace(
+        task_id="normal",
+        status="in_progress",
+        payload={"auto_complete_on_response": True},
+    )
+    store = _FakeStore({"review_default": review_default, "normal": normal})
+    engine = SimpleNamespace(store=store)
+
+    tasks = await plugin._load_target_tasks(
+        _FakeEvent({"workflow_intent_task_id": ["review_default", "normal"]}),
+        engine,
+    )
+
+    assert [task.task_id for task in tasks] == ["normal"]
+
+
+def test_sensor_keeps_success_text_with_negated_missing_terms_success() -> None:
+    module = _load_harness_sensor_module()
+
+    assert (
+        module._classify_response_quality(
+            None,
+            "已完成，未完成项：无；本次资料无需补充。",
+        )
+        == "success"
+    )
+    assert (
+        module._classify_response_quality(
+            None,
+            "fixed the not found fallback and delivered the requested output",
+        )
+        == "success"
+    )

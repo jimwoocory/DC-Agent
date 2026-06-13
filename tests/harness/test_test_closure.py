@@ -33,5 +33,14 @@ def test_external_and_non_script_candidates_do_not_pass_as_main_closure() -> Non
     assert status_for("data/attachments/openapi_test.txt") == "non_script"
 
 
+def test_nested_virtualenv_tests_are_excluded() -> None:
+    assert (
+        classify_path(
+            "dc_engines/.venv/lib/python3.12/site-packages/annotated_types/test_cases.py"
+        )
+        is None
+    )
+
+
 def test_unknown_main_test_script_fails_closure() -> None:
     assert status_for("scripts/test_probe.py") == "unclosed"

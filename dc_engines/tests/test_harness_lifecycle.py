@@ -30,6 +30,7 @@ from dc_engines.harness.workflows import (
     create_workflow_request,
     validate_workflow_result,
 )
+from dc_engines.memory_governance.store import MemoryGovernanceStore
 
 
 @pytest_asyncio.fixture
@@ -79,6 +80,214 @@ async def test_complete_task(harness_engine: HarnessEngine) -> None:
     assert completed.result.get("summary") == "搞定"
 
 
+async def test_complete_task_blocks_strict_employee_facing_without_provenance(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            payload={
+                "workflow_kind": "department_workflow",
+                "employee_facing": True,
+                "generation_allowed": True,
+            },
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="source provenance"):
+        await harness_engine.complete_task(
+            task.task_id,
+            result={"summary": "完成员工可见事实结论"},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+
+
+async def test_complete_task_allows_strict_result_with_source_citation_path(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    completed = await harness_engine.complete_task(
+        task.task_id,
+        result={
+            "summary": "完成",
+            "source_citations": [{"source_path": "projects/customer.md"}],
+        },
+    )
+
+    assert completed.status == "completed"
+
+
+async def test_complete_task_allows_strict_result_with_feishu_hits(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            payload={
+                "truth_status": "ready_for_execution",
+                "truth_requirements": ["必须来自飞书知识库。"],
+            }
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    completed = await harness_engine.complete_task(
+        task.task_id,
+        result={"summary": "完成", "hits": [{"id": "doc-123"}]},
+    )
+
+    assert completed.status == "completed"
+
+
+async def test_complete_task_rejects_feishu_hit_without_source_identity(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="source provenance"):
+        await harness_engine.complete_task(
+            task.task_id,
+            result={"summary": "完成", "hits": [{"source_type": "feishu"}]},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+
+
+async def test_complete_task_rejects_source_citation_title_only(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="source provenance"):
+        await harness_engine.complete_task(
+            task.task_id,
+            result={"summary": "完成", "source_citations": [{"title": "Q2 plan"}]},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"summary": "完成", "source_citations": [{"id": 0}]},
+        {"summary": "完成", "source_citations": [{"source_id": []}]},
+        {"summary": "完成", "source_citations": [{"url": False}]},
+        {"summary": "完成", "hits": [{"id": 0}]},
+    ],
+)
+async def test_complete_task_rejects_non_concrete_source_identity_values(
+    harness_engine: HarnessEngine,
+    result: dict,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="source provenance"):
+        await harness_engine.complete_task(task.task_id, result=result)
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+
+
+async def test_complete_task_rejects_executor_only_source_for_strict_task(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="source provenance"):
+        await harness_engine.complete_task(
+            task.task_id,
+            result={"summary": "完成", "source": "hermes"},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+
+
+async def test_complete_task_allows_generic_summary_only_result(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"workflow_kind": "generic_harness_task"})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    completed = await harness_engine.complete_task(
+        task.task_id,
+        result={"summary": "generic done"},
+    )
+
+    assert completed.status == "completed"
+
+
+async def test_set_status_completed_blocks_strict_task_without_provenance(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="source provenance"):
+        await harness_engine.set_status(
+            task.task_id,
+            "completed",
+            result={"summary": "完成"},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+    events = await harness_engine.store.list_events(task.task_id)
+    assert any(
+        event.event_type == "source_provenance_completion_blocked" for event in events
+    )
+
+
+async def test_set_status_completed_allows_strict_task_with_source_provenance(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(payload={"strict_source_provenance_required": True})
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    completed = await harness_engine.set_status(
+        task.task_id,
+        "completed",
+        result={
+            "summary": "完成",
+            "source_citations": [{"url": "https://example.test/source"}],
+        },
+    )
+
+    assert completed.status == "completed"
+
+
 async def test_fail_task(harness_engine: HarnessEngine) -> None:
     task = await harness_engine.create_task(_make_request())
     await harness_engine.mark_in_progress(task.task_id)
@@ -123,6 +332,138 @@ async def test_reject_workflow(harness_engine: HarnessEngine) -> None:
     reloaded = await harness_engine.store.get_task(task.task_id)
     assert reloaded is not None
     assert reloaded.status == "blocked"
+
+
+async def test_state_machine_rejects_terminal_task_reopen(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(_make_request())
+    await harness_engine.complete_task(task.task_id, result={"summary": "已完成"})
+
+    with pytest.raises(RuntimeError, match="completed -> in_progress"):
+        await harness_engine.mark_in_progress(task.task_id, note="late retry")
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "completed"
+    events = await harness_engine.store.list_events(task.task_id)
+    assert any(event.event_type == "status_transition_blocked" for event in events)
+
+
+async def test_state_machine_rejects_blocked_direct_completion(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(_make_request())
+    await harness_engine.set_status(
+        task.task_id,
+        "blocked",
+        event_payload={"reason": "missing materials"},
+    )
+
+    with pytest.raises(RuntimeError, match="blocked -> completed"):
+        await harness_engine.complete_task(
+            task.task_id,
+            result={"summary": "不能直接完成 blocked 任务"},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "blocked"
+
+
+async def test_state_machine_store_rejects_stale_status_update(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(_make_request())
+    running = await harness_engine.mark_in_progress(task.task_id)
+    await harness_engine.fail_task(task.task_id, reason="timeout")
+
+    with pytest.raises(RuntimeError, match="status changed before update"):
+        await harness_engine.store.update_task_status(
+            task.task_id,
+            "completed",
+            result={"summary": "stale completion"},
+            expected_status=running.status,
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "failed"
+
+
+async def test_review_required_completion_requires_approved_review(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(_make_request())
+    await harness_engine.mark_in_progress(task.task_id)
+    await harness_engine.mark_review_required(task.task_id, reviewer_note="待审核")
+
+    with pytest.raises(RuntimeError, match="approved review"):
+        await harness_engine.complete_task(task.task_id, result={"summary": "已审核"})
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "review_required"
+    events = await harness_engine.store.list_events(task.task_id)
+    assert any(event.event_type == "review_completion_blocked" for event in events)
+
+    await harness_engine.approve_task(
+        task.task_id,
+        reviewer_id="ou_boss",
+        note="OK 发布",
+    )
+    completed = await harness_engine.complete_task(
+        task.task_id,
+        result={"summary": "已审核并完成"},
+    )
+
+    assert completed.status == "completed"
+
+
+async def test_review_required_by_default_cannot_complete_before_review_gate(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            payload={
+                "workflow_kind": "department_workflow",
+                "review_required_by_default": True,
+                "auto_complete_on_response": True,
+            },
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    with pytest.raises(RuntimeError, match="review_required_by_default"):
+        await harness_engine.complete_task(
+            task.task_id,
+            result={"summary": "自动回复不应绕过审核"},
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "in_progress"
+    events = await harness_engine.store.list_events(task.task_id)
+    assert any(
+        event.event_type == "review_default_completion_blocked" for event in events
+    )
+
+
+async def test_approve_task_requires_review_required_status(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(_make_request())
+
+    with pytest.raises(RuntimeError, match="review_required"):
+        await harness_engine.approve_task(
+            task.task_id,
+            reviewer_id="ou_boss",
+            note="不能提前审批",
+        )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert reloaded is not None
+    assert reloaded.status == "pending"
 
 
 async def test_list_tasks_for_conversation_order(harness_engine: HarnessEngine) -> None:
@@ -482,6 +823,214 @@ async def test_content_sop_result_settlement_moves_valid_result_to_review(
 
     assert settled.status == "review_required"
     assert settled.result["lifecycle_stage"] == "review_required"
+
+
+async def test_content_sop_result_settlement_attaches_spiral_snapshot(
+    harness_engine: HarnessEngine,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            title="内容 SOP 螺旋记忆",
+            payload={
+                "workflow_kind": "content_sop_workflow",
+                "brief": "客户内容包",
+                "department_id": "client_dept",
+                "scenario_id": "client_invitation_copy",
+                "required_outputs": [
+                    "message_draft",
+                    "image_prompt",
+                    "video_script",
+                    "source_citations",
+                    "review_checklist",
+                ],
+                "review_required_by_default": True,
+                "generation_allowed": True,
+                "missing_required_inputs": [],
+                "source_citations": [{"source_path": "projects/demo.md"}],
+            },
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    settled = await settle_content_sop_result(
+        harness_engine,
+        task,
+        {
+            "message_draft": "客户触达默认走飞书和私域，不写邮件。",
+            "image_prompt": "业务说明: 海报\n模型 Prompt: 海报",
+            "video_script": "视频脚本",
+            "source_citations": [{"source_path": "projects/demo.md"}],
+            "review_checklist": ["核对渠道"],
+        },
+    )
+
+    spiral = settled.result["spiral_evolution"]
+    assert spiral["current_stage"] == "memory_candidate_created"
+    assert spiral["memory_candidate"]["review_status"] == "need_review"
+    assert spiral["memory_candidate"]["department_id"] == "client_dept"
+    assert spiral["memory_candidate"]["promotion_gate"] == "obsidian_approved_required"
+    assert spiral["autonomy_policy"]["may_apply_runtime_change_without_review"] is False
+
+
+async def test_content_sop_result_settlement_exports_memory_candidate_to_obsidian(
+    harness_engine: HarnessEngine,
+    tmp_path: Path,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            title="内容 SOP 记忆落库",
+            payload={
+                "workflow_kind": "content_sop_workflow",
+                "brief": "客户内容包",
+                "department_id": "client_dept",
+                "scenario_id": "customer_greeting",
+                "required_outputs": [
+                    "message_draft",
+                    "image_prompt",
+                    "video_script",
+                    "source_citations",
+                    "review_checklist",
+                ],
+                "review_required_by_default": True,
+                "generation_allowed": True,
+                "missing_required_inputs": [],
+                "source_citations": [{"source_path": "projects/demo.md"}],
+            },
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+    store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
+
+    settled = await settle_content_sop_result(
+        harness_engine,
+        task,
+        {
+            "message_draft": "客户触达默认走飞书和私域，不写邮件。",
+            "image_prompt": "业务说明: 海报\n模型 Prompt: 海报",
+            "video_script": "视频脚本",
+            "source_citations": [{"source_path": "projects/demo.md"}],
+            "review_checklist": ["核对渠道"],
+        },
+        memory_governance_store=store,
+        obsidian_vault_path=tmp_path / "ObsidianVault",
+        now="2026-06-05T00:00:00Z",
+    )
+
+    export = settled.result["memory_governance_export"]
+    memory_id = settled.result["spiral_evolution"]["memory_candidate"]["candidate_id"]
+    loaded = store.get_memory(memory_id)
+    assert export["status"] == "exported"
+    assert loaded is not None
+    assert loaded.review_status == "need_review"
+    assert loaded.memory_kind == "process"
+    assert "department_id:client_dept" in loaded.tags
+    assert Path(export["note_paths"][0]).exists()
+
+
+async def test_content_sop_result_settlement_survives_memory_export_failure(
+    harness_engine: HarnessEngine,
+    tmp_path: Path,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            title="内容 SOP 记忆导出失败隔离",
+            payload={
+                "workflow_kind": "content_sop_workflow",
+                "brief": "客户内容包",
+                "department_id": "client_dept",
+                "scenario_id": "customer_greeting",
+                "required_outputs": [
+                    "message_draft",
+                    "image_prompt",
+                    "video_script",
+                    "source_citations",
+                    "review_checklist",
+                ],
+                "review_required_by_default": True,
+                "generation_allowed": True,
+                "missing_required_inputs": [],
+                "source_citations": [{"source_path": "projects/demo.md"}],
+            },
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+    blocked_vault_path = tmp_path / "not_a_directory"
+    blocked_vault_path.write_text("file blocks directory creation", encoding="utf-8")
+
+    settled = await settle_content_sop_result(
+        harness_engine,
+        task,
+        {
+            "message_draft": "客户触达默认走飞书和私域，不写邮件。",
+            "image_prompt": "业务说明: 海报\n模型 Prompt: 海报",
+            "video_script": "视频脚本",
+            "source_citations": [{"source_path": "projects/demo.md"}],
+            "review_checklist": ["核对渠道"],
+        },
+        memory_governance_store=MemoryGovernanceStore(tmp_path / "governed_memory.db"),
+        obsidian_vault_path=blocked_vault_path,
+        now="2026-06-05T00:00:00Z",
+    )
+
+    assert settled.status == "review_required"
+    assert settled.result["memory_governance_export"]["status"] == "failed"
+    assert "error" in settled.result["memory_governance_export"]
+
+
+async def test_content_sop_result_settlement_survives_export_status_write_failure(
+    harness_engine: HarnessEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = await harness_engine.create_task(
+        _make_request(
+            title="内容 SOP 导出状态回写失败隔离",
+            payload={
+                "workflow_kind": "content_sop_workflow",
+                "brief": "客户内容包",
+                "department_id": "client_dept",
+                "scenario_id": "customer_greeting",
+                "required_outputs": [
+                    "message_draft",
+                    "image_prompt",
+                    "video_script",
+                    "source_citations",
+                    "review_checklist",
+                ],
+                "review_required_by_default": True,
+                "generation_allowed": True,
+                "missing_required_inputs": [],
+                "source_citations": [{"source_path": "projects/demo.md"}],
+            },
+        )
+    )
+    await harness_engine.mark_in_progress(task.task_id)
+
+    async def fail_set_status(*args, **kwargs):
+        raise RuntimeError("status write failed")
+
+    monkeypatch.setattr(harness_engine, "set_status", fail_set_status)
+
+    settled = await settle_content_sop_result(
+        harness_engine,
+        task,
+        {
+            "message_draft": "客户触达默认走飞书和私域，不写邮件。",
+            "image_prompt": "业务说明: 海报\n模型 Prompt: 海报",
+            "video_script": "视频脚本",
+            "source_citations": [{"source_path": "projects/demo.md"}],
+            "review_checklist": ["核对渠道"],
+        },
+        memory_governance_store=MemoryGovernanceStore(tmp_path / "governed_memory.db"),
+        obsidian_vault_path=tmp_path / "ObsidianVault",
+        now="2026-06-05T00:00:00Z",
+    )
+
+    reloaded = await harness_engine.store.get_task(task.task_id)
+    assert settled.status == "review_required"
+    assert settled.result["memory_governance_export"]["status"] == "not_configured"
+    assert reloaded is not None
+    assert reloaded.status == "review_required"
 
 
 async def test_content_sop_result_settlement_fails_incomplete_result(

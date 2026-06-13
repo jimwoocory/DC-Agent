@@ -118,6 +118,34 @@ def test_build_request_payload_contains_harness_requirements() -> None:
     }
     assert request.payload["truth_requirements"]
     assert request.payload["material_requirements"]
+    assert request.payload["review_required_by_default"] is True
+    assert request.payload["auto_complete_on_response"] is False
+
+
+def test_department_requester_meta_cannot_override_auto_complete_gate() -> None:
+    match = match_department_workflow(
+        employee_department="总经办",
+        text="把昨天会议要点整理成正式会议纪要，列出决策和行动项",
+    )
+
+    assert match is not None
+    request = build_department_workflow_request(
+        match,
+        conversation_id="conv_unsafe_meta",
+        platform_id="巅池-Agent小助手",
+        session_id="lark:chat_unsafe_meta",
+        source="test",
+        message_text="把昨天会议要点整理成正式会议纪要，列出决策和行动项",
+        requester_meta={
+            "requester_open_id": "ou_admin",
+            "review_required_by_default": False,
+            "missing_required_inputs": [],
+        },
+    )
+
+    assert request.payload["requester_open_id"] == "ou_admin"
+    assert request.payload["review_required_by_default"] is True
+    assert request.payload["auto_complete_on_response"] is False
 
 
 def test_material_assessment_marks_missing_inputs_without_materials() -> None:
@@ -218,6 +246,7 @@ def test_client_followup_material_gap_blocks_generation() -> None:
     missing_keys = {item["key"] for item in request.payload["missing_required_inputs"]}
     assert request.payload["lifecycle_stage"] == "needs_materials"
     assert request.payload["generation_allowed"] is False
+    assert request.payload["auto_complete_on_response"] is False
     assert missing_keys >= {"client_segment", "last_interaction", "followup_goal"}
     assert (
         request.payload["communication_channel_policy"]["should_use_email_format"]
@@ -255,6 +284,8 @@ def test_client_private_domain_ready_payload_has_review_outputs() -> None:
     output_keys = {item["key"] for item in request.payload["expected_outputs"]}
     assert request.payload["lifecycle_stage"] == "ready_for_generation"
     assert request.payload["generation_allowed"] is True
+    assert request.payload["review_required_by_default"] is True
+    assert request.payload["auto_complete_on_response"] is False
     assert output_keys >= {
         "segment_strategy",
         "message_variants",
@@ -317,6 +348,7 @@ def test_planning_brand_review_requires_material_and_guidelines() -> None:
     missing_keys = {item["key"] for item in request.payload["missing_required_inputs"]}
     assert request.payload["lifecycle_stage"] == "needs_materials"
     assert request.payload["generation_allowed"] is False
+    assert request.payload["auto_complete_on_response"] is False
     assert missing_keys >= {"review_material", "brand_guideline", "usage_context"}
 
 
@@ -341,6 +373,7 @@ def test_content_sop_payload_blocks_generation_when_materials_are_missing() -> N
     assert request.payload["workflow_kind"] == "content_sop_workflow"
     assert request.payload["lifecycle_stage"] == "needs_materials"
     assert request.payload["generation_allowed"] is False
+    assert request.payload["auto_complete_on_response"] is False
     assert request.payload["missing_required_inputs"]
     assert "send_material_intake_card" in request.payload["next_actions"]
     assert "pause_before_generation" in request.payload["next_actions"]
@@ -379,6 +412,8 @@ def test_content_sop_payload_contains_full_media_requirements() -> None:
     output_keys = {item["key"] for item in request.payload["expected_outputs"]}
     assert request.payload["lifecycle_stage"] == "ready_for_generation"
     assert request.payload["generation_allowed"] is True
+    assert request.payload["review_required_by_default"] is True
+    assert request.payload["auto_complete_on_response"] is False
     assert request.payload["knowledge_context"]
     assert request.payload["source_citations"][0]["source_path"].endswith("传播策略.md")
     assert output_keys >= {

@@ -16,6 +16,7 @@ from dc_engines.department_workflows import (
     strip_internal_memory_context,
     workflow_catalog,
 )
+from dc_engines.harness import allows_auto_complete_on_response
 from dc_engines.harness.content_sop_runtime import plan_content_sop_dispatch
 
 from astrbot.api import logger
@@ -156,7 +157,9 @@ class DepartmentWorkflowPlugin(Star):
                 message_text=text,
                 requester_meta=requester_meta or {"requester_open_id": sender_id},
             )
-            req.payload["auto_complete_on_response"] = True
+            req.payload["auto_complete_on_response"] = allows_auto_complete_on_response(
+                req.payload
+            )
             if not self.create_tasks:
                 logger.info(
                     "[department_workflow] matched but create_tasks=false department=%s scenario=%s",
@@ -175,7 +178,7 @@ class DepartmentWorkflowPlugin(Star):
                     task.task_id,
                     source="department_workflow_plugin",
                 )
-            if self.notify_on_match:
+            if self.notify_on_match and explicit_trigger:
                 await self._send_boundary_notice(
                     event,
                     _format_boundary_notice(

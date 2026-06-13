@@ -62,7 +62,7 @@ class PetStore:
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
-                    source TEXT NOT NULL DEFAULT 'demo',
+                    source TEXT NOT NULL DEFAULT 'manual',
                     due_date TEXT,
                     completed_at TEXT,
                     created_at TEXT NOT NULL,
@@ -178,7 +178,7 @@ class PetStore:
         self,
         user_id: str,
         title: str,
-        source: str = "demo",
+        source: str = "manual",
         due_date: str | None = None,
     ) -> dict[str, Any]:
         now = _now()

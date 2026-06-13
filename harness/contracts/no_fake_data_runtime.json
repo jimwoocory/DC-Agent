@@ -1,0 +1,59 @@
+{
+  "feature": "no_fake_data_runtime",
+  "goal": "Prevent employee-facing production runtime paths from completing tasks or sending replies with fake, mock, demo, sample, placeholder, stub, or fabricated data.",
+  "acceptance_criteria": [
+    {
+      "id": "no-fake-data-001",
+      "description": "A static scanner checks only production runtime paths for high-confidence fake-data completion and reply patterns while excluding tests, docs, UI assets, generated/runtime data, and scanner fixtures.",
+      "verification": "uv run python scripts/check_fake_data_guard.py"
+    },
+    {
+      "id": "no-fake-data-002",
+      "description": "Focused tests prove the scanner flags fake employee-facing completions or replies and ignores test, docs, UI, and ordinary placeholder noise.",
+      "verification": "uv run pytest tests/test_fake_data_guard.py -q"
+    },
+    {
+      "id": "no-fake-data-003",
+      "description": "The no_fake_data_runtime contract stays valid under the shared harness contract validator and lists its verification commands.",
+      "verification": "uv run pytest tests/harness/test_no_fake_data_runtime_contract.py -q"
+    },
+    {
+      "id": "no-fake-data-004",
+      "description": "Harness runtime completion blocks employee-facing strict-source tasks without concrete result provenance while allowing generic tasks and cited strict completions.",
+      "verification": "uv run pytest dc_engines/tests/test_harness_lifecycle.py -q"
+    },
+    {
+      "id": "no-fake-data-005",
+      "description": "Employee-facing pet assistant task views never seed, show, or complete non-production task data; empty states must disclose missing real task sources.",
+      "verification": "uv run pytest tests/test_feishu_pet_assistant.py -q"
+    },
+    {
+      "id": "no-fake-data-006",
+      "description": "Hermes deep-runtime completed callbacks cannot complete strict-source tasks without concrete result provenance.",
+      "verification": "uv run pytest tests/harness/test_hermes_bridge.py -q"
+    },
+    {
+      "id": "no-fake-data-007",
+      "description": "Employee-facing /task done reports Harness lifecycle or source-provenance completion blocks instead of crashing, completing the task, or closing linked AI Inbox items.",
+      "verification": "uv run pytest dc_engines/tests/test_task_cli_plugin.py -q"
+    },
+    {
+      "id": "no-fake-data-008",
+      "description": "Employee onboarding cannot mark employees completed or invited from placeholder invite links, failed/invalid invite API results, or undelivered result cards; only a delivered real invite link or confirmed auto-invite success completes the invite step.",
+      "verification": "uv run pytest tests/test_employee_onboarding_maintenance.py -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full",
+    "manual": [
+      "uv run pytest dc_engines/tests/test_harness_lifecycle.py -q",
+      "uv run pytest tests/test_fake_data_guard.py tests/harness/test_no_fake_data_runtime_contract.py tests/test_feishu_pet_assistant.py tests/harness/test_hermes_bridge.py -q",
+      "uv run pytest dc_engines/tests/test_task_cli_plugin.py -q",
+      "uv run pytest tests/test_employee_onboarding_maintenance.py -q",
+      "uv run python scripts/check_fake_data_guard.py",
+      "uv run ruff check harness/source_provenance_guard.py dc_engines/dc_engines/harness/engine.py dc_engines/dc_engines/harness/source_provenance_guard.py dc_engines/tests/test_harness_lifecycle.py data/plugins/feishu_pet_assistant/main.py data/plugins/feishu_pet_assistant/service.py data/plugins/feishu_pet_assistant/store.py data/plugins/feishu_pet_assistant/cards.py data/plugins/task_cli_plugin/main.py data/plugins/employee_onboarding/main.py harness/hermes_bridge.py scripts/check_fake_data_guard.py tests/test_fake_data_guard.py tests/test_feishu_pet_assistant.py dc_engines/tests/test_task_cli_plugin.py tests/test_employee_onboarding_maintenance.py tests/harness/test_no_fake_data_runtime_contract.py tests/harness/test_hermes_bridge.py",
+      "uv run ruff format --check harness/source_provenance_guard.py dc_engines/dc_engines/harness/engine.py dc_engines/dc_engines/harness/source_provenance_guard.py dc_engines/tests/test_harness_lifecycle.py data/plugins/feishu_pet_assistant/main.py data/plugins/feishu_pet_assistant/service.py data/plugins/feishu_pet_assistant/store.py data/plugins/feishu_pet_assistant/cards.py data/plugins/task_cli_plugin/main.py data/plugins/employee_onboarding/main.py harness/hermes_bridge.py scripts/check_fake_data_guard.py tests/test_fake_data_guard.py tests/test_feishu_pet_assistant.py dc_engines/tests/test_task_cli_plugin.py tests/test_employee_onboarding_maintenance.py tests/harness/test_no_fake_data_runtime_contract.py tests/harness/test_hermes_bridge.py"
+    ]
+  }
+}

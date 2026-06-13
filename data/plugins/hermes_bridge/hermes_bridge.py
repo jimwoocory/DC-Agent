@@ -87,6 +87,91 @@ _HERMES_FINAL_FAILURE_RE = _re_card.compile(
     r"API failed after \d+ retries|Final error|Request timed out\.",
     _re_card.IGNORECASE,
 )
+_HERMES_FAILURE_STATUSES = {
+    "failed",
+    "failure",
+    "error",
+    "errored",
+    "cancelled",
+    "canceled",
+}
+_HERMES_PROVENANCE_FIELDS = (
+    "source_citations",
+    "hits",
+    "sources",
+    "knowledge_sources",
+    "provenance",
+)
+
+
+def _callback_text_value(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("text", "response", "message", "result", "content", "error"):
+            text = _callback_text_value(value.get(key))
+            if text:
+                return text
+    if isinstance(value, list):
+        parts = [_callback_text_value(item) for item in value]
+        return "\n".join(part for part in parts if part).strip()
+    return ""
+
+
+def _callback_response_text(data: dict) -> str:
+    for key in ("response", "message", "result"):
+        text = _callback_text_value(data.get(key))
+        if text:
+            return text
+    return ""
+
+
+def _callback_provenance_fields(data: dict) -> dict[str, object]:
+    result = data.get("result")
+    containers = [data]
+    if isinstance(result, dict):
+        containers.append(result)
+
+    provenance: dict[str, object] = {}
+    for key in _HERMES_PROVENANCE_FIELDS:
+        for container in containers:
+            value = container.get(key)
+            if value:
+                provenance[key] = value
+                break
+    return provenance
+
+
+def _callback_failure_reason(data: dict, response_text: str) -> str | None:
+    for key in ("status", "state"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip().lower() in _HERMES_FAILURE_STATUSES:
+            return (
+                _callback_text_value(data.get("error"))
+                or response_text
+                or f"hermes callback {key}={value.strip()}"
+            )
+
+    error_text = _callback_text_value(data.get("error"))
+    if error_text:
+        return error_text
+    if response_text and _HERMES_FINAL_FAILURE_RE.search(response_text):
+        return response_text
+    return None
+
+
+def _harness_result(
+    response_text: str,
+    provenance_fields: dict[str, object] | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "summary": response_text[:200],
+        "response_preview": response_text[:500],
+        "source": "hermes",
+    }
+    if provenance_fields:
+        result.update(provenance_fields)
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +298,7 @@ class HermesBridgePlugin(Star):
             hcfg = config
         else:
             hcfg = context.get_config().get("hermes_bridge", {})
+        self._hcfg = hcfg
 
         self.hermes_webhook_url: str = hcfg.get(
             "webhook_url", "http://localhost:8644/webhooks/astrbot_qq"
@@ -359,7 +445,7 @@ class HermesBridgePlugin(Star):
 
     # ── 长期任务记忆注入（LLM 调用前钩子） ────────────────────────────────────
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(priority=40)
     async def inject_harness_memory(
         self,
         event: AstrMessageEvent,
@@ -644,12 +730,14 @@ class HermesBridgePlugin(Star):
             "cognitive_context": cognitive_context,
         }
         try:
+            body, signature = self._signed_json_payload(payload)
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     self.hermes_task_webhook_url,
-                    json=payload,
+                    data=body,
                     headers={
                         "Content-Type": "application/json",
+                        "X-Hub-Signature-256": signature,
                         "X-Webhook-Event": "harness_task",
                         "X-Task-ID": task_id,
                     },
@@ -708,12 +796,26 @@ class HermesBridgePlugin(Star):
                 logger.warning("[HermesBridge] 回调 body 解析失败：%s", exc)
                 return web.json_response({"status": "bad_request"}, status=400)
 
-            response_text = data.get("response", "") or data.get("message", "")
-            task_id: str | None = data.get("task_id")
-            session_key: str = data.get("session_key", "")
+            response_text = _callback_response_text(data)
+            provenance_fields = _callback_provenance_fields(data)
+            task_id_value = data.get("task_id")
+            task_id: str | None = str(task_id_value) if task_id_value else None
+            session_key: str = str(data.get("session_key") or "")
+            failure_reason = _callback_failure_reason(data, response_text)
+            if not response_text and failure_reason:
+                response_text = failure_reason
 
             if not response_text:
                 logger.warning("[HermesBridge] 收到空响应：%s", data)
+                if task_id:
+                    failed = await self._fail_harness_task(task_id, "empty_response")
+                    return web.json_response(
+                        {
+                            "status": "failed" if failed else "error",
+                            "reason": "empty_response",
+                        },
+                        status=202 if failed else 500,
+                    )
                 return web.json_response({"status": "ok"})
 
             # ─── Dedup 锁：同一 task 已被推送过完整结果就不再发 ───
@@ -733,7 +835,11 @@ class HermesBridgePlugin(Star):
             card_result = CardHandleResult()
             if task_id:
                 card_result = await self._handle_response_via_card(
-                    task_id, response_text
+                    task_id,
+                    response_text,
+                    provenance_fields=provenance_fields,
+                    is_failure=bool(failure_reason),
+                    failure_reason=failure_reason,
                 )
             if card_result.handled:
                 if task_id and card_result.is_finalized:
@@ -752,9 +858,17 @@ class HermesBridgePlugin(Star):
                         session_key,
                     )
 
-            # 完成 Harness 任务
-            if task_id:
-                await self._complete_harness_task(task_id, response_text)
+            if failure_reason and task_id:
+                failed = await self._fail_harness_task(task_id, failure_reason)
+                if not failed:
+                    return web.json_response(
+                        {
+                            "status": "error",
+                            "reason": "fail_task_failed",
+                            "task_id": task_id,
+                        },
+                        status=500,
+                    )
 
             # 推送给用户（带重试 + DLQ）
             if not umo:
@@ -784,6 +898,21 @@ class HermesBridgePlugin(Star):
                 extra_payload={"session_key": session_key},
             )
             if outcome.success:
+                if not failure_reason and task_id:
+                    completed = await self._complete_harness_task(
+                        task_id,
+                        response_text,
+                        provenance_fields=provenance_fields,
+                    )
+                    if not completed:
+                        return web.json_response(
+                            {
+                                "status": "completion_failed",
+                                "umo": umo,
+                                "attempts": outcome.attempts,
+                            },
+                            status=500,
+                        )
                 # 推送成功 → 标 dedup（防 Hermes 多次推送同 task 导致洪水）
                 if task_id:
                     finalized.add(task_id)
@@ -821,7 +950,13 @@ class HermesBridgePlugin(Star):
             )
 
     async def _handle_response_via_card(
-        self, task_id: str, response_text: str
+        self,
+        task_id: str,
+        response_text: str,
+        *,
+        provenance_fields: dict[str, object] | None = None,
+        is_failure: bool = False,
+        failure_reason: str | None = None,
     ) -> CardHandleResult:
         """飞书卡片流接管 Hermes 响应。
 
@@ -846,7 +981,9 @@ class HermesBridgePlugin(Star):
 
         # 判中间状态 vs 最终失败 vs 最终成功
         is_intermediate = bool(_HERMES_INTERMEDIATE_RE.search(response_text))
-        is_final_failure = bool(_HERMES_FINAL_FAILURE_RE.search(response_text))
+        is_final_failure = is_failure or bool(
+            _HERMES_FINAL_FAILURE_RE.search(response_text)
+        )
         # ⚠️ 关键修复：短文本（< 500 字）即便不含"Still working"关键词，
         # 也认为是中间状态。Hermes 中间会推短摘要，被误当最终结果导致 dedup
         # 锁把真正的长结果挡掉。Hermes 真最终方案通常 1k+ 字。
@@ -911,14 +1048,12 @@ class HermesBridgePlugin(Star):
                     task_id[:8],
                 )
                 return CardHandleResult(handled=True)
-            try:
-                engine = getattr(self.context, "harness_engine", None)
-                if engine:
-                    await engine.fail_task(
-                        task_id, reason="hermes_api_timeout_or_error"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[HermesBridge] fail_task 失败：%s", exc)
+            failed = await self._fail_harness_task(
+                task_id,
+                failure_reason or response_text or "hermes_api_timeout_or_error",
+            )
+            if not failed:
+                return CardHandleResult(handled=True)
             stream_map.pop(task_id, None)
             logger.info(
                 "[HermesBridge] 卡片终态(失败) task=%s elapsed=%.1fs",
@@ -958,7 +1093,13 @@ class HermesBridgePlugin(Star):
                 task_id[:8],
             )
             return CardHandleResult(handled=True)
-        await self._complete_harness_task(task_id, response_text)
+        completed = await self._complete_harness_task(
+            task_id,
+            response_text,
+            provenance_fields=provenance_fields,
+        )
+        if not completed:
+            return CardHandleResult(handled=True)
         stream_map.pop(task_id, None)
         logger.info(
             "[HermesBridge] 卡片终态(成功) task=%s elapsed=%.1fs len=%d",
@@ -968,10 +1109,16 @@ class HermesBridgePlugin(Star):
         )
         return CardHandleResult(handled=True, is_finalized=True)
 
-    async def _complete_harness_task(self, task_id: str, response_text: str) -> None:
+    async def _complete_harness_task(
+        self,
+        task_id: str,
+        response_text: str,
+        *,
+        provenance_fields: dict[str, object] | None = None,
+    ) -> bool:
         engine = getattr(self.context, "harness_engine", None)
         if engine is None:
-            return
+            return False
         try:
             task = None
             store = getattr(engine, "store", None)
@@ -981,22 +1128,22 @@ class HermesBridgePlugin(Star):
                 task is not None
                 and task.payload.get("workflow_kind") == "content_sop_workflow"
             ):
+                result = parse_workflow_result(response_text)
+                if provenance_fields:
+                    result.update(provenance_fields)
                 await settle_content_sop_result(
                     engine,
                     task,
-                    parse_workflow_result(response_text),
+                    result,
+                    **self._content_sop_memory_governance_kwargs(),
                 )
                 logger.info(
                     "[HermesBridge] Content SOP 任务 %s 已进入验收结算", task_id
                 )
-                return
+                return True
             await engine.complete_task(
                 task_id,
-                result={
-                    "summary": response_text[:200],
-                    "response_preview": response_text[:500],
-                    "source": "hermes",
-                },
+                result=_harness_result(response_text, provenance_fields),
             )
             logger.info(
                 "[HermesBridge] Harness 任务 %s 已通过 Hermes 结果完成", task_id
@@ -1017,8 +1164,47 @@ class HermesBridgePlugin(Star):
                         "[HermesBridge] 更新 AI Inbox 交付状态失败：%s",
                         inbox_exc,
                     )
+            return True
         except Exception as exc:
             logger.warning("[HermesBridge] 完成 Harness 任务 %s 失败：%s", task_id, exc)
+            return False
+
+    async def _fail_harness_task(self, task_id: str, reason: str) -> bool:
+        engine = getattr(self.context, "harness_engine", None)
+        if engine is None:
+            return False
+        try:
+            await engine.fail_task(task_id, reason=reason)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[HermesBridge] 标记 Harness 任务 %s 失败异常：%s", task_id, exc
+            )
+            return False
+
+    def _content_sop_memory_governance_kwargs(self) -> dict[str, object]:
+        try:
+            from dc_engines.memory_governance.store import MemoryGovernanceStore
+
+            dc_root = Path(__file__).resolve().parents[3]
+            config = self._hcfg
+            data_dir_override = str(config.get("data_dir") or "").strip()
+            data_dir = (
+                Path(data_dir_override) if data_dir_override else dc_root / "data"
+            )
+            vault_override = str(config.get("obsidian_vault_path") or "").strip()
+            vault_path = (
+                Path(vault_override) if vault_override else dc_root / "ObsidianVault"
+            )
+            return {
+                "memory_governance_store": MemoryGovernanceStore(
+                    data_dir / "governed_memory.db"
+                ),
+                "obsidian_vault_path": vault_path,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[HermesBridge] Content SOP 记忆治理参数构造失败：%s", exc)
+            return {}
 
     async def _send_to_platform_strict(self, umo: str, message: str) -> None:
         """通过 AstrBot platform adapter 发送，按错误类型抛 Retriable/Permanent。
@@ -1049,21 +1235,25 @@ class HermesBridgePlugin(Star):
 
     # ── 辅助方法 ──────────────────────────────────────────────────────────────
 
+    def _signed_json_payload(self, data: dict) -> tuple[bytes, str]:
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        sig = hmac.new(
+            self.hermes_secret.encode("utf-8"), body, hashlib.sha256
+        ).hexdigest()
+        return body, f"sha256={sig}"
+
     async def _send_to_hermes(self, data: dict) -> None:
         try:
-            body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode(
-                "utf-8"
-            )
-            sig = hmac.new(
-                self.hermes_secret.encode("utf-8"), body, hashlib.sha256
-            ).hexdigest()
+            body, signature = self._signed_json_payload(data)
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     self.hermes_webhook_url,
                     data=body,
                     headers={
                         "Content-Type": "application/json",
-                        "X-Hub-Signature-256": f"sha256={sig}",
+                        "X-Hub-Signature-256": signature,
                         "X-Webhook-Event": "qq_message",
                     },
                     timeout=aiohttp.ClientTimeout(total=30),

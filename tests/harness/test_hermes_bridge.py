@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import importlib.util
 import json
 from pathlib import Path
@@ -12,6 +14,7 @@ import pytest
 from harness.callbacks import TaskCallbackPayload
 from harness.hermes_bridge import HermesBridge, HermesTaskRequest
 from harness.resources import ResourceConfig
+from harness.runtime_registry import RuntimeRegistry
 
 
 class CapturingSink:
@@ -20,6 +23,18 @@ class CapturingSink:
 
     async def send(self, payload: TaskCallbackPayload) -> None:
         self.payloads.append(payload)
+
+
+class FailFirstSink(CapturingSink):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def send(self, payload: TaskCallbackPayload) -> None:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("running callback unavailable")
+        await super().send(payload)
 
 
 class CapturingGate:
@@ -69,6 +84,21 @@ class FakeStream:
         return self._lines.pop(0)
 
 
+class FakeStdin:
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.writes.append(data)
+
+    async def drain(self) -> None:
+        await asyncio.sleep(0)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class FakeProcess:
     def __init__(
         self,
@@ -80,6 +110,7 @@ class FakeProcess:
         self.returncode = returncode
         self.stdout = FakeStream(stdout_lines or [])
         self.stderr = FakeStream(stderr_lines or [])
+        self.stdin = FakeStdin()
         self.terminate_called = False
         self.kill_called = False
 
@@ -139,18 +170,124 @@ class CapturingCardStreamer:
 
 
 class CapturingHarnessEngine:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        event_log: list[str] | None = None,
+        fail_complete: bool = False,
+    ) -> None:
         self.completed: list[dict[str, Any]] = []
         self.failed: list[dict[str, Any]] = []
+        self.event_log = event_log
+        self.fail_complete = fail_complete
 
     async def complete_task(self, task_id: str, *, result: dict[str, Any]) -> None:
+        if self.event_log is not None:
+            self.event_log.append("complete")
+        if self.fail_complete:
+            raise RuntimeError("strict source guard")
         self.completed.append({"task_id": task_id, "result": result})
 
     async def fail_task(self, task_id: str, *, reason: str) -> None:
+        if self.event_log is not None:
+            self.event_log.append("fail")
         self.failed.append({"task_id": task_id, "reason": reason})
 
 
+class CapturingDLQLogger:
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    async def log(self, payload: dict[str, Any]) -> None:
+        self.records.append(payload)
+
+
+class CapturingCallbackDispatcher:
+    def __init__(self, *, success: bool = True, event_log: list[str] | None = None):
+        self.success = success
+        self.event_log = event_log
+        self.calls: list[dict[str, Any]] = []
+
+    async def send_with_retry(
+        self,
+        *,
+        target_umo: str,
+        message: str,
+        task_id: str | None,
+        extra_payload: dict[str, Any],
+    ) -> SimpleNamespace:
+        if self.event_log is not None:
+            self.event_log.append("dispatch")
+        self.calls.append(
+            {
+                "target_umo": target_umo,
+                "message": message,
+                "task_id": task_id,
+                "extra_payload": extra_payload,
+            }
+        )
+        return SimpleNamespace(
+            success=self.success,
+            attempts=1,
+            last_error=None if self.success else "permanent: unavailable",
+            dlq_written=not self.success,
+        )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_task_to_hermes_signs_task_webhook(monkeypatch):
+    module = _load_plugin_module()
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        status = 202
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def text(self) -> str:
+            return "ok"
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url: str, **kwargs):
+            captured["url"] = url
+            captured.update(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", FakeSession)
+    plugin = object.__new__(module.HermesBridgePlugin)
+    plugin.hermes_secret = "test-secret"
+    plugin.hermes_task_webhook_url = "http://hermes.local/webhooks/astrbot_task"
+
+    ok = await plugin.dispatch_task_to_hermes(
+        "task_001",
+        "content_sop_workflow",
+        "生成客户邀约文案",
+        "lark:tenant:user",
+        {"trace": "beta"},
+    )
+
+    body = captured["data"]
+    expected_sig = hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
+    assert ok is True
+    assert captured["url"] == "http://hermes.local/webhooks/astrbot_task"
+    assert "json" not in captured
+    assert json.loads(body.decode("utf-8"))["task_id"] == "task_001"
+    assert captured["headers"]["X-Hub-Signature-256"] == f"sha256={expected_sig}"
+    assert captured["headers"]["X-Webhook-Event"] == "harness_task"
+
+
 def _load_plugin_module():
+    # dc_engines 的导入路径由根 tests/conftest.py 统一保证
     module_path = (
         Path(__file__).resolve().parents[2]
         / "data"
@@ -195,6 +332,35 @@ def _plugin_with_card_streamer(streamer: CapturingCardStreamer, task_id: str):
     plugin._dlq_logger = SimpleNamespace(log=lambda payload: None)
     plugin._callback_dispatcher = SimpleNamespace(send_with_retry=None)
     return plugin, context, engine
+
+
+def _plugin_without_card(
+    *,
+    engine: CapturingHarnessEngine | None = None,
+    dispatcher: CapturingCallbackDispatcher | None = None,
+    dlq_logger: CapturingDLQLogger | None = None,
+):
+    module = _load_plugin_module()
+    engine = engine or CapturingHarnessEngine()
+    dispatcher = dispatcher or CapturingCallbackDispatcher()
+    dlq_logger = dlq_logger or CapturingDLQLogger()
+    context = SimpleNamespace(
+        feishu_stream_map={},
+        feishu_streamers={},
+        platform_manager=SimpleNamespace(platform_insts=[]),
+        harness_engine=engine,
+    )
+    plugin = object.__new__(module.HermesBridgePlugin)
+    plugin.context = context
+    plugin.hermes_secret = "test-secret"
+    plugin._umo_cache = {}
+    plugin._finalized_task_ids = set()
+    plugin.session_router = SimpleNamespace(
+        get_platform_user_by_session=lambda session_key: None
+    )
+    plugin._dlq_logger = dlq_logger
+    plugin._callback_dispatcher = dispatcher
+    return plugin, context, engine, dispatcher, dlq_logger
 
 
 class FakeChatEvent:
@@ -251,6 +417,30 @@ def _plugin_for_distillation(base_dir: Path | None = None):
     if base_dir is not None:
         plugin.skill_bundle_base_dir = base_dir
     return plugin, module
+
+
+def test_content_sop_memory_governance_kwargs_use_plugin_config(tmp_path: Path):
+    module = _load_plugin_module()
+    plugin = object.__new__(module.HermesBridgePlugin)
+    plugin.context = SimpleNamespace(
+        get_config=lambda: {
+            "hermes_bridge": {
+                "data_dir": str(tmp_path / "wrong-data"),
+                "obsidian_vault_path": str(tmp_path / "wrong-vault"),
+            }
+        }
+    )
+    plugin._hcfg = {
+        "data_dir": str(tmp_path / "plugin-data"),
+        "obsidian_vault_path": str(tmp_path / "plugin-vault"),
+    }
+
+    kwargs = plugin._content_sop_memory_governance_kwargs()
+
+    assert str(kwargs["memory_governance_store"].db_path) == str(  # type: ignore[attr-defined]
+        tmp_path / "plugin-data" / "governed_memory.db"
+    )
+    assert kwargs["obsidian_vault_path"] == tmp_path / "plugin-vault"
 
 
 @pytest.mark.asyncio
@@ -900,16 +1090,20 @@ def _request(
     *,
     target_runtime: str = "claude_cli",
     job_id: str = "job-1",
+    payload_extra: dict[str, Any] | None = None,
 ) -> HermesTaskRequest:
+    payload = {
+        "target_runtime": target_runtime,
+        "session_id": "session-1",
+        "resource_key": "claude_cli_global",
+    }
+    if payload_extra:
+        payload.update(payload_extra)
     return HermesTaskRequest(
         router_decision={},
         user_input="Write a short plan",
         queue_job_id=job_id,
-        payload={
-            "target_runtime": target_runtime,
-            "session_id": "session-1",
-            "resource_key": "claude_cli_global",
-        },
+        payload=payload,
     )
 
 
@@ -918,6 +1112,7 @@ def _bridge(
     gate: CapturingGate | None = None,
     sink: CapturingSink | None = None,
     estimated_run_seconds: float = 10,
+    runtime_registry: RuntimeRegistry | None = None,
 ) -> HermesBridge:
     return HermesBridge(
         quota_gate=gate or CapturingGate(),  # type: ignore[arg-type]
@@ -928,6 +1123,7 @@ def _bridge(
                 estimated_run_seconds=estimated_run_seconds,  # type: ignore[arg-type]
             )
         },
+        runtime_registry=runtime_registry,
     )
 
 
@@ -1021,10 +1217,97 @@ async def test_claude_cli_success_emits_completed_callback(
     await bridge.submit(_request(job_id="job-ok"))
     await bridge.drain()
 
+    assert [payload.status for payload in sink.payloads] == ["running", "completed"]
+    assert sink.payloads[0].result == {"runtime": "claude_cli"}
     assert sink.payloads[-1].status == "completed"
     assert sink.payloads[-1].result is not None
     assert sink.payloads[-1].result["text"] == "final answer"
     assert gate.completed[-1]["job_id"] == "job-ok"
+
+
+@pytest.mark.asyncio
+async def test_running_callback_failure_does_not_block_cli_or_mark_quota_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sink = FailFirstSink()
+    gate = CapturingGate()
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess(
+            returncode=0,
+            stdout_lines=[
+                b'{"type":"result","subtype":"success","result":"final answer"}\n',
+            ],
+        )
+
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge(gate=gate, sink=sink)
+    await bridge.submit(_request(job_id="job-running-callback-fails"))
+    await bridge.drain()
+
+    assert sink.calls == 2
+    assert [payload.status for payload in sink.payloads] == ["completed"]
+    assert gate.completed[-1]["job_id"] == "job-running-callback-fails"
+    assert gate.failed == []
+
+
+@pytest.mark.asyncio
+async def test_claude_cli_strict_source_without_provenance_emits_failed_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sink = CapturingSink()
+    gate = CapturingGate()
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess(
+            returncode=0,
+            stdout_lines=[
+                b'{"type":"result","subtype":"success","result":"final answer"}\n',
+            ],
+        )
+
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge(gate=gate, sink=sink)
+    await bridge.submit(
+        _request(
+            job_id="job-strict-missing-source",
+            payload_extra={"strict_source_provenance_required": True},
+        )
+    )
+    await bridge.drain()
+
+    assert gate.completed == []
+    assert gate.failed[-1]["job_id"] == "job-strict-missing-source"
+    assert sink.payloads[-1].status == "failed"
+    assert sink.payloads[-1].error is not None
+    assert "source provenance" in sink.payloads[-1].error
+
+
+@pytest.mark.asyncio
+async def test_finish_completed_allows_strict_source_with_result_provenance() -> None:
+    sink = CapturingSink()
+    gate = CapturingGate()
+    bridge = _bridge(gate=gate, sink=sink)
+
+    await bridge._finish_completed(
+        _request(
+            job_id="job-strict-cited",
+            payload_extra={"strict_source_provenance_required": True},
+        ),
+        {
+            "text": "final answer",
+            "source_citations": [{"source_path": "projects/customer.md"}],
+        },
+    )
+
+    assert gate.completed[-1]["job_id"] == "job-strict-cited"
+    assert sink.payloads[-1].status == "completed"
 
 
 @pytest.mark.asyncio
@@ -1048,6 +1331,7 @@ async def test_claude_cli_returncode_failure_emits_failed_callback(
     await bridge.submit(_request(job_id="job-fail"))
     await bridge.drain()
 
+    assert [payload.status for payload in sink.payloads] == ["running", "failed"]
     assert sink.payloads[-1].status == "failed"
     assert sink.payloads[-1].error
     assert gate.failed[-1]["job_id"] == "job-fail"
@@ -1079,11 +1363,277 @@ async def test_claude_cli_timeout_terminates_process_and_fails(
 
 
 @pytest.mark.asyncio
-async def test_unimplemented_runtime_raises_clear_error() -> None:
+async def test_codex_cli_subprocess_args_and_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeProcess(
+            returncode=0,
+            stdout_lines=[
+                b'{"type":"result","subtype":"success","result":"ok"}\n',
+            ],
+        )
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "should-not-leak")
+    monkeypatch.setenv("OPENAI_API_KEY", "should-not-leak")
+    monkeypatch.setenv("GEMINI_API_KEY", "should-not-leak")
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge()
+    await bridge.submit(_request(target_runtime="codex_cli"))
+    await bridge.drain()
+
+    args = captured["args"]
+    env = captured["kwargs"]["env"]
+    assert args[0] == "codex"
+    assert args[1] == "exec"
+    assert "--json" in args
+    assert "Write a short plan" in args
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "OPENAI_API_KEY" not in env
+    assert "GEMINI_API_KEY" not in env
+    assert env["CODEX_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_codex_cli_stdin_does_not_use_claude_input_format_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    sink = CapturingSink()
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        process = FakeProcess(
+            returncode=0,
+            stdout_lines=[
+                b'{"type":"result","subtype":"success","result":"ok"}\n',
+            ],
+        )
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        captured["process"] = process
+        return process
+
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge(sink=sink)
+    await bridge.submit(
+        _request(
+            target_runtime="codex_cli",
+            payload_extra={
+                "messages": [
+                    {"role": "user", "content": "extra context"},
+                ]
+            },
+        )
+    )
+    await bridge.drain()
+
+    args = captured["args"]
+    assert "--input-format" not in args
+    assert captured["kwargs"]["stdin"] is asyncio.subprocess.PIPE
+    process = captured["process"]
+    assert isinstance(process, FakeProcess)
+    assert process.stdin.closed is True
+    assert b'"extra context"' in b"".join(process.stdin.writes)
+    assert sink.payloads[-1].status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_codex_cli_success_emits_completed_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sink = CapturingSink()
+    gate = CapturingGate()
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess(
+            returncode=0,
+            stdout_lines=[
+                b'{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n',
+                b'{"type":"result","subtype":"success","result":"codex final"}\n',
+            ],
+        )
+
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge(gate=gate, sink=sink)
+    await bridge.submit(_request(target_runtime="codex_cli", job_id="job-codex-ok"))
+    await bridge.drain()
+
+    assert [payload.status for payload in sink.payloads] == ["running", "completed"]
+    assert sink.payloads[0].result == {"runtime": "codex_cli"}
+    assert sink.payloads[-1].status == "completed"
+    assert sink.payloads[-1].result is not None
+    assert sink.payloads[-1].result["text"] == "codex final"
+    assert sink.payloads[-1].result["runtime"] == "codex_cli"
+    assert gate.completed[-1]["job_id"] == "job-codex-ok"
+
+
+@pytest.mark.asyncio
+async def test_codex_cli_strict_source_promotes_result_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sink = CapturingSink()
+    gate = CapturingGate()
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess(
+            returncode=0,
+            stdout_lines=[
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": "success",
+                        "result": "codex final",
+                        "source_citations": [{"source_path": "projects/customer.md"}],
+                    }
+                ).encode()
+                + b"\n",
+            ],
+        )
+
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge(gate=gate, sink=sink)
+    await bridge.submit(
+        _request(
+            target_runtime="codex_cli",
+            job_id="job-codex-strict-source",
+            payload_extra={"strict_source_provenance_required": True},
+        )
+    )
+    await bridge.drain()
+
+    assert sink.payloads[-1].status == "completed"
+    assert sink.payloads[-1].result is not None
+    assert sink.payloads[-1].result["source_citations"] == [
+        {"source_path": "projects/customer.md"}
+    ]
+    assert gate.completed[-1]["job_id"] == "job-codex-strict-source"
+
+
+@pytest.mark.asyncio
+async def test_codex_cli_returncode_failure_emits_failed_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sink = CapturingSink()
+    gate = CapturingGate()
+
+    async def fake_exec(*args: str, **kwargs: Any) -> FakeProcess:
+        return FakeProcess(
+            returncode=1,
+            stderr_lines=[b"codex boom\n"],
+        )
+
+    monkeypatch.setattr(
+        "harness.hermes_bridge.asyncio.create_subprocess_exec", fake_exec
+    )
+
+    bridge = _bridge(gate=gate, sink=sink)
+    await bridge.submit(_request(target_runtime="codex_cli", job_id="job-codex-fail"))
+    await bridge.drain()
+
+    assert [payload.status for payload in sink.payloads] == ["running", "failed"]
+    assert sink.payloads[-1].status == "failed"
+    assert sink.payloads[-1].error
+    assert "codex boom" in sink.payloads[-1].error
+    assert gate.failed[-1]["job_id"] == "job-codex-fail"
+
+
+def test_hermes_bridge_exposes_runtime_registry() -> None:
     bridge = _bridge()
 
-    with pytest.raises(NotImplementedError, match="gemini_cli.*not implemented"):
+    payload = bridge.runtime_registry.to_dashboard_payload()
+    ids = {item["runtime"] for item in payload["runtimes"]}
+
+    assert {"claude_cli", "codex_cli", "gemini_cli", "hermes_agent"} <= ids
+
+
+@pytest.mark.asyncio
+async def test_unknown_runtime_raises_typed_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_create_task(*args: Any, **kwargs: Any) -> asyncio.Task[None]:
+        raise AssertionError("submit should reject before creating a background task")
+
+    monkeypatch.setattr("harness.hermes_bridge.asyncio.create_task", fail_create_task)
+    bridge = _bridge()
+
+    with pytest.raises(NotImplementedError) as exc:
+        await bridge.submit(_request(target_runtime="missing_runtime"))
+
+    message = str(exc.value)
+    assert "missing_runtime" in message
+    assert "unknown_runtime" in message
+
+
+@pytest.mark.asyncio
+async def test_disabled_runtime_raises_typed_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_create_task(*args: Any, **kwargs: Any) -> asyncio.Task[None]:
+        raise AssertionError("submit should reject before creating a background task")
+
+    monkeypatch.setattr("harness.hermes_bridge.asyncio.create_task", fail_create_task)
+    bridge = _bridge(
+        runtime_registry=RuntimeRegistry.from_env({"DC_DISABLE_HERMES_AGENT": "1"})
+    )
+
+    with pytest.raises(NotImplementedError) as exc:
+        await bridge.submit(_request(target_runtime="hermes_agent"))
+
+    message = str(exc.value)
+    assert "hermes_agent" in message
+    assert "disabled_by_env" in message
+
+
+@pytest.mark.asyncio
+async def test_gemini_cli_raises_adapter_not_wired_without_background_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_create_task(*args: Any, **kwargs: Any) -> asyncio.Task[None]:
+        raise AssertionError("submit should reject before creating a background task")
+
+    monkeypatch.setattr("harness.hermes_bridge.asyncio.create_task", fail_create_task)
+    bridge = _bridge()
+
+    with pytest.raises(NotImplementedError) as exc:
         await bridge.submit(_request(target_runtime="gemini_cli"))
+
+    message = str(exc.value)
+    assert "gemini_cli" in message
+    assert "adapter_not_wired" in message
+
+
+@pytest.mark.asyncio
+async def test_hermes_agent_raises_adapter_not_wired_without_background_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_create_task(*args: Any, **kwargs: Any) -> asyncio.Task[None]:
+        raise AssertionError("submit should reject before creating a background task")
+
+    monkeypatch.setattr("harness.hermes_bridge.asyncio.create_task", fail_create_task)
+    bridge = _bridge()
+
+    with pytest.raises(NotImplementedError) as exc:
+        await bridge.submit(_request(target_runtime="hermes_agent"))
+
+    message = str(exc.value)
+    assert "hermes_agent" in message
+    assert "adapter_not_wired" in message
 
 
 @pytest.mark.asyncio
@@ -1142,3 +1692,163 @@ async def test_finalize_failure_does_not_dedup() -> None:
     assert task_id in context.feishu_stream_map
     assert streamer.finalized == []
     assert engine.completed == []
+
+
+@pytest.mark.asyncio
+async def test_non_card_without_umo_dlqs_without_completing_task() -> None:
+    task_id = "task-no-umo"
+    plugin, _context, engine, dispatcher, dlq_logger = _plugin_without_card()
+
+    response = await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {"task_id": task_id, "response": "final answer", "session_key": "s1"}
+        )
+    )
+
+    assert response.status == 202
+    assert json.loads(response.text)["status"] == "queued_to_dlq"
+    assert dispatcher.calls == []
+    assert dlq_logger.records
+    assert dlq_logger.records[-1]["task_id"] == task_id
+    assert engine.completed == []
+
+
+@pytest.mark.asyncio
+async def test_non_card_dispatch_success_completes_task_after_delivery() -> None:
+    task_id = "task-delivered"
+    event_log: list[str] = []
+    engine = CapturingHarnessEngine(event_log=event_log)
+    dispatcher = CapturingCallbackDispatcher(event_log=event_log)
+    plugin, _context, engine, dispatcher, _dlq_logger = _plugin_without_card(
+        engine=engine,
+        dispatcher=dispatcher,
+    )
+    plugin._umo_cache["s1"] = "umo-1"
+
+    response = await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {"task_id": task_id, "response": "final answer", "session_key": "s1"}
+        )
+    )
+
+    assert response.status == 200
+    assert json.loads(response.text)["status"] == "ok"
+    assert event_log == ["dispatch", "complete"]
+    assert dispatcher.calls[-1]["target_umo"] == "umo-1"
+    assert engine.completed[-1]["task_id"] == task_id
+    assert task_id in plugin._finalized_task_ids
+
+
+@pytest.mark.asyncio
+async def test_callback_provenance_is_merged_into_harness_completion() -> None:
+    task_id = "task-provenance"
+    plugin, _context, engine, _dispatcher, _dlq_logger = _plugin_without_card()
+    plugin._umo_cache["s1"] = "umo-1"
+
+    await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {
+                "task_id": task_id,
+                "response": "final answer",
+                "session_key": "s1",
+                "source_citations": [{"source_path": "projects/customer.md"}],
+                "hits": [{"id": "doc-1", "url": "https://example.test/doc"}],
+            }
+        )
+    )
+
+    result = engine.completed[-1]["result"]
+    assert result["summary"] == "final answer"
+    assert result["response_preview"] == "final answer"
+    assert result["source"] == "hermes"
+    assert result["source_citations"] == [{"source_path": "projects/customer.md"}]
+    assert result["hits"] == [{"id": "doc-1", "url": "https://example.test/doc"}]
+
+
+@pytest.mark.asyncio
+async def test_card_complete_failure_does_not_dedup_or_pop_stream_map() -> None:
+    task_id = "task-complete-fails"
+    streamer = CapturingCardStreamer()
+    plugin, context, _engine = _plugin_with_card_streamer(streamer, task_id)
+    failing_engine = CapturingHarnessEngine(fail_complete=True)
+    context.harness_engine = failing_engine
+
+    final_text = "最终方案\n" + ("这里是完整分析内容。" * 220)
+    response = await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {"task_id": task_id, "response": final_text, "session_key": "s1"}
+        )
+    )
+
+    assert response.status == 200
+    assert json.loads(response.text)["via"] == "feishu_card"
+    assert len(streamer.finalized) == 1
+    assert task_id not in plugin._finalized_task_ids
+    assert task_id in context.feishu_stream_map
+    assert failing_engine.completed == []
+
+
+@pytest.mark.asyncio
+async def test_failed_callback_status_fails_task_without_completion() -> None:
+    task_id = "task-status-failed"
+    plugin, _context, engine, dispatcher, _dlq_logger = _plugin_without_card()
+    plugin._umo_cache["s1"] = "umo-1"
+
+    response = await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {
+                "task_id": task_id,
+                "status": "failed",
+                "response": "Hermes runtime failed",
+                "session_key": "s1",
+            }
+        )
+    )
+
+    assert response.status == 200
+    assert engine.completed == []
+    assert engine.failed[-1]["task_id"] == task_id
+    assert "Hermes runtime failed" in engine.failed[-1]["reason"]
+    assert dispatcher.calls[-1]["message"] == "Hermes runtime failed"
+
+
+@pytest.mark.asyncio
+async def test_final_error_text_fails_task_without_completion() -> None:
+    task_id = "task-final-error"
+    plugin, _context, engine, _dispatcher, _dlq_logger = _plugin_without_card()
+    plugin._umo_cache["s1"] = "umo-1"
+
+    await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {
+                "task_id": task_id,
+                "response": "Final error: upstream API exhausted retries",
+                "session_key": "s1",
+            }
+        )
+    )
+
+    assert engine.completed == []
+    assert engine.failed[-1]["task_id"] == task_id
+    assert "Final error" in engine.failed[-1]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_empty_response_with_task_id_fails_task() -> None:
+    task_id = "task-empty-response"
+    plugin, _context, engine, dispatcher, dlq_logger = _plugin_without_card()
+
+    response = await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {"task_id": task_id, "response": "", "session_key": "s1"}
+        )
+    )
+
+    body = json.loads(response.text)
+    assert response.status == 202
+    assert body["status"] == "failed"
+    assert body["reason"] == "empty_response"
+    assert engine.completed == []
+    assert engine.failed[-1]["task_id"] == task_id
+    assert dispatcher.calls == []
+    assert dlq_logger.records == []

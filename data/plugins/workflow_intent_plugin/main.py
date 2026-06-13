@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
-from dc_engines.harness import create_workflow_request
+from dc_engines.harness import (
+    allows_auto_complete_on_response,
+    create_workflow_request,
+)
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -40,13 +43,20 @@ _INTERNAL_CONTEXT_MARKERS: tuple[str, ...] = ("<dc_agent_memory_context>",)
     "1.0.0",
 )
 class WorkflowIntentPlugin(Star):
-    def __init__(self, context: Context) -> None:
-        super().__init__(context)
+    def __init__(self, context: Context, config=None) -> None:
+        super().__init__(context, config)
+        cfg = config or {}
+        self.delegate_to_department_workflow = bool(
+            cfg.get("delegate_to_department_workflow", False)
+        )
 
     @filter.event_message_type(
         EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE
     )
     async def on_message(self, event: AstrMessageEvent):
+        if self.delegate_to_department_workflow:
+            return
+
         text = (event.message_str or "").strip()
         if not text:
             return
@@ -141,7 +151,9 @@ class WorkflowIntentPlugin(Star):
             # 请求人画像写进 payload（payload 是 dict，加字段不破坏 schema）
             if requester_meta:
                 req.payload.update(requester_meta)
-            req.payload["auto_complete_on_response"] = True
+            req.payload["auto_complete_on_response"] = allows_auto_complete_on_response(
+                req.payload
+            )
             task = await engine.create_task(req)
             event.set_extra("workflow_intent_task_id", task.task_id)
             link_task = getattr(self.context, "ai_inbox_link_task", None)

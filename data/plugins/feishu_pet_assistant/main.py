@@ -108,10 +108,10 @@ class FeishuPetAssistantPlugin(Star):
         user_id = self._user_id(event)
         if not user_id:
             return
-        self._service.get_or_create_pet(user_id)  # 确保 demo 任务已种
+        self._service.get_or_create_pet(user_id)
         result = self._service.complete_first_pending(user_id)
         if result is None:
-            self._reply(event, "今天没有待办了，小橘可以躺着晒太阳 🌞")
+            self._reply(event, cards.NO_REAL_TASKS_TEXT)
             return
         pet, task = result
         stats = self._service.build_stats(user_id)
@@ -131,14 +131,46 @@ class FeishuPetAssistantPlugin(Star):
             return
 
         payload = self._parse_card_action(event)
-        value = payload.get("value", {}) if isinstance(payload, dict) else {}
+        # Robust extraction: some card actions put fields at top level of payload, others wrap in "value".
+        # Support both the inner value and top-level for source/action (defensive against parse variations).
+        if isinstance(payload, dict):
+            inner_value = payload.get("value", {}) or {}
+            if isinstance(inner_value, dict) and inner_value:
+                value = inner_value
+            else:
+                value = payload
+        else:
+            value = {}
         action = value.get("action") if isinstance(value, dict) else None
+        source = value.get("source") if isinstance(value, dict) else None
         logger.info(
-            "[FeishuPet] handle_card_action user=%s action=%s",
-            user_id[:12],
+            "[FeishuPet] handle_card_action user=%s action=%s source=%s",
+            user_id[:12] if user_id else "",
             action,
+            source,
         )
 
+        # ── 隔离膜：不处理其他插件渲染的卡片来源 ──────────────────────────
+        if source == "department_memory_prompt":
+            logger.info(
+                "[FeishuPet] 透传 department_memory_prompt card_action，停止本插件传播让 dc_router 接管。"
+            )
+            event.stop_event()
+            return
+        if source is not None and source not in {
+            "pet_system",  # pet 自己的卡片（如有）
+            "daily_response",
+            "thinking_waiting",
+            "casual_reply",
+        }:
+            logger.info(
+                "[FeishuPet] 透传未知 source=%s action=%s，停止本插件传播。",
+                source,
+                action,
+            )
+            event.stop_event()
+            return
+        # ── 以下是 pet 自己的按钮处理 ──────────────────────────────────────
         if action == "pet_view_tasks":
             pet = self._service.get_or_create_pet(user_id)
             tasks = self._service.list_today_tasks(user_id)
@@ -154,7 +186,7 @@ class FeishuPetAssistantPlugin(Star):
             result = self._service.complete_first_pending(user_id)
             if result is None:
                 await self._send_card(
-                    event, cards.build_error_card("今天没有待办了，小橘可以躺着 🌞")
+                    event, cards.build_error_card(cards.NO_REAL_TASKS_TEXT)
                 )
                 event.stop_event()
                 return

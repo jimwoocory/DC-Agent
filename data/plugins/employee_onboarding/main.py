@@ -1334,18 +1334,22 @@ class EmployeeOnboardingPlugin(Star):
             )
             if err:
                 if valid_invite_link:
-                    note = (
-                        "已通过测试，可以正常使用小助手。自动拉群失败；如需进内测群，可用下方链接或等管理员处理。"
-                    )
+                    note = "已通过测试，可以正常使用小助手。自动拉群失败；如需进内测群，可用下方链接或等管理员处理。"
                     return "done", note, err
-                note = "已通过测试，可以正常使用小助手。内测群入口后续由管理员单独处理。"
+                note = (
+                    "已通过测试，可以正常使用小助手。内测群入口后续由管理员单独处理。"
+                )
                 return "done", note, err
             if ok > 0 and open_id not in invalid:
                 return "joined", "已通过测试，我已经自动把你拉进内测群。", None
             note = "已通过测试，可以正常使用小助手。飞书返回未成功入群，内测群后续由管理员单独处理。"
             return "done", note, "invalid_or_already_member"
         if valid_invite_link:
-            return "done", "已通过测试，可以正常使用小助手。如需进内测群，可点击下方入口。", None
+            return (
+                "done",
+                "已通过测试，可以正常使用小助手。如需进内测群，可点击下方入口。",
+                None,
+            )
         return "done", "已通过测试，可以正常使用小助手。", None
 
     # ─────────────────── Admin command ───────────────────

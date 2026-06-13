@@ -41,6 +41,23 @@ _INSUFFICIENT_MATERIAL_PATTERNS: tuple[str, ...] = (
     "不能确认",
     "无法核实",
     "无法验证",
+    "不能完成",
+    "无法完成",
+    "未命中",
+    "没有命中",
+    "检索未命中",
+    "未找到相关资料",
+    "没有找到相关资料",
+    "没找到相关资料",
+    "无来源依据",
+    "缺少来源",
+    "缺少引用",
+    "白名单未配置",
+    "资料库未配置",
+    "待审核",
+    "等待审核",
+    "待员工确认",
+    "等待员工确认",
     "没读到",
     "未读取到",
     "没有读取到",
@@ -48,9 +65,28 @@ _INSUFFICIENT_MATERIAL_PATTERNS: tuple[str, ...] = (
     "没有提供",
     "insufficient material",
     "missing material",
+    "missing required input",
     "need more information",
+    "insufficient information",
+    "not enough information",
     "cannot verify",
     "unable to verify",
+    "no matches",
+    "no relevant documents",
+    "no source",
+    "no citation",
+    "requires review",
+    "pending review",
+    "waiting for approval",
+)
+_INSUFFICIENT_MATERIAL_SUCCESS_EXCEPTIONS: tuple[str, ...] = (
+    "未完成项：无",
+    "未完成项: 无",
+    "无需补充",
+    "不需要补充",
+    "无需提供",
+    "not found fallback",
+    "fixed the not found",
 )
 
 _MD_HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
@@ -68,7 +104,13 @@ _AUTO_COMPLETE_TASK_ID_KEYS = (
 
 _AUTO_COMPLETE_SOURCE_DEFAULTS = {
     "department_workflow_plugin",
+    # 2026-06-11: 同时接受 ``llm_router_truth_intake`` (harness_state_injector
+    # 仍在写的旧名) 和 ``dc_router_truth_intake`` (合同定义的新名, 阶段 5H
+    # 完成 harness_state_injector 迁移后会切换). 一旦 harness_state_injector
+    # 切到新名, 旧名可以从这里删掉 — 见
+    # tests/harness_sensor_plugin_truth_intake_test.py 锁的契约.
     "llm_router_truth_intake",
+    "dc_router_truth_intake",
     "workflow_intent_plugin",
 }
 
@@ -81,6 +123,9 @@ def _classify_response_quality(resp: LLMResponse, text: str) -> str:
         if pattern in head:
             return "error"
     lowered = head.lower()
+    for exception in _INSUFFICIENT_MATERIAL_SUCCESS_EXCEPTIONS:
+        if exception.lower() in lowered:
+            return "success"
     for pattern in _INSUFFICIENT_MATERIAL_PATTERNS:
         if pattern.lower() in lowered:
             return "insufficient_materials"
@@ -129,6 +174,12 @@ def _result_plain_text(event: AstrMessageEvent) -> str:
 
 def _allows_auto_complete(task) -> bool:
     payload = getattr(task, "payload", {}) or {}
+    if payload.get("review_required_by_default") is True:
+        return False
+    if payload.get("generation_allowed") is False:
+        return False
+    if payload.get("missing_required_inputs"):
+        return False
     explicit = payload.get("auto_complete_on_response")
     if explicit is not None:
         return bool(explicit)
@@ -173,6 +224,12 @@ class HarnessSensorPlugin(Star):
             return
         text = _result_plain_text(event)
         if not text:
+            # If the result chain exists but has no plain text, do not stop propagation.
+            # Many tool-use plugins leave only custom components here and rely on the
+            # downstream decorators / respond stage to send. Let the pipeline continue.
+            logger.debug(
+                "[harness_sensor] maybe_complete_plugin_result skipped because result plain text is empty."
+            )
             return
         await self._settle_active_tasks(
             event,
@@ -180,7 +237,7 @@ class HarnessSensorPlugin(Star):
             quality=_classify_response_quality(None, text),
             source="harness_sensor_plugin:decorating_result",
             role=None,
-            allowed_statuses={"pending", "in_progress", "review_required"},
+            allowed_statuses={"pending", "in_progress"},
         )
 
     async def _settle_active_tasks(
@@ -315,6 +372,7 @@ class HarnessSensorPlugin(Star):
             return (
                 task is not None
                 and task.status not in _HARNESS_TERMINAL_STATUSES
+                and task.status != "review_required"
                 and _allows_auto_complete(task)
                 and (allowed_statuses is None or task.status in allowed_statuses)
             )

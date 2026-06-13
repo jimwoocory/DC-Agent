@@ -21,6 +21,7 @@ from .task_store import HarnessTaskStore
 from .workflows import (
     HarnessWorkflowKind,
     HarnessWorkflowPlan,
+    allows_auto_complete_on_response,
     build_workflow_plan,
     create_workflow_request,
     parse_workflow_result,
@@ -47,6 +48,7 @@ __all__ = [
     "HarnessTaskStore",
     "HarnessWorkflowKind",
     "HarnessWorkflowPlan",
+    "allows_auto_complete_on_response",
     "assess_harness_guardrails",
     "build_workflow_plan",
     "create_workflow_request",

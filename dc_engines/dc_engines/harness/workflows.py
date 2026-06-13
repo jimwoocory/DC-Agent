@@ -111,11 +111,20 @@ def build_workflow_plan(
         "review_required_by_default": template["review_required"],
         "required_outputs": list(template["required_outputs"]),
     }
+    payload["auto_complete_on_response"] = allows_auto_complete_on_response(payload)
     return HarnessWorkflowPlan(
         workflow_kind=workflow_kind,
         title=title,
         domain=str(template["domain"]),
         payload=payload,
+    )
+
+
+def allows_auto_complete_on_response(payload: dict[str, Any]) -> bool:
+    return (
+        payload.get("review_required_by_default") is not True
+        and payload.get("generation_allowed") is not False
+        and not payload.get("missing_required_inputs")
     )
 
 

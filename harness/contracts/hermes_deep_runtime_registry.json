@@ -1,0 +1,20 @@
+{
+  "feature": "hermes_deep_runtime_registry",
+  "goal": "Expose typed Hermes runtime status for dashboard and submit-time bridge decisions without pretending unwired adapters can execute.",
+  "acceptance_criteria": [
+    {
+      "id": "hermes-runtime-001",
+      "description": "RuntimeRegistry reports typed status for claude_cli, codex_cli, gemini_cli, hermes_agent, adapter_wired execution readiness, disabled Hermes env, unknown runtimes, and dashboard payload serialization.",
+      "verification": "uv run pytest tests/test_deep_runtime_closure.py -q"
+    },
+    {
+      "id": "hermes-runtime-002",
+      "description": "HermesBridge exposes the runtime registry, rejects unknown or disabled runtimes with typed reasons, and rejects status-known but unwired adapters with adapter_not_wired before creating background tasks.",
+      "verification": "uv run pytest tests/harness/test_hermes_bridge.py -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

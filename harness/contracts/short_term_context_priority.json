@@ -1,0 +1,97 @@
+{
+  "feature": "short_term_context_priority",
+  "goal": "Keep short follow-up messages anchored to recent conversation history, while treating DC-Agent long-term memory as lower-priority factual reference.",
+  "acceptance_criteria": [
+    {
+      "id": "stcp-001",
+      "description": "When a user sends short feedback or a follow-up such as 不满意, the current intent must be resolved from the recent conversation history before any long-term memory match is considered.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_below_recent_history -q"
+    },
+    {
+      "id": "stcp-002",
+      "description": "The provider request must remove the dc_agent_memory_context marker block from the current user prompt so the model sees the user's actual short message as the prompt.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_below_recent_history -q"
+    },
+    {
+      "id": "stcp-003",
+      "description": "DC-Agent long-term memory must be appended only as a lower-priority reference after recent conversation history has established the current project, customer, brand, or task target.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_below_recent_history -q"
+    },
+    {
+      "id": "stcp-004",
+      "description": "Demoted DC-Agent memory context must be transient provider input and must not be saved back into conversation history as ordinary user content.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_below_recent_history -q"
+    },
+    {
+      "id": "stcp-005",
+      "description": "The short-term context priority contract must remain wired to a harness test that verifies the contract, core regression entry point, and implementation guardrails.",
+      "verification": "uv run pytest tests/harness/test_short_term_context_priority_contract.py -q"
+    },
+    {
+      "id": "stcp-006",
+      "description": "A Feishu/Lark short-feedback replay must prove that platform-specific message events still use recent conversation history before lower-priority DC-Agent memory.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_for_lark_short_feedback -q"
+    },
+    {
+      "id": "stcp-007",
+      "description": "The dc_router memory retrieval call must pass a query built from recent conversation history plus the current short feedback, instead of querying long-term memory with only the short feedback text.",
+      "verification": "uv run pytest tests/unit/test_runtime_context_memory_query.py::test_build_memory_retrieval_query_combines_history_and_short_feedback -q"
+    }
+  ],
+  "runtime_context_pipeline": {
+    "core_files": [
+      "astrbot/core/runtime_context/models.py",
+      "astrbot/core/runtime_context/assembler.py",
+      "astrbot/core/runtime_context/memory_query.py"
+    ],
+    "router_files": [
+      "data/plugins/dc_router/dispatch.py",
+      "data/plugins/dc_router/memory_injection.py"
+    ],
+    "priority_order": [
+      "current_user_message",
+      "recent_conversation_history",
+      "current_turn_attachments",
+      "long_term_memory_reference",
+      "knowledge_base_reference",
+      "background_system_context"
+    ],
+    "save_policy": {
+      "current_user_message": "save",
+      "recent_conversation_history": "already_saved",
+      "current_turn_attachments": "no_save",
+      "long_term_memory_reference": "no_save",
+      "knowledge_base_reference": "no_save",
+      "background_system_context": "no_save"
+    }
+  },
+  "runtime_boundaries": {
+    "authoritative_recent_context": [
+      "conversation history",
+      "current user prompt"
+    ],
+    "lower_priority_reference": [
+      "data/plugins/dc_router/memory_injection.py injected dc_agent_memory_context"
+    ],
+    "retrieval_query_context": [
+      "data/plugins/dc_router/dispatch.py recent conversation history",
+      "current user prompt"
+    ],
+    "core_enforcement": [
+      "astrbot/core/runtime_context/assembler.py",
+      "astrbot/core/astr_main_agent.py"
+    ]
+  },
+  "non_goals": [
+    "Do not solve this by adding platform-specific WebChat-only behavior.",
+    "Do not patch the memory retrieval query by simple string concatenation in dc_memory_context as the sole guardrail.",
+    "Do not allow long-term memory to rename or retarget the active brand, customer, project, or task established by recent turns."
+  ],
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_short_term_context_priority_contract.py -q",
+    "core_regression": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_below_recent_history -q",
+    "feishu_lark_regression": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_demotes_dc_memory_for_lark_short_feedback -q",
+    "router_memory_query_regression": "uv run pytest tests/unit/test_runtime_context_memory_query.py::test_build_memory_retrieval_query_combines_history_and_short_feedback -q",
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

@@ -4,6 +4,8 @@ import asyncio
 import base64
 from collections.abc import AsyncGenerator
 from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
 
 from astrbot.core import db_helper, logger
 from astrbot.core.agent.message import (
@@ -33,7 +35,13 @@ from astrbot.core.provider.entities import (
     LLMResponse,
     ProviderRequest,
 )
+from astrbot.core.runtime_context.watermarks import (
+    MemoryWatermarkAction,
+    evaluate_medium_term_watermark,
+    long_term_archive_action,
+)
 from astrbot.core.star.star_handler import EventType
+from astrbot.core.utils.astrbot_path import get_astrbot_root
 from astrbot.core.utils.metrics import Metric
 from astrbot.core.utils.session_lock import session_lock_manager
 
@@ -491,12 +499,194 @@ class InternalAgentSubStage(Stage):
             history=message_to_save,
             token_usage=token_usage,
         )
+        await self._archive_lark_chat_turn(
+            event,
+            req,
+            llm_response,
+            token_usage=token_usage,
+        )
+
+    async def _archive_lark_chat_turn(
+        self,
+        event: AstrMessageEvent,
+        req: ProviderRequest,
+        llm_response: LLMResponse,
+        *,
+        token_usage: int | None,
+    ) -> None:
+        if event.get_platform_name() != "lark":
+            return
+
+        user_text = (req.prompt or event.get_message_str() or "").strip()
+        assistant_text = (llm_response.completion_text or "").strip()
+        if not user_text and not assistant_text:
+            return
+
+        try:
+            from dc_engines.chat_archive import (
+                LarkChatArchiveRecord,
+                append_lark_chat_record,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Lark chat archive unavailable: %s", exc)
+            return
+
+        try:
+            open_id = event.get_sender_id() or ""
+            employee_name, department = await self._resolve_lark_employee_profile(
+                open_id=open_id,
+                fallback_name=event.get_sender_name(),
+            )
+            await self._evaluate_lark_medium_memory_watermark(open_id, event)
+
+            root = self._lark_chat_archive_root()
+            timestamp = _event_timestamp(event)
+            message_id = _lark_message_id(event)
+            archive_action = long_term_archive_action()
+            common = {
+                "platform_id": event.get_platform_id(),
+                "conversation_id": req.conversation.cid if req.conversation else "",
+                "message_id": message_id,
+                "feishu_open_id": open_id,
+                "employee_name": employee_name,
+                "department": department,
+                "metadata": {
+                    "unified_msg_origin": event.unified_msg_origin,
+                    "long_term_action": archive_action.action.value,
+                    "long_term_handoff": archive_action.metadata.get("handoff", ""),
+                },
+            }
+            if user_text:
+                await asyncio.to_thread(
+                    append_lark_chat_record,
+                    root,
+                    LarkChatArchiveRecord(
+                        timestamp=timestamp,
+                        sender_type="user",
+                        text=user_text,
+                        **common,
+                    ),
+                )
+            if assistant_text:
+                await asyncio.to_thread(
+                    append_lark_chat_record,
+                    root,
+                    LarkChatArchiveRecord(
+                        timestamp=_now_timestamp(),
+                        sender_type="assistant",
+                        text=assistant_text,
+                        total_tokens=token_usage,
+                        **common,
+                    ),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Persist Lark chat archive failed: %s", exc, exc_info=True)
+
+    async def _resolve_lark_employee_profile(
+        self,
+        *,
+        open_id: str,
+        fallback_name: str,
+    ) -> tuple[str, str]:
+        employee_name = fallback_name.strip() or "未知员工"
+        department = "未知部门"
+        store = getattr(self.ctx.plugin_manager.context, "employee_store", None)
+        if not store or not open_id:
+            return employee_name, department
+
+        try:
+            employee = await store.get_employee(open_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Load Lark employee profile failed: %s", exc)
+            return employee_name, department
+
+        if employee is None:
+            return employee_name, department
+        return (
+            employee.display_name or employee_name,
+            employee.department or department,
+        )
+
+    async def _evaluate_lark_medium_memory_watermark(
+        self,
+        open_id: str,
+        event: AstrMessageEvent,
+    ) -> None:
+        store = getattr(self.ctx.plugin_manager.context, "employee_store", None)
+        if not store or not open_id:
+            return
+
+        try:
+            memories = await store.list_memories(open_id, limit=1000)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Evaluate Lark medium memory watermark failed: %s", exc)
+            return
+
+        token_estimate = sum(max(1, len(memory.content) // 3) for memory in memories)
+        decision = evaluate_medium_term_watermark(
+            item_count=len(memories),
+            token_estimate=token_estimate,
+        )
+        event.set_extra(
+            "runtime_context_medium_watermark",
+            {
+                "layer": decision.layer.value,
+                "action": decision.action.value,
+                "current": decision.current,
+                "limit": decision.limit,
+                "reason": decision.reason,
+                "metadata": dict(decision.metadata),
+            },
+        )
+        if decision.action == MemoryWatermarkAction.CLEANUP_AND_PROMOTE:
+            logger.info(
+                "Lark medium memory watermark reached for open_id=%s: %s",
+                open_id,
+                decision.reason,
+            )
+
+    def _lark_chat_archive_root(self) -> Path:
+        archive_cfg = self.main_agent_cfg.provider_settings.get("lark_chat_archive", {})
+        if not isinstance(archive_cfg, dict):
+            archive_cfg = {}
+        configured_root = archive_cfg.get("nas_root")
+        if configured_root:
+            return Path(str(configured_root)).expanduser()
+        return Path(get_astrbot_root()) / "nas"
 
 
 # we prevent astrbot from connecting to known malicious hosts
 # these hosts are base64 encoded
 BLOCKED = {"dGZid2h2d3IuY2xvdWQuc2VhbG9zLmlv", "a291cmljaGF0"}
 decoded_blocked = [base64.b64decode(b).decode("utf-8") for b in BLOCKED]
+
+
+def _now_timestamp() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
+def _event_timestamp(event: AstrMessageEvent) -> str:
+    created_at = getattr(event, "created_at", None)
+    if isinstance(created_at, int | float) and created_at > 0:
+        return datetime.fromtimestamp(created_at, timezone.utc).astimezone().isoformat()
+    return _now_timestamp()
+
+
+def _lark_message_id(event: AstrMessageEvent) -> str:
+    raw_message = getattr(event.message_obj, "raw_message", None)
+    if isinstance(raw_message, dict):
+        for key in ("message_id", "open_message_id"):
+            value = raw_message.get(key)
+            if value:
+                return str(value)
+    else:
+        for key in ("message_id", "open_message_id"):
+            value = getattr(raw_message, key, None)
+            if value:
+                return str(value)
+
+    extra = event.get_extra("message_id")
+    return str(extra) if extra else ""
 
 
 async def _record_internal_agent_stats(

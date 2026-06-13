@@ -252,6 +252,9 @@ class WebChatAdapter(Platform):
         message_event.set_extra("action_type", payload.get("action_type"))
         message_event.set_extra("llm_checkpoint_id", payload.get("llm_checkpoint_id"))
         message_event.set_extra(
+            "platform_history_id", payload.get("platform_history_id")
+        )
+        message_event.set_extra(
             "thread_selected_text", payload.get("thread_selected_text")
         )
 

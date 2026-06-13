@@ -227,6 +227,7 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         fallback_providers: list[Provider] | None = None,
         tool_result_overflow_dir: str | None = None,
         read_tool: FunctionTool | None = None,
+        context_max_tokens_override: int | None = None,
         **kwargs: T.Any,
     ) -> None:
         self.req = request
@@ -240,13 +241,18 @@ class ToolLoopAgentRunner(BaseAgentRunner[TContext]):
         self.custom_compressor = custom_compressor
         self.tool_result_overflow_dir = tool_result_overflow_dir
         self.read_tool = read_tool
+        self.context_max_tokens_override = context_max_tokens_override
         self._tool_result_token_counter = EstimateTokenCounter()
         # we will do compress when:
         # 1. before requesting LLM
         # TODO: 2. after LLM output a tool call
         self.context_config = ContextConfig(
             # <=0 will never do compress
-            max_context_tokens=provider.provider_config.get("max_context_tokens", 0),
+            max_context_tokens=(
+                context_max_tokens_override
+                if context_max_tokens_override and context_max_tokens_override > 0
+                else provider.provider_config.get("max_context_tokens", 0)
+            ),
             # enforce max turns before compression
             enforce_max_turns=self.enforce_max_turns,
             truncate_turns=self.truncate_turns,

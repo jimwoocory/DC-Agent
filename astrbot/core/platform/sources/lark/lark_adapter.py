@@ -686,12 +686,23 @@ class LarkPlatformAdapter(Platform):
             abm.message_str = "__card_action__:" + json.dumps(
                 payload, ensure_ascii=False
             )
-            abm.message_id = f"card_action_{int(time.time() * 1000)}_{open_id[:8]}"
+            # Use real open_message_id from card context when available (prevents 99992354 invalid id errors).
+            # The synthetic "card_action_..." was being passed as open_message_id to Feishu APIs expecting real "om_..." card message ids.
+            # Fallback to synthetic only if no original id (for pure action identification).
+            original_msg_id = payload.get("open_message_id")
+            abm.message_id = (
+                original_msg_id
+                or f"card_action_{int(time.time() * 1000)}_{open_id[:8]}"
+            )
             abm.raw_message = data
             abm.is_card_action = True
             abm.card_action_payload = payload
             abm.sender = MessageMember(user_id=open_id, nickname=open_id[:8])
             abm.session_id = open_id
+            if original_msg_id:
+                abm.original_card_message_id = (
+                    original_msg_id  # for downstream card update logic
+                )
 
             logger.info(
                 "[Lark.CardAction] open_id=%s value=%s",

@@ -14,7 +14,7 @@ from pathlib import Path
 from astrbot.core import logger
 from astrbot.core.agent.handoff import HandoffTool
 from astrbot.core.agent.mcp_client import MCPTool
-from astrbot.core.agent.message import TextPart
+from astrbot.core.agent.message import TextPart, get_checkpoint_id
 from astrbot.core.agent.tool import ToolSet
 from astrbot.core.astr_agent_context import AgentContextWrapper, AstrAgentContext
 from astrbot.core.astr_agent_hooks import MAIN_AGENT_HOOKS
@@ -38,6 +38,11 @@ from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.provider import Provider
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.provider.register import llm_tools
+from astrbot.core.runtime_context.assembler import RuntimeContextAssembler
+from astrbot.core.runtime_context.watermarks import (
+    LarkChatScenario,
+    MemoryWatermarkPolicy,
+)
 from astrbot.core.skills.skill_manager import (
     SkillInfo,
     SkillManager,
@@ -226,6 +231,130 @@ async def _get_session_conv(
     if not conversation:
         raise RuntimeError("无法创建新的对话。")
     return conversation
+
+
+def _extract_webchat_conversation_id(event: AstrMessageEvent) -> str:
+    session_id = event.session_id or ""
+    if session_id.startswith("webchat!"):
+        parts = session_id.split("!", 2)
+        if len(parts) == 3:
+            return parts[2]
+    return session_id
+
+
+def _extract_webchat_history_text(content: dict | None) -> str:
+    if not isinstance(content, dict):
+        return ""
+    message_parts = content.get("message")
+    if not isinstance(message_parts, list):
+        return ""
+
+    texts: list[str] = []
+    for part in message_parts:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if part_type == "plain":
+            text = part.get("text")
+            if isinstance(text, str):
+                texts.append(text)
+        elif part_type in {"image", "record", "file", "video"}:
+            texts.append(f"[{part_type} attachment]")
+    return "".join(texts).strip()
+
+
+def _webchat_platform_history_to_contexts(
+    records: list,
+    *,
+    current_checkpoint_id: str | None = None,
+) -> list[dict]:
+    contexts: list[dict] = []
+    filtered_records = [
+        record
+        for record in records
+        if not (
+            current_checkpoint_id and record.llm_checkpoint_id == current_checkpoint_id
+        )
+    ]
+
+    for index, record in enumerate(filtered_records):
+        content = record.content if isinstance(record.content, dict) else None
+        message_type = content.get("type") if content else None
+        text = _extract_webchat_history_text(content)
+        if not text:
+            continue
+
+        role = (
+            "assistant"
+            if message_type == "bot" or record.sender_id == "bot"
+            else "user"
+        )
+        contexts.append({"role": role, "content": text})
+
+        checkpoint_id = record.llm_checkpoint_id
+        next_checkpoint_id = (
+            filtered_records[index + 1].llm_checkpoint_id
+            if index + 1 < len(filtered_records)
+            else None
+        )
+        if checkpoint_id and checkpoint_id != next_checkpoint_id:
+            contexts.append({"role": "_checkpoint", "content": {"id": checkpoint_id}})
+
+    return contexts
+
+
+async def _backfill_webchat_contexts_from_display_history(
+    event: AstrMessageEvent,
+    req: ProviderRequest,
+) -> None:
+    if event.get_platform_id() != "webchat":
+        return
+
+    context_checkpoint_ids = {
+        checkpoint_id
+        for message in req.contexts or []
+        if (checkpoint_id := get_checkpoint_id(message))
+    }
+    current_checkpoint_id = event.get_extra("llm_checkpoint_id")
+    if not isinstance(current_checkpoint_id, str):
+        current_checkpoint_id = None
+
+    try:
+        from astrbot.core import db_helper
+
+        platform_history_id = event.get_extra("platform_history_id") or "webchat"
+        records = await db_helper.get_platform_message_history(
+            platform_id=platform_history_id,
+            user_id=_extract_webchat_conversation_id(event),
+            page=1,
+            page_size=12,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to load WebChat display history: %s", exc)
+        return
+
+    records = sorted(records, key=lambda item: (item.created_at, item.id or 0))
+    latest_display_checkpoint_id = next(
+        (
+            record.llm_checkpoint_id
+            for record in reversed(records)
+            if record.llm_checkpoint_id
+            and record.llm_checkpoint_id != current_checkpoint_id
+        ),
+        None,
+    )
+    if req.contexts and (
+        not latest_display_checkpoint_id
+        or latest_display_checkpoint_id in context_checkpoint_ids
+    ):
+        return
+
+    backfilled_contexts = _webchat_platform_history_to_contexts(
+        records,
+        current_checkpoint_id=current_checkpoint_id,
+    )
+    if backfilled_contexts:
+        req.contexts = backfilled_contexts
 
 
 async def _apply_kb(
@@ -1148,6 +1277,79 @@ def _get_compress_provider(
     return provider
 
 
+def _runtime_context_scenario_from_event(event: AstrMessageEvent) -> LarkChatScenario:
+    get_extra = getattr(event, "get_extra", None)
+    raw_value = get_extra("runtime_context_scenario") if callable(get_extra) else None
+    value = str(raw_value or "").strip().lower()
+    if value in {"complex", "deep", "deep_insight", "deep_creative"}:
+        return LarkChatScenario.COMPLEX
+    if value in {
+        "business",
+        "work",
+        "ops",
+        "ops_writing",
+        "work_preflight",
+        "public_opinion",
+        "creative",
+        "insight",
+    }:
+        return LarkChatScenario.BUSINESS
+    return LarkChatScenario.CASUAL
+
+
+def _get_lark_context_budget_override(
+    event: AstrMessageEvent,
+    config: MainAgentBuildConfig,
+) -> int | None:
+    if event.get_platform_name() != "lark":
+        return None
+
+    runtime_context_cfg = config.provider_settings.get("runtime_context_budgets", {})
+    if not isinstance(runtime_context_cfg, dict):
+        runtime_context_cfg = {}
+    lark_cfg = runtime_context_cfg.get("lark", {})
+    if not isinstance(lark_cfg, dict):
+        lark_cfg = {}
+
+    default_policy = MemoryWatermarkPolicy()
+    policy = MemoryWatermarkPolicy(
+        short_casual_tokens=_clamp_lark_context_budget(
+            lark_cfg.get("casual_tokens"), default_policy.short_casual_tokens
+        ),
+        short_business_tokens=_clamp_lark_context_budget(
+            lark_cfg.get("business_tokens"), default_policy.short_business_tokens
+        ),
+        short_complex_tokens=_clamp_lark_context_budget(
+            lark_cfg.get("complex_tokens"), default_policy.short_complex_tokens
+        ),
+    )
+    scenario = _runtime_context_scenario_from_event(event)
+    limit = policy.short_limit_for(scenario)
+    event.set_extra(
+        "runtime_context_budget",
+        {
+            "layer": "short_term",
+            "platform": "lark",
+            "scenario": scenario.value,
+            "max_context_tokens": limit,
+            "action": "compress_or_trim_when_exceeded",
+        },
+    )
+    return limit
+
+
+def _clamp_lark_context_budget(raw_value: object, default_limit: int) -> int:
+    if raw_value is None:
+        return default_limit
+    try:
+        configured_limit = int(raw_value)
+    except (TypeError, ValueError):
+        return default_limit
+    if configured_limit <= 0:
+        return default_limit
+    return min(configured_limit, default_limit)
+
+
 def _get_fallback_chat_providers(
     provider: Provider, plugin_context: Context, provider_settings: dict
 ) -> list[Provider]:
@@ -1209,6 +1411,7 @@ async def build_main_agent(
             )
             if req.conversation:
                 req.contexts = json.loads(req.conversation.history)
+            RuntimeContextAssembler().normalize(req)
         else:
             req = ProviderRequest()
             req.prompt = ""
@@ -1342,7 +1545,11 @@ async def build_main_agent(
             conversation = await _get_session_conv(event, plugin_context)
             req.conversation = conversation
             req.contexts = json.loads(conversation.history)
+            await _backfill_webchat_contexts_from_display_history(event, req)
+            RuntimeContextAssembler().normalize(req)
             event.set_extra("provider_request", req)
+
+    RuntimeContextAssembler().normalize(req)
 
     if isinstance(req.contexts, str):
         req.contexts = json.loads(req.contexts)
@@ -1471,6 +1678,7 @@ async def build_main_agent(
         read_tool=(
             req.func_tool.get_tool("astrbot_file_read_tool") if req.func_tool else None
         ),
+        context_max_tokens_override=_get_lark_context_budget_override(event, config),
     )
 
     if apply_reset:

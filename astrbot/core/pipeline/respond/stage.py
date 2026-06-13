@@ -127,6 +127,20 @@ class RespondStage(Stage):
         # 如果所有组件都为空
         return True
 
+    @staticmethod
+    def _has_only_unknown_components(chain: list[BaseMessageComponent]) -> bool:
+        """Return whether every chain component is unknown to this stage.
+
+        This separates a truly empty chain from a chain that only contains
+        custom plugin components such as ToolUse. Unknown-only model chains
+        should be skipped without sending the empty-model fallback prompt.
+        """
+        if not chain:
+            return False
+        return all(
+            type(comp) not in RespondStage._component_validators for comp in chain
+        )
+
     def is_seg_reply_required(self, event: AstrMessageEvent) -> bool:
         """检查是否需要分段回复"""
         if not self.enable_seg:
@@ -211,8 +225,28 @@ class RespondStage(Stage):
             # 检查消息链是否为空
             try:
                 if await self._is_empty_message_chain(result.chain):
-                    logger.info("消息为空，跳过发送阶段")
-                    return
+                    # Unknown-only model chains usually come from plugins that
+                    # converted tool_use blocks into custom components during
+                    # on_decorating_result. Let those plugins own the response.
+                    if self._has_only_unknown_components(result.chain) and (
+                        result.is_model_result()
+                    ):
+                        logger.info(
+                            "model result chain 只含未知类型组件（plugin 自定义 ToolUse 等），"
+                            "stage 跳过发送，不发降级提示。chain: %s",
+                            result.chain,
+                        )
+                        return
+                    if result.is_model_result():
+                        logger.warning("模型回复为空，使用降级提示避免静默跳过发送。")
+                        result.chain = [
+                            Comp.Plain(
+                                "刚才模型返回了空内容，我已收到消息。请您再发一次，我会重新处理。"
+                            )
+                        ]
+                    else:
+                        logger.info("消息为空，跳过发送阶段")
+                        return
             except Exception as e:
                 logger.warning(f"空内容检查异常: {e}")
 
@@ -226,6 +260,20 @@ class RespondStage(Stage):
                 )
             ]
 
+            # Check again after empty segments are removed so model results do
+            # not disappear silently when cleanup leaves no sendable content.
+            if (
+                result.is_model_result()
+                and not result.chain
+                and not (event.get_extra("_unknown_components_only", False))
+            ):
+                logger.warning("模型回复链路在清理后变为空，发送降级提示。")
+                result.chain = [
+                    Comp.Plain(
+                        "刚才模型返回了空内容，我已收到消息。请您再发一次，我会重新处理。"
+                    )
+                ]
+
             # 发送消息链
             # Record 需要强制单独发送
             need_separately = {ComponentType.Record}
@@ -236,11 +284,21 @@ class RespondStage(Stage):
                     modify_raw_chain=True,
                 )
                 if not result.chain or len(result.chain) == 0:
-                    # may fix #2670
-                    logger.warning(
-                        f"实际消息链为空, 跳过发送阶段。header_chain: {header_comps}, actual_chain: {result.chain}",
-                    )
-                    return
+                    if result.is_model_result():
+                        logger.warning(
+                            "分段回复实际消息链为空，使用降级提示避免静默跳过发送。"
+                        )
+                        result.chain = [
+                            Comp.Plain(
+                                "刚才模型返回了空内容，我已收到消息。请您再发一次，我会重新处理。"
+                            )
+                        ]
+                    else:
+                        # may fix #2670
+                        logger.warning(
+                            f"实际消息链为空, 跳过发送阶段。header_chain: {header_comps}, actual_chain: {result.chain}",
+                        )
+                        return
                 for comp in result.chain:
                     i = await self._calc_comp_interval(comp)
                     await asyncio.sleep(i)

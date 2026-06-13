@@ -1,6 +1,10 @@
 """Tests for astr_main_agent module."""
 
+import asyncio
+import json
 import os
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,8 +14,12 @@ from astrbot.core.agent.mcp_client import MCPTool
 from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.conversation_mgr import Conversation
 from astrbot.core.message.components import File, Image, Plain, Reply, Video
+from astrbot.core.platform import MessageType
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
+from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
 from astrbot.core.platform.platform_metadata import PlatformMetadata
+from astrbot.core.platform.sources.lark.lark_event import LarkMessageEvent
+from astrbot.core.platform.sources.webchat.webchat_adapter import WebChatAdapter
 from astrbot.core.provider import Provider
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.skills.skill_manager import SkillInfo
@@ -118,6 +126,36 @@ def _setup_conversation_for_build(conv_mgr, cid: str = "conv-id") -> MagicMock:
     return conversation
 
 
+def _feishu_short_feedback_history() -> str:
+    return json.dumps(
+        [
+            {"role": "user", "content": "帮我做五菱2026中秋传播方案"},
+            {
+                "role": "assistant",
+                "content": "五菱2026中秋，要做陪你去看月亮的那台车。",
+            },
+        ],
+        ensure_ascii=False,
+    )
+
+
+def _webchat_history_record(
+    *,
+    record_id: int,
+    message_type: str,
+    text: str,
+    checkpoint_id: str | None = None,
+    sender_id: str | None = None,
+):
+    return SimpleNamespace(
+        id=record_id,
+        created_at=datetime(2026, 1, 1, 0, 0, record_id, tzinfo=timezone.utc),
+        content={"type": message_type, "message": [{"type": "plain", "text": text}]},
+        llm_checkpoint_id=checkpoint_id,
+        sender_id=sender_id or ("bot" if message_type == "bot" else "alice"),
+    )
+
+
 class TestMainAgentBuildConfig:
     """Tests for MainAgentBuildConfig dataclass."""
 
@@ -219,6 +257,201 @@ class TestSelectProvider:
         result = module._select_provider(mock_event, mock_context)
 
         assert result is None
+
+
+class TestWebchatContextBackfill:
+    def test_webchat_platform_history_to_contexts_preserves_recent_turn(self):
+        module = ama
+        records = [
+            _webchat_history_record(
+                record_id=1,
+                message_type="user",
+                text="帮我做五菱2026中秋方案",
+                checkpoint_id="prev",
+            ),
+            _webchat_history_record(
+                record_id=2,
+                message_type="bot",
+                text="五菱2026中秋要做陪你去看月亮的那台车。",
+                checkpoint_id="prev",
+            ),
+        ]
+
+        contexts = module._webchat_platform_history_to_contexts(records)
+
+        assert contexts == [
+            {"role": "user", "content": "帮我做五菱2026中秋方案"},
+            {
+                "role": "assistant",
+                "content": "五菱2026中秋要做陪你去看月亮的那台车。",
+            },
+            {"role": "_checkpoint", "content": {"id": "prev"}},
+        ]
+
+    def test_webchat_platform_history_to_contexts_excludes_current_checkpoint(self):
+        module = ama
+        records = [
+            _webchat_history_record(
+                record_id=1,
+                message_type="bot",
+                text="上一轮五菱方案",
+                checkpoint_id="prev",
+            ),
+            _webchat_history_record(
+                record_id=2,
+                message_type="user",
+                text="不满意",
+                checkpoint_id="curr",
+            ),
+        ]
+
+        contexts = module._webchat_platform_history_to_contexts(
+            records,
+            current_checkpoint_id="curr",
+        )
+
+        assert contexts == [
+            {"role": "assistant", "content": "上一轮五菱方案"},
+            {"role": "_checkpoint", "content": {"id": "prev"}},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_backfill_webchat_contexts_when_llm_history_is_stale(self):
+        module = ama
+        req = ProviderRequest(prompt="不满意", contexts=[])
+        event = MagicMock(spec=AstrMessageEvent)
+        event.session_id = "webchat!alice!session-1"
+        event.get_platform_id.return_value = "webchat"
+        event.get_extra.side_effect = lambda key: {
+            "llm_checkpoint_id": "curr",
+            "platform_history_id": "webchat",
+        }.get(key)
+        records = [
+            _webchat_history_record(
+                record_id=1,
+                message_type="user",
+                text="帮我做五菱2026中秋方案",
+                checkpoint_id="prev",
+            ),
+            _webchat_history_record(
+                record_id=2,
+                message_type="bot",
+                text="五菱2026中秋要做陪你去看月亮的那台车。",
+                checkpoint_id="prev",
+            ),
+            _webchat_history_record(
+                record_id=3,
+                message_type="user",
+                text="不满意",
+                checkpoint_id="curr",
+            ),
+        ]
+
+        with patch(
+            "astrbot.core.db_helper.get_platform_message_history",
+            new=AsyncMock(return_value=records),
+        ) as get_history:
+            await module._backfill_webchat_contexts_from_display_history(event, req)
+
+        get_history.assert_awaited_once_with(
+            platform_id="webchat",
+            user_id="session-1",
+            page=1,
+            page_size=12,
+        )
+        assert req.contexts == [
+            {"role": "user", "content": "帮我做五菱2026中秋方案"},
+            {
+                "role": "assistant",
+                "content": "五菱2026中秋要做陪你去看月亮的那台车。",
+            },
+            {"role": "_checkpoint", "content": {"id": "prev"}},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_webchat_adapter_forwards_platform_history_id(self):
+        event_queue = asyncio.Queue()
+        adapter = WebChatAdapter({}, {}, event_queue)
+        message = SimpleNamespace(
+            message_str="不满意",
+            message=[],
+            type=MessageType.FRIEND_MESSAGE,
+            session_id="webchat!alice!session-1",
+            raw_message=(
+                "alice",
+                "session-1",
+                {
+                    "llm_checkpoint_id": "curr",
+                    "platform_history_id": "webchat_thread",
+                },
+            ),
+        )
+
+        await adapter.handle_msg(message)
+
+        event = event_queue.get_nowait()
+        assert event.get_extra("llm_checkpoint_id") == "curr"
+        assert event.get_extra("platform_history_id") == "webchat_thread"
+
+    @pytest.mark.asyncio
+    async def test_build_main_agent_backfills_webchat_contexts(
+        self, mock_event, mock_context, mock_provider
+    ):
+        module = ama
+        mock_event.message_str = "不满意"
+        mock_event.session_id = "webchat!alice!session-1"
+        mock_event.unified_msg_origin = "webchat:FriendMessage:webchat!alice!session-1"
+        mock_event.get_platform_id.return_value = "webchat"
+        mock_event.get_platform_name.return_value = "webchat"
+        mock_event.get_extra.side_effect = lambda key: {
+            "llm_checkpoint_id": "curr",
+            "platform_history_id": "webchat",
+        }.get(key)
+        mock_context.get_provider_by_id.return_value = None
+        mock_context.get_using_provider.return_value = mock_provider
+        mock_context.get_config.return_value = {}
+        _setup_conversation_for_build(mock_context.conversation_manager)
+        records = [
+            _webchat_history_record(
+                record_id=1,
+                message_type="bot",
+                text="五菱2026中秋要做陪你去看月亮的那台车。",
+                checkpoint_id="prev",
+            ),
+            _webchat_history_record(
+                record_id=2,
+                message_type="user",
+                text="不满意",
+                checkpoint_id="curr",
+            ),
+        ]
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+            patch(
+                "astrbot.core.db_helper.get_platform_message_history",
+                new=AsyncMock(return_value=records),
+            ),
+        ):
+            mock_runner = MagicMock()
+            mock_runner.reset = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+
+            result = await module.build_main_agent(
+                event=mock_event,
+                plugin_context=mock_context,
+                config=module.MainAgentBuildConfig(tool_call_timeout=60),
+            )
+
+        assert result is not None
+        assert result.provider_request.contexts == [
+            {
+                "role": "assistant",
+                "content": "五菱2026中秋要做陪你去看月亮的那台车。",
+            },
+            {"role": "_checkpoint", "content": {"id": "prev"}},
+        ]
 
 
 class TestGetSessionConv:
@@ -967,6 +1200,142 @@ class TestBuildMainAgent:
         assert isinstance(result, module.MainAgentBuildResult)
 
     @pytest.mark.asyncio
+    async def test_build_main_agent_demotes_dc_memory_below_recent_history(
+        self, mock_event, mock_context, mock_provider
+    ):
+        """Long-term memory should not override short-term follow-up context."""
+        module = ama
+        mock_event.message_str = (
+            "不满意\n\n"
+            "<dc_agent_memory_context>\n"
+            "相关文档：东风柳汽活动方案。\n"
+            "</dc_agent_memory_context>"
+        )
+        mock_event.get_platform_id.return_value = "巅池-Agent小助手"
+        mock_event.get_platform_name.return_value = "巅池-Agent小助手"
+        mock_context.get_provider_by_id.return_value = None
+        mock_context.get_using_provider.return_value = mock_provider
+        mock_context.get_config.return_value = {}
+
+        conversation = _new_mock_conversation()
+        conversation.history = _feishu_short_feedback_history()
+        conv_mgr = mock_context.conversation_manager
+        conv_mgr.get_curr_conversation_id = AsyncMock(return_value="conv-id")
+        conv_mgr.get_conversation = AsyncMock(return_value=conversation)
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+        ):
+            mock_runner = MagicMock()
+            mock_runner.reset = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+
+            result = await module.build_main_agent(
+                event=mock_event,
+                plugin_context=mock_context,
+                config=module.MainAgentBuildConfig(tool_call_timeout=60),
+            )
+
+        assert result is not None
+        req = result.provider_request
+        assert req.prompt == "不满意"
+        assert "五菱2026中秋" in json.dumps(req.contexts, ensure_ascii=False)
+        assert "recent conversation history first" in req.system_prompt
+        assert len(req.extra_user_content_parts) == 1
+        memory_part = req.extra_user_content_parts[0]
+        assert "Lower-priority DC-Agent long-term memory" in memory_part.text
+        assert "东风柳汽活动方案" in memory_part.text
+        assert getattr(memory_part, "_no_save") is True
+
+    @pytest.mark.asyncio
+    async def test_build_main_agent_demotes_dc_memory_for_lark_short_feedback(
+        self, mock_context, mock_provider
+    ):
+        """Feishu/Lark short feedback must stay anchored to recent chat history."""
+        module = ama
+        platform_meta = PlatformMetadata(
+            id="lark",
+            name="飞书机器人官方 API 适配器",
+            description="Lark platform",
+        )
+        message_obj = AstrBotMessage()
+        message_obj.type = MessageType.FRIEND_MESSAGE
+        message_obj.self_id = "bot-open-id"
+        message_obj.session_id = "chat-id"
+        message_obj.message_id = "message-id"
+        message_obj.sender = MessageMember(user_id="user-open-id", nickname="蔡挺")
+        message_obj.group_id = None
+        message_obj.group = None
+        message_obj.message = [Plain(text="不满意")]
+        message_obj.message_str = (
+            "不满意\n\n"
+            "<dc_agent_memory_context>\n"
+            "相关文档：东风柳汽活动方案。\n"
+            "</dc_agent_memory_context>"
+        )
+        message_obj.raw_message = {
+            "event": {
+                "message": {
+                    "chat_id": "chat-id",
+                    "message_id": "message-id",
+                }
+            }
+        }
+        event = LarkMessageEvent(
+            message_str=message_obj.message_str,
+            message_obj=message_obj,
+            platform_meta=platform_meta,
+            session_id="chat-id",
+            bot=MagicMock(),
+        )
+        event.trace = MagicMock()
+
+        mock_context.get_provider_by_id.return_value = None
+        mock_context.get_using_provider.return_value = mock_provider
+        mock_context.get_config.return_value = {}
+
+        conversation = _new_mock_conversation()
+        conversation.history = _feishu_short_feedback_history()
+        conv_mgr = mock_context.conversation_manager
+        conv_mgr.get_curr_conversation_id = AsyncMock(return_value="conv-id")
+        conv_mgr.get_conversation = AsyncMock(return_value=conversation)
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+        ):
+            mock_runner = MagicMock()
+            mock_runner.reset = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+
+            result = await module.build_main_agent(
+                event=event,
+                plugin_context=mock_context,
+                config=module.MainAgentBuildConfig(tool_call_timeout=60),
+            )
+
+        assert result is not None
+        req = result.provider_request
+        assert event.get_platform_id() == "lark"
+        assert req.prompt == "不满意"
+        assert req.image_urls == []
+        assert req.audio_urls == []
+        assert len(req.contexts) == 2
+        assert req.contexts[0]["role"] == "user"
+        assert req.contexts[1]["role"] == "assistant"
+        assert "五菱2026中秋" in req.contexts[0]["content"]
+        assert "五菱2026中秋" in req.contexts[1]["content"]
+        assert "五菱2026中秋" in json.dumps(req.contexts, ensure_ascii=False)
+        assert "recent conversation history first" in req.system_prompt
+        assert len(req.extra_user_content_parts) == 1
+        assert getattr(req.extra_user_content_parts[0], "_no_save") is True
+        memory_part = req.extra_user_content_parts[0]
+        assert "Lower-priority DC-Agent long-term memory" in memory_part.text
+        assert "东风柳汽活动方案" in memory_part.text
+        assert getattr(memory_part, "_no_save") is True
+
+    @pytest.mark.asyncio
     async def test_build_main_agent_no_provider(self, mock_event, mock_context):
         """Test building main agent when no provider is available."""
         module = ama
@@ -1292,6 +1661,47 @@ class TestBuildMainAgent:
 
         assert result is not None
         assert result.provider_request == existing_req
+
+    @pytest.mark.asyncio
+    async def test_build_main_agent_normalizes_direct_request_dc_memory(
+        self, mock_event, mock_context, mock_provider
+    ):
+        """Caller-provided ProviderRequest still receives runtime context normalization."""
+        module = ama
+        existing_req = ProviderRequest(
+            prompt=(
+                "不满意\n\n"
+                "<dc_agent_memory_context>\n"
+                "相关文档：东风柳汽活动方案。\n"
+                "</dc_agent_memory_context>"
+            )
+        )
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+        ):
+            mock_runner = MagicMock()
+            mock_runner.reset = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+
+            result = await module.build_main_agent(
+                event=mock_event,
+                plugin_context=mock_context,
+                config=module.MainAgentBuildConfig(tool_call_timeout=60),
+                provider=mock_provider,
+                req=existing_req,
+            )
+
+        assert result is not None
+        req = result.provider_request
+        assert req == existing_req
+        assert req.prompt == "不满意"
+        assert "recent conversation history first" in req.system_prompt
+        assert len(req.extra_user_content_parts) == 1
+        memory_part = req.extra_user_content_parts[0]
+        assert "东风柳汽活动方案" in memory_part.text
+        assert getattr(memory_part, "_no_save") is True
 
 
 class TestHandleWebchat:

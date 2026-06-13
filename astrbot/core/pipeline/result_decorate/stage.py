@@ -161,6 +161,9 @@ class ResultDecorateStage(Stage):
             plugins_name=event.plugins_name,
         )
         for handler in handlers:
+            # Events may already be stopped by an upstream stage. Only treat
+            # this handler as the propagation stopper if it changed the state.
+            stopped_before_handler = event.is_stopped()
             try:
                 logger.debug(
                     f"hook(on_decorating_result) -> {star_map[handler.handler_module_path].name} - {handler.handler_name}",
@@ -178,10 +181,9 @@ class ResultDecorateStage(Stage):
             except BaseException:
                 logger.error(traceback.format_exc())
 
-            if event.is_stopped():
-                logger.info(
-                    f"{star_map[handler.handler_module_path].name} - {handler.handler_name} 终止了事件传播。",
-                )
+            if event.is_stopped() and not stopped_before_handler:
+                handler_name = f"{star_map[handler.handler_module_path].name} - {handler.handler_name}"
+                logger.info(f"{handler_name} 终止了事件传播。")
                 return
 
         # 流式输出不执行下面的逻辑

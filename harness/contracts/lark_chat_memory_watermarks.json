@@ -1,0 +1,53 @@
+{
+  "contract_id": "lark_chat_memory_watermarks",
+  "title": "Lark chat memory watermarks and NAS long-term archive",
+  "scope": "Feishu/Lark assistant conversations must separate prompt context from local long-term memory storage.",
+  "acceptance_criteria": [
+    {
+      "id": "lcmw-001",
+      "description": "Short-term memory has an explicit token budget by Lark chat scenario; exceeding the budget produces a compress-or-trim action instead of passing full history to the LLM.",
+      "verification": "uv run pytest tests/unit/test_runtime_context_watermarks.py -q"
+    },
+    {
+      "id": "lcmw-002",
+      "description": "Medium-term memory has an explicit item/token watermark; exceeding it produces cleanup and promotion-candidate actions, not prompt expansion.",
+      "verification": "uv run pytest tests/unit/test_runtime_context_watermarks.py -q"
+    },
+    {
+      "id": "lcmw-003",
+      "description": "Long-term Lark chat records archive to NAS-style Chinese department/employee folders under knowledge/Chat/Lark Chat.",
+      "verification": "uv run pytest dc_engines/tests/test_chat_archive.py -q"
+    },
+    {
+      "id": "lcmw-004",
+      "description": "Long-term memory entry is represented as archive + index/distillation handoff, so full archives are never treated as LLM prompt context.",
+      "verification": "uv run pytest tests/harness/test_lark_chat_memory_watermarks_contract.py -q"
+    }
+  ],
+  "memory_layers": {
+    "short_term": {
+      "purpose": "Current LLM prompt continuity",
+      "overflow_action": "compress_or_trim",
+      "default_lark_budget_tokens": 12000,
+      "business_lark_budget_tokens": 24000,
+      "complex_lark_budget_tokens": 32000
+    },
+    "medium_term": {
+      "purpose": "Rolling employee/project state",
+      "overflow_action": "cleanup_merge_and_promote_candidates",
+      "default_max_items_per_employee": 50,
+      "default_max_tokens_per_employee": 50000
+    },
+    "long_term": {
+      "purpose": "Local company memory and audit archive",
+      "overflow_action": "archive_to_nas_and_distill",
+      "nas_path_template": "knowledge/Chat/Lark Chat/<部门>/<员工姓名>/<YYYY>/<MM>/<YYYY-MM-DD>.jsonl",
+      "handoffs": ["obsidian", "harness", "assistant_distillation"]
+    }
+  },
+  "non_goals": [
+    "Do not use NAS archive size as prompt context size.",
+    "Do not send the full employee chat archive to the LLM by default.",
+    "Do not rely on manual /reset or /new as the only cost-control mechanism."
+  ]
+}

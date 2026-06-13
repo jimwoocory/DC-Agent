@@ -401,6 +401,25 @@ def runner():
     return ToolLoopAgentRunner()
 
 
+@pytest.mark.asyncio
+async def test_reset_uses_context_max_tokens_override(
+    runner, mock_provider, provider_request, mock_tool_executor, mock_hooks
+):
+    mock_provider.provider_config["max_context_tokens"] = 128000
+
+    await runner.reset(
+        provider=mock_provider,
+        request=provider_request,
+        run_context=ContextWrapper(context=None),
+        tool_executor=mock_tool_executor,
+        agent_hooks=mock_hooks,
+        streaming=False,
+        context_max_tokens_override=12000,
+    )
+
+    assert runner.context_config.max_context_tokens == 12000
+
+
 def _make_large_tool_result_text() -> str:
     return "x" * 100000
 

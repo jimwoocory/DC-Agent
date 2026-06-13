@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# 必须早于 data/plugins/dc_router (那是 AstrBot plugin, 不含 classifier.py) —
+# 之前 raw ``from dc_router.classifier import ...`` 会因为 tests/dc_router/
+# test_config.py 等把 data/plugins 塞到 sys.path[0] 而撞上, 触发
+# ``ModuleNotFoundError: No module named 'dc_router.classifier'``
+# (regression 2026-06-11). 这里改用 canonical ``dc_router_core.*`` import,
+# shim 包留作向后兼容, 不再在 test 里走它.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import pytest
 
-from dc_router.classifier import ClassifierResult
-from dc_router.decision import RouterDecision
-from dc_router.entrypoint import DCRouter, MessageEnvelope
-from dc_router.ops_taxonomy import OpsIntent
-from dc_router.provider_map import get_provider_route
-from dc_router.rules import match_document_link, match_keywords, match_prefix
-from dc_router.taxonomy import AttachmentKind, RouterIntent
+from dc_router_core.classifier import ClassifierResult
+from dc_router_core.decision import RouterDecision
+from dc_router_core.entrypoint import DCRouter, MessageEnvelope
+from dc_router_core.ops_taxonomy import OpsIntent
+from dc_router_core.provider_map import get_provider_route
+from dc_router_core.rules import match_document_link, match_keywords, match_prefix
+from dc_router_core.taxonomy import AttachmentKind, RouterIntent
 
 
 @pytest.mark.parametrize(
@@ -146,6 +159,32 @@ async def test_business_router_falls_back_when_classifier_returns_none() -> None
     assert decision.intent == RouterIntent.FALLBACK.value
     assert decision.source == "fallback"
     assert decision.provider_id == "cli/antigravity/gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_business_router_preserves_feishu_channel_metadata() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide(
+        MessageEnvelope(
+            text="#创意 帮我写一版活动文案",
+            metadata={
+                "platform_id": "巅池-Agent小助手",
+                "feishu_channel_agent_id": "planning-agent",
+                "feishu_channel_workspace": "data/feishu_agents/planning-agent",
+                "feishu_channel_peer_kind": "group",
+                "feishu_channel_peer_id": "oc_group",
+            },
+        )
+    )
+
+    assert decision.intent == RouterIntent.CREATIVE.value
+    assert decision.metadata["feishu_channel_agent_id"] == "planning-agent"
+    assert decision.metadata["feishu_channel_workspace"] == (
+        "data/feishu_agents/planning-agent"
+    )
+    assert decision.metadata["feishu_channel_peer_kind"] == "group"
+    assert decision.metadata["feishu_channel_peer_id"] == "oc_group"
 
 
 @pytest.mark.asyncio

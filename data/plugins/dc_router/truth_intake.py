@@ -18,8 +18,13 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.api.message_components import File, Image, Record, Video
 
-INTAKE_ROOT = Path("/Users/dianchi/DC-Agent/data/harness_intake")
-INTAKE_SOURCE = "llm_router_truth_intake"
+try:
+    from .paths import data_path
+except ImportError:  # pragma: no cover - direct file-load compatibility
+    from data.plugins.dc_router.paths import data_path
+
+INTAKE_ROOT = data_path("harness_intake")
+INTAKE_SOURCE = "dc_router_truth_intake"
 INTAKE_DOMAIN = "truth_intake"
 INTAKE_PLATFORMS = {"巅池-Agent小助手"}
 ACTIVE_INTAKE_STATUSES = ("blocked", "pending", "in_progress")
@@ -586,6 +591,32 @@ def _missing_material_reply(text: str, task_id: str | None) -> str:
     )
 
 
+def _is_pure_meta_chitchat(text: str) -> bool:
+    """Bypass truth intake for pure meta questions about the bot's mode/state
+    or small social chitchat. Prevents casual follow-ups from inheriting
+    previous blocked "stabilize context" tasks (e.g. task 8c98f89f from
+    "你现在是不是闲聊的状态？").
+    """
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    meta = (
+        "闲聊",
+        "闲聊的状态",
+        "闲聊模式",
+        "聊天模式",
+        "你现在是不是",
+        "现在在闲聊",
+        "是闲聊",
+        "casual",
+        "今天天气",
+        "天气不错",
+        "你好",
+        "在吗",
+    )
+    return any(k in t for k in meta)
+
+
 async def maybe_handle_truth_intake(
     context: Any,
     event: AstrMessageEvent,
@@ -601,6 +632,12 @@ async def maybe_handle_truth_intake(
 
     text = (event.message_str or "").strip()
     if not text:
+        return False
+
+    # Pure meta / chitchat bypass (added to fix real private-chat over-blocking).
+    # Meta questions like "你现在是不是闲聊的状态？" should not trigger truth-intake
+    # or inherit previous tasks; let daily_card_renderer handle as casual.
+    if _is_pure_meta_chitchat(text):
         return False
 
     blocked_task = await _find_blocked_intake_task(context, event)

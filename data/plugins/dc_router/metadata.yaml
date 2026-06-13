@@ -1,0 +1,9 @@
+name: dc_router
+display_name: DC 路由
+author: dc_agent
+version: 0.2.0
+desc: DC 路由 · 统一意图分类与 provider 分发（业务 + DevOps 唯一入口）
+short_desc: 统一纳管意图识别、模型选择、深度任务分流、CLI 路由、QuotagGate 队列
+support_platforms:
+  - lark
+pages: []

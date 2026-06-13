@@ -6,12 +6,16 @@ import json
 import re
 import sqlite3
 import sys
-from pathlib import Path
 from typing import Any
 
-DC_ROOT = Path("/Users/dianchi/DC-Agent")
-NAS_MEMORY_DB = Path("/Users/dianchi/DC-Agent/data/nas_memory.db")
-GOVERNED_MEMORY_DB = Path("/Users/dianchi/DC-Agent/data/governed_memory.db")
+try:
+    from .paths import data_path, project_root
+except ImportError:  # pragma: no cover - direct file-load compatibility
+    from data.plugins.dc_router.paths import data_path, project_root
+
+DC_ROOT = project_root()
+NAS_MEMORY_DB = data_path("nas_memory.db")
+GOVERNED_MEMORY_DB = data_path("governed_memory.db")
 BUSINESS_PLATFORM_ID = "巅池-Agent小助手"
 SUPPORTED_PLATFORM_IDS = {
     BUSINESS_PLATFORM_ID,
@@ -451,12 +455,13 @@ def inject_memory_context_into_event(event, query_text: str | None = None) -> bo
     if not block:
         return False
 
-    merged = f"{text.strip()}\n\n{block}" if text.strip() else block
-    event.message_str = merged
-    try:
-        event.message_obj.message_str = merged
-    except Exception:  # noqa: BLE001
-        pass
+    # CRITICAL FIX: Do NOT mutate the user's visible message_str or message_obj.
+    # This was causing <dc_agent_memory_context> (Obsidian-governed long-term memories,
+    # DeepSeek archives, project items etc.) to leak directly into user-facing replies
+    # and pollute the "current user prompt".
+    # Memory must only be provided via set_extra so prompt assemblers (llm_router /
+    # RuntimeContextAssembler) can treat it as lower-priority reference context.
+    # The user's original short message remains clean.
     try:
         event.set_extra("dc_agent_memory_context", context)
         event.set_extra(

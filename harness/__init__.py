@@ -2,6 +2,7 @@
 
 from harness.hermes_bridge import HermesBridge, HermesTaskRequest
 from harness.quota_gate import QuotaGate, QuotaRequest
+from harness.route_arbiter import QuotaGateArbiter
 from harness.task_state import AdmissionDecision, AdmissionMode, QueueJob, QueueStatus
 
 __all__ = [
@@ -12,5 +13,6 @@ __all__ = [
     "QueueJob",
     "QueueStatus",
     "QuotaGate",
+    "QuotaGateArbiter",
     "QuotaRequest",
 ]

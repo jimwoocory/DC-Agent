@@ -1,20 +1,20 @@
-"""DC router package.
+"""DC router package — backward-compat shim.
 
-This package is intentionally independent from AstrBot's legacy router. The
-AstrBot entrypoint should call this package as the only routing authority once
-the new path is enabled.
-
-双 router 架构 (按 envelope.metadata['platform_id'] 自动切):
-- business: RouterIntent / provider_map / rules        (员工业务入口)
-- ops:      OpsIntent     / ops_provider_map / ops_rules (DevOps 机器人入口)
-
-两套路由表完全独立, 输出共用 RouterDecision 契约。
+Canonical home is `dc_router_core`. This package re-exports its public API for
+existing callers (e.g. `data/plugins/llm_router/dc_router_adapter.py`,
+`dc_router/tests/`, harness contract callers). It will be deleted in phase 5 of
+the routing merge (see harness/contracts/routing_merge_contract.json).
 """
 
-from dc_router.decision import RouterDecision
-from dc_router.entrypoint import DCRouter, MessageEnvelope
-from dc_router.ops_taxonomy import OpsIntent
-from dc_router.taxonomy import AttachmentKind, RouteAction, RouteDepth, RouterIntent
+from dc_router_core.decision import RouterDecision
+from dc_router_core.entrypoint import DCRouter, MessageEnvelope
+from dc_router_core.ops_taxonomy import OpsIntent
+from dc_router_core.taxonomy import (
+    AttachmentKind,
+    RouteAction,
+    RouteDepth,
+    RouterIntent,
+)
 
 __all__ = [
     "AttachmentKind",

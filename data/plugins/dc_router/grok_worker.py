@@ -16,12 +16,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from cli_runner import CliResult, CliRunner
+try:
+    from .cli_runner import CliResult, CliRunner
+    from .paths import data_path
+except ImportError:  # pragma: no cover - direct file-load compatibility
+    from data.plugins.dc_router.cli_runner import CliResult, CliRunner
+    from data.plugins.dc_router.paths import data_path
 
 _STATE_PATH = Path(
     os.environ.get(
         "DC_GROK_WORKER_STATE_PATH",
-        "/Users/dianchi/DC-Agent/data/grok_worker_state.json",
+        str(data_path("grok_worker_state.json")),
     )
 )
 

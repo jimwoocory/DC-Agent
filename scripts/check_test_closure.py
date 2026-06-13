@@ -94,7 +94,7 @@ def looks_like_test_path(path: str) -> bool:
 
 def is_excluded(path: str) -> bool:
     parts = set(Path(path).parts)
-    if "node_modules" in parts or "__pycache__" in parts:
+    if "node_modules" in parts or "__pycache__" in parts or ".venv" in parts:
         return True
     return path.startswith(EXCLUDED_PREFIXES)
 
@@ -117,6 +117,11 @@ def classify_path(path: str) -> Classification | None:
     if path.startswith(EXTERNAL_PREFIXES):
         return Classification(path, "external", "outside the main DC-Agent gate")
 
+    if path.startswith("tests/dc_router/"):
+        return Classification(
+            path, "covered", "scripts/agent-check.sh --profile targeted"
+        )
+
     if path.startswith("tests/"):
         return Classification(path, "covered", "scripts/run_pytests_ci.sh ./tests")
 
@@ -125,9 +130,22 @@ def classify_path(path: str) -> Classification | None:
             path, "covered", "scripts/agent-check.sh --profile targeted"
         )
 
-    if path == "data/plugins/llm_router/test_dc_router_path.py":
+    if path.startswith("data/plugins/dc_router/test_"):
+        # Stage 5H (2026-06-11): compatibility entry replacing the deleted
+        # data/plugins/llm_router/test_dc_router_path.py. The targeted profile
+        # invokes it explicitly, so test closure can classify it as covered.
         return Classification(
             path, "covered", "scripts/agent-check.sh --profile targeted"
+        )
+
+    if path.startswith("data/plugins/llm_router/test_"):
+        # Stage 5H migration window: old llm_router test paths may still appear
+        # in tracked diffs while the replacement data/plugins/dc_router/test_*
+        # entry is already run by the targeted profile.
+        return Classification(
+            path,
+            "covered",
+            "scripts/agent-check.sh --profile targeted (migrated to data/plugins/dc_router/test_*)",
         )
 
     if path.startswith("dashboard/tests/") and path.endswith(".test.mjs"):
@@ -160,9 +178,11 @@ def filesystem_test_paths() -> set[str]:
         kept_dirs: list[str] = []
         for dirname in dirnames:
             rel_path = f"{rel_dir}/{dirname}/" if rel_dir else f"{dirname}/"
-            if dirname in {"node_modules", "__pycache__"} or rel_path.startswith(
-                EXCLUDED_PREFIXES
-            ):
+            if dirname in {
+                "node_modules",
+                "__pycache__",
+                ".venv",
+            } or rel_path.startswith(EXCLUDED_PREFIXES):
                 continue
             kept_dirs.append(dirname)
         dirnames[:] = kept_dirs

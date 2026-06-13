@@ -16,6 +16,11 @@ from pathlib import Path
 
 import pexpect
 
+try:
+    from .paths import data_path
+except ImportError:  # pragma: no cover - direct file-load compatibility
+    from data.plugins.dc_router.paths import data_path
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07")
 AGY_AUTH_PATTERNS = (
     "Authentication required",
@@ -341,7 +346,7 @@ class CliRunner:
             "--allowed-tools",
             "Read,Glob,Grep,Skill",
             "--add-dir",
-            "/Users/dianchi/DC-Agent/data/skills",
+            str(data_path("skills")),
         ]
         return await self._run_json_cli(
             args,

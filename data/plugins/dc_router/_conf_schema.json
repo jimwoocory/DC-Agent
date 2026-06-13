@@ -1,0 +1,28 @@
+{
+  "enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "是否启用 DC 路由（合并后只有这一个开关；关闭 = 走默认全局 provider，不做意图分类）"
+  },
+  "dry_run": {
+    "type": "bool",
+    "default": true,
+    "description": "true 时只记录决策 (log + event.set_extra), 不真切 provider / 不入 QuotaGate. 配合 enabled=false 可彻底走 v1.0 兜底."
+  },
+  "fallback_on_error": {
+    "type": "bool",
+    "default": true,
+    "description": "DC 路由异常时是否回退到 v1.0 兼容路径（保员工体验不挂）"
+  },
+  "feishu_channel_routes": {
+    "type": "object",
+    "default": {},
+    "items": {},
+    "description": "飞书 channel agent 固定 provider 路由表. key=feishu_channel_agent_id, value=provider_id (string) 或 { provider_id, reasoning_tier }. 命中时 dc_router 直接接管, 跳过意图分类."
+  },
+  "queue_recovery_interval_seconds": {
+    "type": "int",
+    "default": 60,
+    "description": "Background QuotaGate pending CLI job 恢复扫描间隔 (秒). 0 表示禁用 background recovery."
+  }
+}

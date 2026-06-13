@@ -22,11 +22,18 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # 让 `from dc_router import ...` 和 `from harness import ...` 能从 DC-Agent 顶层 import
 _DC_AGENT_ROOT = Path(__file__).resolve().parents[3]
 if str(_DC_AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DC_AGENT_ROOT))
+
+if TYPE_CHECKING:
+    # 2026-06-11: DCRouter 在 function 内部 lazy import, 但 type annotation
+    # 需要在模块级 import 才能让 ruff F821 + UP037 都满意. TYPE_CHECKING
+    # 保证 runtime 不会被真 import, 只在静态分析时存在.
+    from dc_router.entrypoint import DCRouter
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
@@ -60,7 +67,12 @@ CLI_FAILURE_DIAG_TIMEOUT_SECONDS = 90
 _FEISHU_URL_RE = re.compile(
     r"https?://[^\s]*?feishu\.cn/(wiki|docx|docs)/([A-Za-z0-9_-]+)"
 )
-_FEISHU_CREDS_PATH = Path("/Users/dianchi/DC-Agent/data/feishu_whitelist.yaml")
+try:
+    from .paths import data_path
+except ImportError:  # pragma: no cover - direct file-load compatibility
+    from data.plugins.dc_router.paths import data_path
+
+_FEISHU_CREDS_PATH = data_path("feishu_whitelist.yaml")
 _FEISHU_DOC_MAX_CHARS = 8000  # 单个文档塞进 prompt 的截断阈值
 MULTIMODAL_PREPROCESS_PROMPT = """\
 请用中文提取用户附件里的关键信息，供后续模型继续完成用户任务。
@@ -165,11 +177,20 @@ def _parse_cli_provider(provider_id: str) -> tuple[str, str, str | None]:
 
 
 def _strip_known_prefix(text: str) -> str:
-    stripped = text.lstrip()
-    for prefix in ("#深度", "#PRD", "#prd", "#洞察", "#创意", "#舆情", "#代码"):
-        if stripped.startswith(prefix):
-            return stripped.removeprefix(prefix).strip() or stripped
-    return stripped
+    try:
+        from dc_router.rules import PREFIX_RULES
+
+        stripped = text.lstrip()
+        for prefix, _intent, _reason in PREFIX_RULES:
+            if stripped.startswith(prefix):
+                return stripped.removeprefix(prefix).strip() or stripped
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[dc-router] 复用前缀规则失败，回退本地列表: %s", exc)
+        stripped = text.lstrip()
+        for prefix in ("#深度", "#PRD", "#prd", "#洞察", "#创意", "#舆情", "#代码"):
+            if stripped.startswith(prefix):
+                return stripped.removeprefix(prefix).strip() or stripped
+    return text
 
 
 # 非交互模式硬约束 — 所有 CLI 调用都要 prepend 这段
@@ -616,14 +637,14 @@ async def _direct_cli_answer(_context, event: AstrMessageEvent, decision) -> boo
         gate = None
         job_id = ""
         try:
-            from antigravity_health import (
+            from .antigravity_health import (
                 antigravity_allowed,
                 mark_antigravity_failure,
                 mark_antigravity_success,
                 record_antigravity_circuit_fallback,
             )
-            from cli_runner import CliRunner
-            from dc_quota_runtime import get_quota_gate
+            from .cli_runner import CliRunner
+            from .dc_quota_runtime import get_quota_gate
             from harness import AdmissionMode, QuotaRequest
 
             allowed, health_reason, health_state = antigravity_allowed()
@@ -761,7 +782,7 @@ async def _direct_cli_answer(_context, event: AstrMessageEvent, decision) -> boo
             )
         except Exception as exc:  # noqa: BLE001
             try:
-                from antigravity_health import mark_antigravity_failure
+                from .antigravity_health import mark_antigravity_failure
 
                 mark_antigravity_failure(error_code="exception", error=str(exc))
             except Exception:  # noqa: BLE001
@@ -936,7 +957,7 @@ async def _direct_cli_answer(_context, event: AstrMessageEvent, decision) -> boo
     stream_message_id = card_info[1] if card_info else None
 
     try:
-        from cli_runner import CliRunner
+        from .cli_runner import CliRunner
 
         prompt = await _inline_feishu_docs_in_text(_build_cli_prompt(event, decision))
         result = await CliRunner(cwd=_DC_AGENT_ROOT).run_codex(
@@ -1061,7 +1082,7 @@ async def _codex_cli_failure_report(
         error=error,
     )
     try:
-        from cli_runner import CliRunner
+        from .cli_runner import CliRunner
 
         diag_prompt = (
             "你是 DC-Agent 的运维诊断助手。Claude CLI 深度任务刚刚失败或疑似僵死。\n"
@@ -1424,7 +1445,7 @@ async def maybe_handle_antigravity_queue_card_action(
         return True
 
     try:
-        from dc_quota_runtime import get_quota_gate
+        from .dc_quota_runtime import get_quota_gate
 
         gate = await get_quota_gate()
         cancelled = await gate.cancel_pending_job(
@@ -1698,7 +1719,7 @@ async def _run_harness_cli_job(
             await _send_context_message(context, umo, text)
 
     try:
-        from cli_runner import CliRunner
+        from .cli_runner import CliRunner
 
         runner = CliRunner()
         if backend == "claude":
@@ -1809,11 +1830,11 @@ async def _run_antigravity_cli_job(
             await _send_context_message(context, umo, text)
 
     try:
-        from antigravity_health import (
+        from .antigravity_health import (
             mark_antigravity_failure,
             mark_antigravity_success,
         )
-        from cli_runner import CliRunner
+        from .cli_runner import CliRunner
 
         result = await CliRunner(cwd=_DC_AGENT_ROOT).run_antigravity(
             prompt,
@@ -2069,7 +2090,7 @@ async def _resume_pending_harness_cli_jobs(context, gate, *, limit: int = 20) ->
 
 
 async def _queue_recovery_loop(context, interval_seconds: int) -> None:
-    from dc_quota_runtime import get_quota_gate
+    from .dc_quota_runtime import get_quota_gate
 
     gate = await get_quota_gate()
     while True:
@@ -2128,7 +2149,7 @@ async def _enqueue_or_run_harness_cli(
         return False
 
     try:
-        from dc_quota_runtime import get_quota_gate
+        from .dc_quota_runtime import get_quota_gate
         from harness import AdmissionMode, QuotaRequest
 
         gate = await get_quota_gate()
@@ -2328,6 +2349,7 @@ def event_to_envelope(event: AstrMessageEvent):
     metadata: dict[str, str] = {
         "platform_id": event.get_platform_id() or "",
     }
+    metadata.update(_feishu_channel_metadata(event))
 
     return MessageEnvelope(
         text=event.message_str or "",
@@ -2336,6 +2358,33 @@ def event_to_envelope(event: AstrMessageEvent):
         session_id=event.unified_msg_origin or None,
         metadata=metadata,
     )
+
+
+def _feishu_channel_metadata(event: AstrMessageEvent) -> dict[str, str]:
+    get_extra = getattr(event, "get_extra", None)
+    if not callable(get_extra):
+        return {}
+    metadata: dict[str, str] = {}
+    limits = {
+        "feishu_channel_agent_id": 120,
+        "feishu_channel_workspace": 300,
+        "feishu_channel_peer_kind": 20,
+        "feishu_channel_peer_id": 160,
+    }
+    for key, max_len in limits.items():
+        try:
+            raw = get_extra(key)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(raw, str):
+            continue
+        value = raw.strip()
+        if not value:
+            continue
+        if key == "feishu_channel_peer_kind" and value not in {"direct", "group"}:
+            continue
+        metadata[key] = value[:max_len]
+    return metadata
 
 
 async def apply_decision(context, event: AstrMessageEvent, decision) -> bool:
@@ -2376,6 +2425,44 @@ async def apply_decision(context, event: AstrMessageEvent, decision) -> bool:
 
     # DIRECT path: 切 provider 即可
     available = {p.meta().id for p in context.get_all_providers()}
+
+    # Circuit-breaker: qwen3.6-flash 不稳定时主动 demote 到 gemini-3.5-flash，
+    # 避免再让员工看到"模型回复为空"那行告警。
+    if provider_id == "aihubmix/qwen3.6-flash":
+        try:
+            from qwen_health import qwen3_6_flash_allowed
+        except Exception:  # noqa: BLE001
+            qwen3_6_flash_allowed = None  # type: ignore[assignment]
+        if qwen3_6_flash_allowed is not None:
+            allowed, reason, qwen_state = qwen3_6_flash_allowed()
+            if not allowed:
+                fallback_id = "aihubmix/gemini-3.5-flash"
+                if fallback_id in available:
+                    logger.info(
+                        "[dc-router] qwen3.6-flash breaker open reason=%s "
+                        "remaining=%ss · demote to %s",
+                        reason,
+                        qwen_state.get("remaining_seconds", 0),
+                        fallback_id,
+                    )
+                    event.set_extra(
+                        "dc_router_qwen_breaker_demote",
+                        {
+                            "from_provider_id": provider_id,
+                            "to_provider_id": fallback_id,
+                            "reason": reason,
+                            "remaining_seconds": qwen_state.get("remaining_seconds", 0),
+                        },
+                    )
+                    provider_id = fallback_id
+                else:
+                    logger.warning(
+                        "[dc-router] qwen3.6-flash breaker open reason=%s "
+                        "但 fallback %s 不在 available 列表，继续走 qwen",
+                        reason,
+                        fallback_id,
+                    )
+
     if provider_id not in available:
         logger.warning(
             "[dc-router] target provider %s 不在 available 列表，fallback 到 v1.0",
@@ -2424,6 +2511,18 @@ async def apply_decision(context, event: AstrMessageEvent, decision) -> bool:
             exc,
         )
         return False
+
+
+def create_dc_router(context) -> DCRouter:
+    """Build a DCRouter with AstrBot classifier for llm_router delegation.
+
+    The arbiter defaults to PassThroughArbiter (no quota/circuit interference).
+    真实仲裁器是 harness.route_arbiter.QuotaGateArbiter，由 dispatch._build_arbiter
+    按 dc_router_config.json 的 arbiter_enabled 开关注入。
+    """
+    from dc_router.entrypoint import DCRouter
+
+    return DCRouter(classifier=AstrBotRouterClassifier(context))
 
 
 async def route_via_dc_router(

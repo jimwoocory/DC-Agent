@@ -1,0 +1,225 @@
+{
+  "contract_id": "routing_merge_contract",
+  "version": "2.0.0",
+  "status": "active",
+  "supersedes": "1.0.0",
+  "implemented_at": "2026-06-11",
+  "principle": "Single source of truth for intent classification and provider dispatch — dc_router is the sole entry point. llm_router is fully retired; no second classifier, no second prefix map, no second prefix→provider table exists in production.",
+  "scope": {
+    "owner_plugin": "data/plugins/dc_router",
+    "core_package": "dc_router_core",
+    "managed_platforms": [
+      "巅池-Agent小助手",
+      "巅池-技术（DevOps）",
+      "巅池-技术"
+    ],
+    "out_of_scope_platforms": [
+      "巅池-推广 01",
+      "any non-AstrBot chat surface"
+    ]
+  },
+  "rules": [
+    {
+      "id": "R1",
+      "title": "dc_router 是唯一意图分类入口",
+      "text": "当 dc_router_config.enabled=true 且 dry_run=false 时，意图分类只能由 dc_router_core.DCRouter.decide() 输出。任何代码路径（包括但不限于旧 llm_router 残留、helper 脚本、临时 patch）都不得再保留 prefix/keyword/classify 独立生效的分类逻辑。",
+      "enforcement": [
+        "data/plugins/dc_router/test_routing_path.py::test_no_llm_router_package_anywhere confirms the retired plugin path does not reappear",
+        "tests/dc_router/test_dc_router_contract.py locks dc_router_core as the canonical classifier/provider routing implementation",
+        "scripts/agent-check.sh --profile targeted runs the plugin smoke test and full tests/dc_router suite"
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "dispatch.py 12 阶段顺序敏感且不可并行",
+      "text": "dispatch.dispatch() 必须按下列顺序串行执行；任何阶段返回 handled=True 即终止；阶段编号在 dispatch.py 注释里稳定。",
+      "stage_order": [
+        {"stage": 1, "name": "card_action",        "module": "preprocessing.card_action"},
+        {"stage": 2, "name": "slash_command",      "module": "dispatch._SLASH_RE (inline)"},
+        {"stage": 3, "name": "chitchat_guard",     "module": "preprocessing.chitchat"},
+        {"stage": 4, "name": "reasoning_prefix",   "module": "routing.reasoning_prefix"},
+        {"stage": 5, "name": "feishu_channel",     "module": "preprocessing.feishu_channel"},
+        {"stage": 6, "name": "truth_intake",       "module": "truth_intake (dc_engines, optional)"},
+        {"stage": 7, "name": "dept_memory_prompt", "module": "preprocessing.department_memory"},
+        {"stage": 8, "name": "memory_injection",   "module": "memory_injection (set_extra only)"},
+        {"stage": 9, "name": "assistant_tone",     "module": "preprocessing.assistant_tone"},
+        {"stage": 10, "name": "media_route",       "module": "preprocessing.media_route"},
+        {"stage": 11, "name": "dc_router_decide",  "module": "dc_router_core.DCRouter.decide + routing.apply_decision"},
+        {"stage": 12, "name": "v1_fallback",       "module": "routing.legacy_v1_fallback (仅 enabled=false / dry-run / decide 异常)"}
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "reasoning prefix 优先级最高",
+      "text": "#高 / #超深 / #codex 等直接指定 provider_id 的前缀，由 dispatch 阶段 4 拦截：命中后 set_provider + 跳过所有后续 intent 分类（business / ops / classifier）。这是 R1 唯一允许的「意图分类提前」路径。",
+      "enforcement": [
+        "routing.reasoning_prefix._REASONING_PREFIX_PROVIDERS 是唯一权威表",
+        "legacy_v1_fallback.V1_PREFIX_INTENTS 在 stage=12 才生效 (因为前面已经被 stage=4 拦走)"
+      ]
+    },
+    {
+      "id": "R4",
+      "title": "关闭 dc_router 时回退 v1.0",
+      "text": "当 dc_router_config.enabled=false 或 dry_run=true 时，stage 11 调 DCRouter.decide() 仅做决策注解 (annotate_event_with_decision)；stage 12 调 legacy_v1_fallback 接管真实 set_provider。这是 R1 唯一的回退窗口。",
+      "enforcement": [
+        "config.DCRouterConfig.is_active (enabled && !dry_run) 控制 stage 11 是否调用 apply_decision",
+        "config.DCRouterConfig.fallback_on_error=false 时 stage 11 抛错直接停止本消息处理 (不进入 stage 12)"
+      ]
+    },
+    {
+      "id": "R5",
+      "title": "CLI provider 路径统一走 cli_handlers",
+      "text": "RouterDecision.provider_id 以 cli/ 开头 (antigravity / codex / grok) 时，routing.apply_decision 必须委托给 cli_handlers.dispatch_cli_provider，禁止在 routing 层内联任何 subprocess / pexpect / QuotaGate.admit 调用。所有 antigravity / codex / grok 的 circuit-breaker / QuotaGate 队列 / fallback 逻辑只在 cli_handlers 内部实现。",
+      "enforcement": [
+        "cli_handlers._is_cli_provider 是唯一 provider_id 判定入口",
+        "antigravity_health / qwen_health / dc_quota_runtime 只允许被 cli_handlers 导入"
+      ]
+    },
+    {
+      "id": "R6",
+      "title": "QuotaGate admit/complete/fail 状态机",
+      "text": "CLI 任务 (antigravity / codex) 必须先调 harness.quota_gate.admit() 才能跑；admit 命中冷却 (cooldown_after_completion_seconds) 或资源占用 (concurrent_slots) 时返回 QUEUED，由 cli_handlers 给用户发排队卡；队列持久化到 SQLite (queue_store) 之后由 background queue_recovery_loop 接管。",
+      "enforcement": [
+        "cli_handlers.start_queue_recovery / stop_queue_recovery 由 plugin.py 在 enabled && !dry_run 时挂载",
+        "config.queue_recovery_interval_seconds 默认 60s"
+      ]
+    },
+    {
+      "id": "R7",
+      "title": "antigravity / qwen3.6-flash circuit breaker 串联",
+      "text": "antigravity 走 antigravity_health.* (auth=30min, timeout=3min, transient=5min)；qwen3.6-flash 走 qwen_health.*。两个 health 模块独立状态，cli_handlers 命中 circuit-open 时自动切换 ANTIGRAVITY_FALLBACK_PROVIDER_ID / QWEN_FALLBACK_PROVIDER_ID。任何业务路径不得绕过 health 直接调 CliRunner。",
+      "enforcement": [
+        "antigravity_health.antigravity_allowed() / qwen_health.qwen3_6_flash_allowed() 是唯一入口",
+        "health_snapshot() 是 dashboard / cli 唯一读取接口"
+      ]
+    },
+    {
+      "id": "R8",
+      "title": "Platform 路由分支",
+      "text": "DCRouter.decide() 根据 envelope.metadata['platform_id'] 选 business 路由表或 ops 路由表。business: dc_router_core.taxonomy.RouterIntent + provider_map.rules / content_sop。ops: dc_router_core.ops_taxonomy.OpsIntent + ops_rules / ops_provider_map。两条线共用 RouterDecision 契约 (use_enum_values=True) 收敛下游。",
+      "enforcement": [
+        "DCRouter.OPS_PLATFORM_IDS == {'巅池-技术（DevOps）', '巅池-技术'}",
+        "config.BUSINESS_PLATFORM_IDS == frozenset({'巅池-Agent小助手'})",
+        "config.OPS_PLATFORM_IDS == frozenset({'巅池-技术（DevOps）', '巅池-技术'})"
+      ]
+    },
+    {
+      "id": "R9",
+      "title": "Memory 注入不污染 message_str",
+      "text": "memory_injection / dept_memory / assistant_tone 全部用 event.set_extra(...) 传 context，禁止改写 event.message_str / event.message_obj.message_str。原始文本只走 routing_adapter / apply_decision 做最终 prompt 拼接。",
+      "enforcement": [
+        "memory_injection.inject_memory_context_into_event 写 dc_agent_memory_context / dc_agent_memory_hits extras",
+        "dept_memory.audit_state 状态走 audit log (data/department_memory_prompt_audit.jsonl) 而非 event 字段"
+      ]
+    },
+    {
+      "id": "R10",
+      "title": "回滚方式",
+      "text": "data/config/dc_router_config.json 是唯一开关: enabled=false 即关闭 dc_router + 自动回退 v1.0；dry_run=true 保留 dc_router 决策注解但仍走 v1.0。plugin.py 每条消息 hot-reload 配置，无需重启 AstrBot。",
+      "enforcement": [
+        "config.load_config() 读 mtime 缓存 + 异常时返回安全默认 (enabled=False, dry_run=True)"
+      ]
+    },
+    {
+      "id": "R11",
+      "title": "测试入口",
+      "text": "所有 dc_router 行为测试统一落在 tests/dc_router/ 目录。data/plugins/dc_router/test_routing_path.py 仅保留为 AstrBot 插件导入/路由路径 smoke test。",
+      "enforcement": [
+        "scripts/agent-check.sh targeted profile 覆盖 test closure、data/plugins/dc_router/test_routing_path.py、tests/dc_router；完整 dc_router 套件用 uv run pytest tests/dc_router -q",
+        "tests/dc_router/ 下的 test_* 必须能在 AstrBot stub 下独立跑 (PYTHONPATH=.)"
+      ]
+    }
+  ],
+  "acceptance_tests": [
+    {
+      "id": "A1",
+      "title": "reasoning prefix 命中时 dc_router 不被调",
+      "covers": ["R1", "R3"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestPipelineOrdering::test_reasoning_prefix_short_circuits_remaining_stages"
+    },
+    {
+      "id": "A2",
+      "title": "slash command 绕过整个 dispatch",
+      "covers": ["R1", "R2"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestStage2SlashCommand::test_slash_command_bypasses_routing"
+    },
+    {
+      "id": "A3",
+      "title": "chitchat 命中后 stage 4-12 不被调",
+      "covers": ["R2", "R3"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestStage3Chitchat::test_chitchat_greeting_routes_to_chitchat_stage"
+    },
+    {
+      "id": "A4",
+      "title": "feishu channel agent 命中时直接 pin provider",
+      "covers": ["R2", "R8"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestStage5FeishuChannel::test_feishu_channel_handles_message"
+    },
+    {
+      "id": "A5",
+      "title": "dc_router decide() 异常且 fallback_on_error=true 时 v1.0 兜底",
+      "covers": ["R4"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestStage11DCRouterDecision::test_dc_router_error_with_fallback"
+    },
+    {
+      "id": "A6",
+      "title": "dc_router_config.enabled=false 时所有 dc_router 调用路径不进入",
+      "covers": ["R4", "R10"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestStage11DCRouterDecision::test_dc_router_not_run_when_inactive"
+    },
+    {
+      "id": "A7",
+      "title": "CLI provider 路由全部走 cli_handlers",
+      "covers": ["R5", "R6"],
+      "test_path": "tests/dc_router/test_cli_apply_decision.py::test_apply_decision_dispatches_cli_provider_and_annotates_event"
+    },
+    {
+      "id": "A8",
+      "title": "antigravity circuit-open 时自动 fallback",
+      "covers": ["R7"],
+      "test_path": "tests/dc_router/test_antigravity_circuit_tuning.py::test_antigravity_timeout_opens_circuit_immediately"
+    },
+    {
+      "id": "A9",
+      "title": "memory injection 不污染 message_str",
+      "covers": ["R9"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestStage8MemoryInjection::test_memory_injection_does_not_mutate_message_str"
+    },
+    {
+      "id": "A10",
+      "title": "dry-run 只注解不切换 provider",
+      "covers": ["R4", "R10"],
+      "test_path": "tests/dc_router/test_dispatch_pipeline.py::TestPipelineDryRun::test_dry_run_calls_dc_router_and_annotates"
+    },
+    {
+      "id": "A11",
+      "title": "ops platform 走 ops 路由表",
+      "covers": ["R8"],
+      "test_path": "tests/dc_router/test_dc_router_contract.py::TestOpsRouterContracts::test_ops_platform_uses_ops_router_by_default"
+    },
+    {
+      "id": "A12",
+      "title": "config 损坏时安全默认 (enabled=False)",
+      "covers": ["R10"],
+      "test_path": "tests/dc_router/test_config.py::TestLoadConfigCorruptedJson::test_garbage_content_returns_safe_defaults"
+    }
+  ],
+  "retired_artifacts": {
+    "removed_in_version": "2.0.0",
+    "artifacts": [
+      "data/plugins/llm_router/ (整个目录)",
+      "data/plugins/llm_router/test_dc_router_path.py",
+      "data/plugins/llm_router/test_routing_path.py",
+      "data/plugins/dc_router/routing_adapter.py (CLI 拆分后被 cli_handlers 替代, 仅保留 antigravity 排队卡兼容入口)",
+      "data/plugins/dc_router/dc_router_adapter.py (旧 dispatch shim)",
+      "data/plugins/dc_router/main.py 中的 LLMRouterPlugin 兼容 shim"
+    ],
+    "superseding_modules": {
+      "dispatch": "data/plugins/dc_router/dispatch.py",
+      "decision_application": "data/plugins/dc_router/routing/apply_decision.py",
+      "cli_providers": "data/plugins/dc_router/cli_handlers.py",
+      "v1_fallback": "data/plugins/dc_router/routing/legacy_v1_fallback.py",
+      "core_logic": "dc_router_core/"
+    }
+  }
+}

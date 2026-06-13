@@ -89,6 +89,32 @@ class QuotaGate:
         finally:
             await db.close()
 
+    async def resources_available_now(
+        self,
+        resource_keys: tuple[str, ...],
+    ) -> bool:
+        """Read-only availability snapshot for L3 route arbitration.
+
+        Unlike :meth:`admit`, this never inserts a queue job; it only
+        registers missing resource rows (idempotent) and reports whether
+        all requested resources are free right now.
+        """
+        await self.store.init()
+        now = time.time()
+        db = await self.store.connect()
+        try:
+            for resource_key in resource_keys:
+                config = self.resource_configs.get(
+                    resource_key,
+                    ResourceConfig(key=resource_key),
+                )
+                await self.store.ensure_resource(db, config)
+            await db.commit()
+            rows = await self._fetch_resource_rows(db, resource_keys)
+            return self._resources_available(rows, now)
+        finally:
+            await db.close()
+
     async def complete(
         self,
         job_id: str,
@@ -106,6 +132,7 @@ class QuotaGate:
                 await db.rollback()
                 msg = f"Queue job not found: {job_id}"
                 raise ValueError(msg)
+            await self._require_running_job(db, row, job_id)
 
             resource_keys = tuple(json.loads(row["resource_keys_json"]))
             await db.execute(
@@ -126,6 +153,7 @@ class QuotaGate:
             await self._release_resources_to_cooldown(
                 db,
                 resource_keys,
+                job_id,
                 now=now,
                 cooldown_seconds=cooldown_seconds,
                 last_success_at=now,
@@ -254,6 +282,7 @@ class QuotaGate:
                 await db.rollback()
                 msg = f"Queue job not found: {job_id}"
                 raise ValueError(msg)
+            await self._require_running_job(db, row, job_id)
 
             resource_keys = tuple(json.loads(row["resource_keys_json"]))
             await db.execute(
@@ -269,6 +298,7 @@ class QuotaGate:
             await self._release_resources_to_cooldown(
                 db,
                 resource_keys,
+                job_id,
                 now=now,
                 cooldown_seconds=retry_after_seconds,
                 last_success_at=None,
@@ -312,6 +342,19 @@ class QuotaGate:
             msg = f"Missing resource state rows: {sorted(missing)}"
             raise RuntimeError(msg)
         return list(rows)
+
+    async def _require_running_job(
+        self,
+        db: aiosqlite.Connection,
+        row: aiosqlite.Row,
+        job_id: str,
+    ) -> None:
+        status = row["status"]
+        if status == QueueStatus.RUNNING.value:
+            return
+        await db.rollback()
+        msg = f"Queue job is not running: {job_id} (status={status})"
+        raise ValueError(msg)
 
     def _resources_available(
         self,
@@ -405,6 +448,7 @@ class QuotaGate:
         self,
         db: aiosqlite.Connection,
         resource_keys: tuple[str, ...],
+        job_id: str,
         *,
         now: float,
         cooldown_seconds: int | None,
@@ -416,7 +460,11 @@ class QuotaGate:
                 resource_key,
                 ResourceConfig(key=resource_key),
             )
-            cooldown = cooldown_seconds or config.cooldown_after_completion_seconds
+            cooldown = (
+                config.cooldown_after_completion_seconds
+                if cooldown_seconds is None
+                else cooldown_seconds
+            )
             await db.execute(
                 """
                 UPDATE dc_llm_resource_state
@@ -427,6 +475,7 @@ class QuotaGate:
                     last_429_at = CASE WHEN ? IS NULL THEN last_429_at ELSE ? END,
                     last_error = ?
                 WHERE resource_key = ?
+                  AND in_flight_job_id = ?
                 """,
                 (
                     QueueStatus.COOLDOWN.value,
@@ -436,6 +485,7 @@ class QuotaGate:
                     now,
                     last_error,
                     resource_key,
+                    job_id,
                 ),
             )
 

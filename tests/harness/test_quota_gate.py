@@ -50,6 +50,72 @@ async def _resource_row(gate: QuotaGate) -> dict:
         await db.close()
 
 
+async def _job_row(gate: QuotaGate, job_id: str) -> dict:
+    db = await gate.store.connect()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM dc_llm_queue_jobs WHERE job_id = ?",
+            (job_id,),
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        return dict(row)
+    finally:
+        await db.close()
+
+
+async def _set_job_status(gate: QuotaGate, job_id: str, status: str) -> None:
+    db = await gate.store.connect()
+    try:
+        await db.execute(
+            """
+            UPDATE dc_llm_queue_jobs
+            SET status = ?
+            WHERE job_id = ?
+            """,
+            (status, job_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def _set_resource_in_flight(gate: QuotaGate, job_id: str) -> None:
+    db = await gate.store.connect()
+    try:
+        await db.execute(
+            """
+            UPDATE dc_llm_resource_state
+            SET status = ?,
+                in_flight_job_id = ?,
+                next_available_at = NULL,
+                last_success_at = NULL,
+                last_429_at = NULL,
+                last_error = NULL
+            WHERE resource_key = ?
+            """,
+            (QueueStatus.RUNNING.value, job_id, RESOURCE_KEY),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def _reject_release_call(*args: object, **kwargs: object) -> None:
+    raise AssertionError("resource release should not be called")
+
+
+async def _complete_or_fail(
+    gate: QuotaGate,
+    action: str,
+    job_id: str,
+) -> None:
+    if action == "complete":
+        await gate.complete(job_id, result={"summary": "done"})
+        return
+    await gate.fail(job_id, "should not terminalize")
+
+
 @pytest.mark.asyncio
 async def test_quota_gate_admits_first_request_run_now(
     quota_gate: QuotaGate,
@@ -67,6 +133,67 @@ async def test_quota_gate_admits_first_request_run_now(
 
     resource = await _resource_row(quota_gate)
     assert resource["in_flight_job_id"] == decision.job.job_id
+
+
+@pytest.mark.parametrize("action", ["complete", "fail"])
+@pytest.mark.asyncio
+async def test_pending_job_complete_or_fail_rejects_without_releasing_resource(
+    quota_gate: QuotaGate,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    running = await quota_gate.admit(_request())
+    queued = await quota_gate.admit(_request())
+    monkeypatch.setattr(
+        quota_gate,
+        "_release_resources_to_cooldown",
+        _reject_release_call,
+    )
+
+    with pytest.raises(ValueError, match="not running"):
+        await _complete_or_fail(quota_gate, action, queued.job.job_id)
+
+    queued_row = await _job_row(quota_gate, queued.job.job_id)
+    assert queued_row["status"] == QueueStatus.PENDING.value
+
+    resource = await _resource_row(quota_gate)
+    assert resource["status"] == QueueStatus.RUNNING.value
+    assert resource["in_flight_job_id"] == running.job.job_id
+
+
+@pytest.mark.parametrize("action", ["complete", "fail"])
+@pytest.mark.parametrize(
+    "status",
+    [
+        QueueStatus.CANCELLED.value,
+        QueueStatus.FAILED.value,
+        "unknown",
+    ],
+)
+@pytest.mark.asyncio
+async def test_non_running_terminal_or_unknown_jobs_reject_without_release(
+    quota_gate: QuotaGate,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    status: str,
+) -> None:
+    admitted = await quota_gate.admit(_request())
+    await _set_job_status(quota_gate, admitted.job.job_id, status)
+    monkeypatch.setattr(
+        quota_gate,
+        "_release_resources_to_cooldown",
+        _reject_release_call,
+    )
+
+    with pytest.raises(ValueError, match=f"status={status}"):
+        await _complete_or_fail(quota_gate, action, admitted.job.job_id)
+
+    stored = await _job_row(quota_gate, admitted.job.job_id)
+    assert stored["status"] == status
+
+    resource = await _resource_row(quota_gate)
+    assert resource["status"] == QueueStatus.RUNNING.value
+    assert resource["in_flight_job_id"] == admitted.job.job_id
 
 
 @pytest.mark.asyncio
@@ -106,6 +233,37 @@ async def test_complete_releases_resource_to_cooldown(
     assert resource["in_flight_job_id"] is None
     assert resource["next_available_at"] is not None
     assert resource["last_success_at"] is not None
+
+
+@pytest.mark.parametrize("action", ["complete", "fail"])
+@pytest.mark.asyncio
+async def test_completed_job_duplicate_complete_or_fail_rejects_without_release(
+    quota_gate: QuotaGate,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+) -> None:
+    admitted = await quota_gate.admit(_request())
+    await quota_gate.complete(
+        admitted.job.job_id,
+        result={"summary": "done"},
+        cooldown_seconds=15,
+    )
+    resource_before = await _resource_row(quota_gate)
+    monkeypatch.setattr(
+        quota_gate,
+        "_release_resources_to_cooldown",
+        _reject_release_call,
+    )
+
+    with pytest.raises(ValueError, match="status=completed"):
+        await _complete_or_fail(quota_gate, action, admitted.job.job_id)
+
+    stored = await quota_gate.store.get_job(admitted.job.job_id)
+    assert stored is not None
+    assert stored.status is QueueStatus.COMPLETED
+
+    resource_after = await _resource_row(quota_gate)
+    assert resource_after == resource_before
 
 
 @pytest.mark.asyncio
@@ -174,6 +332,23 @@ async def test_cancel_pending_job_does_not_release_running_resource(
     assert resource["in_flight_job_id"] == running.job.job_id
 
 
+@pytest.mark.parametrize("action", ["complete", "fail"])
+@pytest.mark.asyncio
+async def test_running_job_complete_or_fail_only_releases_matching_in_flight_job(
+    quota_gate: QuotaGate,
+    action: str,
+) -> None:
+    admitted = await quota_gate.admit(_request())
+    other_job_id = "other-running-job"
+    await _set_resource_in_flight(quota_gate, other_job_id)
+
+    await _complete_or_fail(quota_gate, action, admitted.job.job_id)
+
+    resource = await _resource_row(quota_gate)
+    assert resource["status"] == QueueStatus.RUNNING.value
+    assert resource["in_flight_job_id"] == other_job_id
+
+
 @pytest.mark.asyncio
 async def test_fail_marks_job_failed_and_records_resource_error(
     quota_gate: QuotaGate,
@@ -193,6 +368,7 @@ async def test_fail_marks_job_failed_and_records_resource_error(
 
     resource = await _resource_row(quota_gate)
     assert resource["status"] == QueueStatus.COOLDOWN.value
+    assert resource["in_flight_job_id"] is None
     assert resource["last_error"] == "429 too many requests"
     assert resource["last_429_at"] is not None
 

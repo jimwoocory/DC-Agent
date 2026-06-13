@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from pathlib import Path
 from typing import Any
 
+try:
+    from .paths import data_path, project_root
+except ImportError:  # pragma: no cover - direct file-load compatibility
+    from data.plugins.dc_router.paths import data_path, project_root
+
 # 让 `from harness import ...` 从 DC-Agent 顶层 import
-_DC_AGENT_ROOT = Path("/Users/dianchi/DC-Agent")
+_DC_AGENT_ROOT = project_root()
 if str(_DC_AGENT_ROOT) not in sys.path:
     sys.path.insert(0, str(_DC_AGENT_ROOT))
 
@@ -28,7 +32,7 @@ from astrbot.api import logger  # noqa: E402
 _QUOTA_GATE_INSTANCE: Any = None
 _INIT_LOCK = asyncio.Lock()
 
-DEFAULT_DB_PATH = "/Users/dianchi/DC-Agent/data/dc_harness.db"
+DEFAULT_DB_PATH = str(data_path("dc_harness.db"))
 
 
 async def get_quota_gate(db_path: str | None = None):

@@ -96,7 +96,8 @@ uv run pytest \
   tests/test_computer_fs_tools.py::test_restricted_member_still_cannot_read_unrelated_data_path \
   tests/test_harness_state_injector.py \
   -q
-uv run pytest data/plugins/llm_router/test_dc_router_path.py -q
+uv run pytest data/plugins/dc_router/test_routing_path.py -q
+uv run pytest tests/dc_router -q
 uv run pytest dc_engines/tests -q
 
 if [[ "$PROFILE" == "full" ]]; then

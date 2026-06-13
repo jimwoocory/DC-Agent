@@ -80,6 +80,49 @@ _ANALYSIS_INTENT_RE = re.compile(
     r"(解读|总结|分析|提炼|梳理|输出|生成|写|案例|方案|文案|海报|报告)"
 )
 _HARNESS_TERMINAL_STATUSES = {"completed", "cancelled", "failed"}
+_HARNESS_STATUS_CAN_BLOCK_ON_MISSING_RESOURCE = {"pending", "in_progress", "blocked"}
+
+
+def _merge_harness_source_citations(existing, hits: list[dict]) -> list[dict]:
+    existing_citations = existing if isinstance(existing, list) else []
+    merged: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add_citation(candidate: dict) -> None:
+        title = str(candidate.get("title") or candidate.get("id") or "")
+        source_path = str(
+            candidate.get("source_path")
+            or candidate.get("url")
+            or candidate.get("id")
+            or title
+        )
+        if not source_path and not title:
+            return
+        key = (source_path, title)
+        if key in seen:
+            return
+        seen.add(key)
+        item = dict(candidate)
+        item.setdefault("title", title)
+        item.setdefault("source_path", source_path)
+        merged.append(item)
+
+    for citation in existing_citations:
+        if isinstance(citation, dict):
+            add_citation(citation)
+    for hit in hits:
+        add_citation(
+            {
+                "title": hit.get("title", ""),
+                "source_path": hit.get("url") or hit.get("id") or "",
+                "source_type": hit.get("source_type", ""),
+                "retrieval_mode": hit.get("retrieval_mode", ""),
+                "credential_status": hit.get("credential_status", ""),
+                "content_status": hit.get("content_status", ""),
+                "matched_snippet": hit.get("matched_snippet", ""),
+            }
+        )
+    return merged[:20]
 
 
 def _extract_user_query_text(text: str) -> str:
@@ -125,11 +168,14 @@ class FeishuResourcePlugin(Star):
         if creds and creds.enable:
             try:
                 self.client = FeishuClient(creds)
-                self.mode = "v1"
+                self.mode = "v1" if self.client.enabled else "metadata_only"
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[feishu_resource] FeishuClient 初始化失败：%s", exc)
                 self.client = None
-                self.mode = "v0"
+                self.mode = "metadata_only"
+        elif creds:
+            self.client = None
+            self.mode = "metadata_only"
         else:
             self.client = None
             self.mode = "v0"
@@ -204,6 +250,7 @@ class FeishuResourcePlugin(Star):
                 and (
                     task.domain == "truth_intake"
                     or str(task.domain).startswith("department_workflow:")
+                    or str(task.domain).startswith("content_sop:")
                 )
             )
 
@@ -237,6 +284,7 @@ class FeishuResourcePlugin(Star):
         summary: str,
         keyword: str,
         hits: list | None = None,
+        retrieval_scope: str | None = None,
     ) -> None:
         harness_engine = getattr(self.context, "harness_engine", None)
         if harness_engine is None:
@@ -246,40 +294,92 @@ class FeishuResourcePlugin(Star):
             return
 
         hits = hits or []
+        harness_hits = [
+            {
+                "type": h.source_type,
+                "source_type": h.source_type,
+                "id": h.source_id,
+                "title": h.title,
+                "url": h.url or "",
+                "retrieval_mode": h.metadata.get("retrieval_mode", ""),
+                "matched_snippet": h.matched_snippet,
+                "credential_status": h.metadata.get("credential_status", ""),
+                "matched_field": h.matched_field,
+                "content_status": h.metadata.get("content_status", ""),
+                "error_type": h.metadata.get("error_type", ""),
+            }
+            for h in hits[:10]
+        ]
         result = {
             "summary": summary,
             "response_preview": summary,
             "source": "feishu_resource_plugin",
-            "quality": "success" if status == "completed" else "blocked",
+            "quality": "resource_evidence" if hits else "blocked",
             "keyword": keyword,
             "mode": self.mode,
-            "hits": [
-                {
-                    "type": h.source_type,
-                    "id": h.source_id,
-                    "title": h.title,
-                    "url": h.url,
-                }
-                for h in hits[:10]
-            ],
+            "retrieval_scope": retrieval_scope or self._retrieval_scope(),
+            "content_status": "hits_found" if hits else "not_found",
+            "harness_settlement": "evidence_attached" if hits else "blocked",
+            "hits": harness_hits,
         }
         for task in tasks:
             try:
-                if status == "completed":
-                    await harness_engine.complete_task(task.task_id, result=result)
-                else:
-                    await harness_engine.set_status(
-                        task.task_id,
-                        "blocked",
-                        result=result,
-                        event_payload={"reason": summary[:200]},
+                if hits:
+                    await self._attach_harness_resource_evidence(
+                        harness_engine,
+                        task,
+                        result,
                     )
+                    continue
+                if task.status not in _HARNESS_STATUS_CAN_BLOCK_ON_MISSING_RESOURCE:
+                    await harness_engine.append_trace(
+                        task.task_id,
+                        "feishu_resource_missing_skipped_status_change",
+                        result,
+                    )
+                    continue
+                await harness_engine.set_status(
+                    task.task_id,
+                    "blocked",
+                    result=result,
+                    event_payload={"reason": summary[:200]},
+                )
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "[feishu_resource] harness settle failed task=%s",
                     task.task_id,
                     exc_info=True,
                 )
+
+    async def _attach_harness_resource_evidence(
+        self,
+        harness_engine,
+        task,
+        result: dict,
+    ) -> None:
+        task_payload = getattr(task, "payload", {}) or {}
+        existing_citations = task_payload.get("source_citations") or []
+        citations = _merge_harness_source_citations(existing_citations, result["hits"])
+        patch = {
+            "resource_retrieval_status": "evidence_attached",
+            "resource_retrieval_summary": result["summary"],
+            "resource_retrieval_keyword": result["keyword"],
+            "retrieval_mode": result["mode"],
+            "retrieval_scope": result["retrieval_scope"],
+            "content_status": result["content_status"],
+            "feishu_resource_hits": result["hits"],
+            "source_citations": citations,
+        }
+        await harness_engine.merge_payload(
+            task.task_id,
+            patch,
+            event_type="feishu_resource_evidence_attached",
+        )
+        await harness_engine.append_trace(
+            task.task_id,
+            "feishu_resource_retrieval_result",
+            result,
+        )
 
     def _resource_scope_text(self) -> str:
         return (
@@ -289,15 +389,45 @@ class FeishuResourcePlugin(Star):
             f"folder {len(self.whitelist.folders)}），模式 {self.mode}"
         )
 
+    def _metadata_query_credential_status(self) -> str:
+        if self.mode == "metadata_only":
+            return "disabled"
+        return "missing"
+
+    def _retrieval_scope(self) -> str:
+        if self.mode == "v1":
+            return "bounded_content_with_metadata_fallback"
+        return "metadata_only"
+
+    def _no_hits_summary(self, keyword: str) -> str:
+        if self.mode == "v1":
+            return (
+                f"有限内容检索与元信息回退范围内未找到「{keyword}」的匹配资料。"
+                "可换更短关键词或提供飞书链接继续处理。"
+            )
+        return f"没有在资料元信息里找到「{keyword}」的匹配内容。"
+
+    def _no_hits_fallback_text(self, keyword: str) -> str:
+        base = (
+            f"没找到含「{keyword}」的资料"
+            f"（白名单 {self.whitelist.total()} 条，模式 {self.mode}）"
+        )
+        if self.mode == "v1":
+            return base + "；已进行有限内容检索并回退检查元信息。"
+        return base
+
     def _build_no_hits_card(self, keyword: str) -> dict:
+        scope_note = ""
+        if self.mode == "v1":
+            scope_note = "\n\n**检索说明**：内容检索按元信息预筛并限制源数量；未命中不等于所有授权资料全文都包含不了该词。"
         return build_daily_response_card(
             title="📚 资料查询未命中",
             header_color="orange",
             content_md=(
                 f"**查询词**：`{keyword}`\n\n"
                 f"**检索范围**：{self._resource_scope_text()}\n\n"
-                "没有在已授权资料里找到匹配内容。可以换一个更短、更具体的关键词，"
-                "或直接发送飞书链接 / 文档标题让小助手理解内容。"
+                f"{self._no_hits_summary(keyword)}"
+                f"{scope_note}"
             ),
             footer_hint="如果你是在问图片或截图里的内容，直接提问即可，不需要触发资料查询。",
         )
@@ -320,6 +450,45 @@ class FeishuResourcePlugin(Star):
                 t = t[idx + len(kw) :].strip(" 一下 :：,，")
                 break
         return t.strip()
+
+    def _build_hits_reply_text(self, keyword: str, hits: list) -> str:
+        lines = [f"🔍 「{keyword}」找到 {len(hits)} 条相关资料（{self.mode}）："]
+        for h in hits:
+            kind_emoji = {"document": "📄", "table": "📊", "folder": "📁"}.get(
+                h.source_type, "•"
+            )
+            score_bar = "★" * min(5, int(h.score * 5))
+            metadata = h.metadata or {}
+            retrieval_mode = metadata.get("retrieval_mode") or (
+                "content" if h.matched_field == "content" else "metadata_only"
+            )
+            credential_status = metadata.get("credential_status", "unknown")
+            content_status = metadata.get("content_status", "unknown")
+            error_type = metadata.get("error_type", "")
+            provenance_parts = [
+                f"来源: {h.source_type}",
+                f"检索: {retrieval_mode}",
+                f"凭证: {credential_status}",
+                f"字段: {h.matched_field or 'unknown'}",
+                f"状态: {content_status}",
+            ]
+            if error_type:
+                provenance_parts.append(f"错误: {error_type}")
+
+            lines.append(f"\n{kind_emoji} **{h.title}** ({h.domain}) {score_bar}")
+            lines.append("   " + " / ".join(provenance_parts))
+            if h.matched_snippet:
+                lines.append(f"   匹配: {h.matched_snippet}")
+            elif h.summary:
+                lines.append(f"   {h.summary[:80]}")
+            if h.url:
+                lines.append(f"   [打开]({h.url})")
+        if self.mode != "v1":
+            lines.append("")
+            lines.append(
+                "_注：当前仅匹配资料元信息；可用 Feishu 凭证启用后才会进行真实内容检索_"
+            )
+        return "\n".join(lines)
 
     @filter.event_message_type(
         EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE
@@ -356,7 +525,7 @@ class FeishuResourcePlugin(Star):
                 pass
 
         # v0 / v1 自动切换
-        if self.mode == "v1" and self.client is not None:
+        if self.mode == "v1" and self.client is not None and self.client.enabled:
             hits = await query_resources_v1(
                 keyword,
                 whitelist=self.whitelist,
@@ -365,7 +534,10 @@ class FeishuResourcePlugin(Star):
             )
         else:
             hits = query_resources_v0(
-                keyword, whitelist=self.whitelist, domain_hint=domain_hint
+                keyword,
+                whitelist=self.whitelist,
+                domain_hint=domain_hint,
+                credential_status=self._metadata_query_credential_status(),
             )
 
         if not hits:
@@ -386,10 +558,7 @@ class FeishuResourcePlugin(Star):
                     keyword=keyword,
                 )
             else:
-                fallback = (
-                    f"没找到含「{keyword}」的资料"
-                    f"（白名单 {self.whitelist.total()} 条，模式 {self.mode}）"
-                )
+                fallback = self._no_hits_fallback_text(keyword)
                 await self._reply_card_or_text(
                     event,
                     card=self._build_no_hits_card(keyword),
@@ -398,30 +567,13 @@ class FeishuResourcePlugin(Star):
                 await self._record_harness_resource_result(
                     event,
                     status="blocked",
-                    summary=f"没有在已授权资料里找到「{keyword}」的匹配内容。",
+                    summary=self._no_hits_summary(keyword),
                     keyword=keyword,
+                    retrieval_scope=self._retrieval_scope(),
                 )
             return
 
-        lines = [f"🔍 「{keyword}」找到 {len(hits)} 条相关资料（{self.mode}）："]
-        for h in hits:
-            kind_emoji = {"document": "📄", "table": "📊", "folder": "📁"}.get(
-                h.source_type, "•"
-            )
-            score_bar = "★" * min(5, int(h.score * 5))
-            lines.append(f"\n{kind_emoji} **{h.title}** ({h.domain}) {score_bar}")
-            if h.matched_snippet:
-                lines.append(f"   匹配: {h.matched_snippet}")
-            elif h.summary:
-                lines.append(f"   {h.summary[:80]}")
-            if h.url:
-                lines.append(f"   [打开]({h.url})")
-        if self.mode == "v0":
-            lines.append("")
-            lines.append(
-                "_注：v0 模式仅匹配资料元信息，配置 `feishu.app_id/app_secret` 启用 v1 真内容检索_"
-            )
-        reply_text = "\n".join(lines)
+        reply_text = self._build_hits_reply_text(keyword, hits)
         await self._reply_card_or_text(
             event,
             card=build_daily_response_card(
@@ -434,7 +586,7 @@ class FeishuResourcePlugin(Star):
         )
         await self._record_harness_resource_result(
             event,
-            status="completed",
+            status="evidence_attached",
             summary=f"已返回「{keyword}」的资料查询结果，共 {len(hits)} 条。",
             keyword=keyword,
             hits=hits,
@@ -450,7 +602,17 @@ class FeishuResourcePlugin(Star):
                         "keyword": keyword,
                         "mode": self.mode,
                         "hits": [
-                            {"type": h.source_type, "id": h.source_id, "title": h.title}
+                            {
+                                "type": h.source_type,
+                                "id": h.source_id,
+                                "title": h.title,
+                                "retrieval_mode": h.metadata.get("retrieval_mode", ""),
+                                "credential_status": h.metadata.get(
+                                    "credential_status", ""
+                                ),
+                                "content_status": h.metadata.get("content_status", ""),
+                                "error_type": h.metadata.get("error_type", ""),
+                            }
                             for h in hits
                         ],
                         "ts": datetime.now(timezone.utc).isoformat(),

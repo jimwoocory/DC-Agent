@@ -98,3 +98,4 @@ class QueryHit:
     matched_snippet: str = ""  # 命中位置上下文（v1 真内容检索时填）
     score: float = 0.0
     url: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)

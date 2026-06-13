@@ -2,10 +2,10 @@
 
 职责：从白名单飞书文档 / 多维表格 / NAS KB 文件夹里检索资料。
 
-v0 设计：
+版本：
 - ``Whitelist`` 数据模型 + yaml 加载
-- ``query_resources`` 接口（v0 桩，返回白名单元信息；真 API 集成留 TODO）
-- 整体框架定型，后续填 lark-oapi 真实调用
+- ``query_resources_v0`` 返回带 provenance 的白名单元信息命中
+- ``query_resources_v1`` 在凭证可用时读取 docx / bitable 内容，失败源安全退回元信息
 
 设计上 LLM 推理由调用方做（Star plugin），本引擎只负责"按 keyword 找到候选源"。
 """

@@ -1,8 +1,8 @@
 """FeishuClient — wrapping lark-oapi 1.6.x。
 
 只暴露 ``read_document`` 和 ``read_table_records`` 两个高层方法。token 刷新、
-错误处理、分页全在内部消化。任何 API 失败 → 返回 None 或空列表，不抛异常
-（业务层不该被 SDK 细节绑架）。
+分页全在内部处理。内容 API 失败会抛出 ``FeishuClientError``，让业务层能按
+source 标记 retrieval error。
 """
 
 from __future__ import annotations
@@ -26,6 +26,28 @@ _DOC_PLAIN_TEXT_MAX = 30_000
 _BLOCKS_PAGE_SIZE = 500
 # bitable 单次 list_records 拉的 page_size
 _RECORDS_PAGE_SIZE = 200
+
+
+class FeishuClientError(RuntimeError):
+    """Raised when a Feishu source content API fails."""
+
+    def __init__(
+        self,
+        operation: str,
+        source_id: str,
+        *,
+        code: object | None = None,
+        message: object | None = None,
+    ) -> None:
+        details = f"Feishu {operation} failed for {source_id}"
+        if code is not None:
+            details = f"{details} code={code}"
+        if message:
+            details = f"{details} msg={message}"
+        super().__init__(details)
+        self.operation = operation
+        self.source_id = source_id
+        self.code = code
 
 
 def _extract_block_text(block) -> str:
@@ -126,7 +148,7 @@ class FeishuClient:
     # ───────────────────────── document ─────────────────────────
 
     async def read_document(self, doc_token: str) -> DocContent | None:
-        """读飞书 docx 全文（拼成 plain_text）。失败返回 None。"""
+        """读飞书 docx 全文（拼成 plain_text）。API 失败抛出 FeishuClientError。"""
         if not self.enabled or not doc_token:
             return None
 
@@ -137,8 +159,22 @@ class FeishuClient:
             resp = await self._client.docx.v1.document.aget(req)
             if resp.success() and resp.data and resp.data.document:
                 title = getattr(resp.data.document, "title", "") or ""
+            elif not resp.success():
+                raise FeishuClientError(
+                    "doc_get",
+                    doc_token,
+                    code=getattr(resp, "code", "?"),
+                    message=getattr(resp, "msg", "?"),
+                )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[feishu] doc get title 失败 %s: %s", doc_token, exc)
+            logger.warning("[feishu] doc get 失败 %s: %s", doc_token, exc)
+            if isinstance(exc, FeishuClientError):
+                raise
+            raise FeishuClientError(
+                "doc_get",
+                doc_token,
+                message=exc,
+            ) from exc
 
         # 2) blocks 分页
         chunks: list[str] = []
@@ -159,7 +195,11 @@ class FeishuClient:
                 resp = await self._client.docx.v1.document_block.alist(req)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[feishu] list_blocks 失败 %s: %s", doc_token, exc)
-                break
+                raise FeishuClientError(
+                    "list_blocks",
+                    doc_token,
+                    message=exc,
+                ) from exc
 
             if not resp.success():
                 logger.warning(
@@ -168,7 +208,12 @@ class FeishuClient:
                     getattr(resp, "code", "?"),
                     getattr(resp, "msg", "?"),
                 )
-                break
+                raise FeishuClientError(
+                    "list_blocks",
+                    doc_token,
+                    code=getattr(resp, "code", "?"),
+                    message=getattr(resp, "msg", "?"),
+                )
 
             items = (resp.data and resp.data.items) or []
             block_count += len(items)
@@ -204,7 +249,7 @@ class FeishuClient:
         *,
         limit: int = 500,
     ) -> list[TableRecord]:
-        """读 bitable 单张表的记录。失败返回空列表。"""
+        """读 bitable 单张表的记录。API 失败抛出 FeishuClientError。"""
         if not self.enabled or not app_token or not table_id:
             return []
 
@@ -230,7 +275,11 @@ class FeishuClient:
                     table_id,
                     exc,
                 )
-                break
+                raise FeishuClientError(
+                    "list_records",
+                    f"{app_token}/{table_id}",
+                    message=exc,
+                ) from exc
 
             if not resp.success():
                 logger.warning(
@@ -239,7 +288,12 @@ class FeishuClient:
                     table_id,
                     getattr(resp, "code", "?"),
                 )
-                break
+                raise FeishuClientError(
+                    "list_records",
+                    f"{app_token}/{table_id}",
+                    code=getattr(resp, "code", "?"),
+                    message=getattr(resp, "msg", "?"),
+                )
 
             items = (resp.data and resp.data.items) or []
             for rec in items:

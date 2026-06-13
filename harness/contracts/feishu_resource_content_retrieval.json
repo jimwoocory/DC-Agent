@@ -1,0 +1,73 @@
+{
+  "feature": "feishu_resource_content_retrieval",
+  "goal": "Feishu/Lark resource queries distinguish real content retrieval from metadata-only fallback with offline-testable typed provenance.",
+  "runtime_wiring": {
+    "reader_files": [
+      "dc_engines/dc_engines/feishu_reader/contracts.py",
+      "dc_engines/dc_engines/feishu_reader/query_engine.py"
+    ],
+    "plugin_file": "data/plugins/feishu_resource_plugin/main.py",
+    "provenance_metadata_keys": [
+      "retrieval_mode",
+      "credential_status",
+      "source_type",
+      "content_status",
+      "error_type"
+    ],
+    "retrieval_modes": [
+      "content",
+      "metadata_only"
+    ],
+    "credential_statuses": [
+      "enabled",
+      "disabled",
+      "missing"
+    ],
+    "harness_hit_fields": [
+      "source_type",
+      "url",
+      "retrieval_mode",
+      "matched_snippet",
+      "credential_status"
+    ],
+    "harness_task_semantics": {
+      "hit_effect": "attach_provenance_only",
+      "forbidden_hit_methods": [
+        "complete_task",
+        "set_status"
+      ],
+      "missing_block_statuses": [
+        "pending",
+        "in_progress",
+        "blocked"
+      ],
+      "review_required_lifecycle_mutation": false
+    }
+  },
+  "acceptance_criteria": [
+    {
+      "id": "feishu-resource-content-001",
+      "description": "Reader QueryHit objects expose typed metadata provenance and enabled document/table content matches report content retrieval with enabled credentials.",
+      "verification": "uv run pytest dc_engines/tests/test_feishu_reader_content_retrieval.py -q"
+    },
+    {
+      "id": "feishu-resource-content-002",
+      "description": "The contract remains valid and records the source wiring plus required verification commands.",
+      "verification": "uv run pytest tests/harness/test_feishu_resource_content_retrieval_contract.py -q"
+    },
+    {
+      "id": "feishu-resource-content-003",
+      "description": "The plugin does not label disabled clients as v1 and exposes retrieval provenance in replies and harness task evidence without completing business tasks.",
+      "verification": "uv run pytest tests/test_feishu_resource_plugin.py -q"
+    },
+    {
+      "id": "feishu-resource-content-004",
+      "description": "Changed reader, plugin, and contract tests pass lint without adding network-dependent checks.",
+      "verification": "uv run ruff check dc_engines/dc_engines/feishu_reader/contracts.py dc_engines/dc_engines/feishu_reader/query_engine.py dc_engines/dc_engines/feishu_reader/__init__.py dc_engines/tests/test_feishu_reader_content_retrieval.py data/plugins/feishu_resource_plugin/main.py tests/test_feishu_resource_plugin.py tests/harness/test_feishu_resource_content_retrieval_contract.py"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

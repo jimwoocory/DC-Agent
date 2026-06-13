@@ -89,7 +89,6 @@ dashboard/bun.lock
 !data/plugins/
 !data/plugins/**
 !data/config/
-!data/config/hermes_bridge_config.json
 !data/config/openclaw_on_demand_config.json
 !data/feishu_whitelist.example.yaml
 
@@ -97,7 +96,14 @@ dashboard/bun.lock
 data/config/*.json
 data/config/*.yaml
 data/config/*.yml
-!data/config/hermes_bridge_config.json
+data/config/*.env
+data/config/*.txt
+data/config/*.token
+data/config/*.secret
+data/config/*.key
+!data/config/*.example.json
+!data/config/*.example.yaml
+!data/config/*.example.yml
 !data/config/openclaw_on_demand_config.json
 !data/config/system_entries_config.json
 
@@ -160,6 +166,8 @@ data/plugin_data/
 data/config/abconf_*.json
 data/config/alert_channel.yaml
 data/antigravity_health.json
+data/*_events.jsonl
+data/*_state.json
 data/grok_worker_state.json
 data/onboarding_watch.log
 data/chitchat_guard_hits.jsonl
@@ -168,6 +176,9 @@ data/.onboarding_pushed_markers/
 data/attachments/
 data/card_runtime/
 data/harness_intake/
+data/case_archives/
+data/workspaces/
+data/feishu-rpa-persistent-profile/
 
 # Dashboard 编译产物（用户自定义 build，再 build 就有；含 minified JS 不适合 git）
 data/dist/
@@ -179,9 +190,13 @@ astrbot.err.log
 astrbot.err.log.*
 nas_sync/logs/
 nas_sync/*.log
+nas_sync/*.failstate
 nas_sync/state.json
 nas_sync/watchdog.heartbeat
+nas/
 independent-website/
+.qoder/
+h_send_*_cron*.json
 
 # Generated local deliverables and scratch reports
 deliverables/

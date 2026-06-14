@@ -1,6 +1,7 @@
-"""临时建群 Star 插件（P2）。
+"""飞书群协作 Star 插件。
 
 `/chat new <群名> <成员1> <成员2> ...`
+`/chat invite <成员1> <成员2> ...`
 
 成员可以是：
 - `ou_xxx` 原始飞书 open_id
@@ -9,8 +10,8 @@
 
 发起人（owner）默认是命令的发送者；如果命令发送者不在飞书平台（如 QQ），不允许建群。
 
-凭证复用 ``data/feishu_whitelist.yaml`` 里的 ``feishu.app_id/app_secret``，
-所以**前置条件**：ops 在飞书后台为 app 勾选 ``im:chat`` + ``im:chat.member`` 权限。
+底层能力由 ``dc_engines.feishu_writer.ChatCreator`` 提供，插件只负责 AstrBot
+命令入口、员工名解析和飞书消息回复。
 """
 
 from __future__ import annotations
@@ -29,8 +30,8 @@ from astrbot.api.star import Context, Star, register
 @register(
     "chat_creator_plugin",
     "dc_agent",
-    "临时建群（P2 接待机器人配套）：/chat new <名> <成员...>",
-    "1.0.0",
+    "飞书群协作助手：建群、群内邀请和小助手进群指引",
+    "1.1.0",
 )
 class ChatCreatorPlugin(Star):
     def __init__(self, context: Context) -> None:
@@ -76,7 +77,7 @@ class ChatCreatorPlugin(Star):
         return (
             "可以，有两种方式：\n"
             "1. 已有飞书群：在群设置里添加机器人「巅池-Agent小助手」，然后在群里 @我 提需求。\n"
-            "2. 需要我帮你新建临时群：私聊发送 `/chat new 群名 成员1 成员2`，成员可以写员工姓名或飞书 open_id。\n\n"
+            "2. 需要我协助新建飞书群：私聊发送 `/chat new 群名 成员1 成员2`，成员可以写员工姓名或飞书 open_id。\n\n"
             "如果我已经在某个群里，要继续拉同事进来，可以在那个群里发：`/chat invite 成员1 成员2`。"
         )
 
@@ -102,7 +103,7 @@ class ChatCreatorPlugin(Star):
             self._reply(
                 event,
                 "用法：\n"
-                "  /chat new <群名> <成员1> <成员2> ...  在飞书新建临时群\n"
+                "  /chat new <群名> <成员1> <成员2> ...  在飞书新建协作群\n"
                 "  /chat invite <成员1> <成员2> ...      把人拉进当前群\n"
                 "成员可写：飞书 open_id (ou_xxx) / 员工名 / @员工名",
             )
@@ -117,10 +118,7 @@ class ChatCreatorPlugin(Star):
             )
             return
 
-        # 仅允许飞书发起（QQ 无法建飞书群）
-        platform = event.get_platform_id() or ""
-        # 飞书的 platform_id 通常含 "lark"
-        if "lark" not in platform.lower() and "feishu" not in platform.lower():
+        if not self._is_feishu_event(event):
             self._reply(event, "⚠️ 此命令只能在飞书里使用。")
             return
 
@@ -148,7 +146,7 @@ class ChatCreatorPlugin(Star):
             name=chat_name,
             owner_open_id=owner_open_id,
             member_open_ids=member_open_ids,
-            description=f"DC-Agent 临时群，由 {owner_open_id[:8]}... 发起",
+            description=f"DC-Agent 飞书协作群，由 {owner_open_id[:8]}... 发起",
         )
         result = await self.creator.create_group_chat(req)
 
@@ -157,7 +155,7 @@ class ChatCreatorPlugin(Star):
             return
 
         lines = [
-            f"✅ 已建临时群：**{chat_name}**",
+            f"✅ 已建飞书协作群：**{chat_name}**",
             f"  • chat_id: `{result.chat_id}`",
             f"  • 邀请成员: {result.invited_count} 人",
         ]
@@ -191,8 +189,7 @@ class ChatCreatorPlugin(Star):
             )
             return
 
-        platform = event.get_platform_id() or ""
-        if "lark" not in platform.lower() and "feishu" not in platform.lower():
+        if not self._is_feishu_event(event):
             self._reply(event, "⚠️ 此命令只能在飞书使用。")
             return
 
@@ -287,3 +284,13 @@ class ChatCreatorPlugin(Star):
                 seen.add(oid)
                 deduped.append(oid)
         return deduped, unresolved
+
+    def _is_feishu_event(self, event: AstrMessageEvent) -> bool:
+        platform_id = event.get_platform_id() or ""
+        platform = platform_id.lower()
+        origin = str(getattr(event, "unified_msg_origin", "") or "").lower()
+        if any(key in platform for key in ("lark", "feishu", "飞书")):
+            return True
+        if any(key in origin for key in ("lark", "feishu", "飞书")):
+            return True
+        return platform_id in {"巅池-Agent小助手", "巅池-技术（DevOps）"}

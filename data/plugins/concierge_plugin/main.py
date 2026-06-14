@@ -143,6 +143,7 @@ _IDENTITY_OVERRIDE_FIELDS = {
     "honorific_policy",
     "personality_summary",
     "communication_style",
+    "is_system_tester",
 }
 _PERSONA_MIN_EVIDENCE = 3
 _PERSONA_EVIDENCE_PREFIX = "persona_evidence:"
@@ -700,7 +701,7 @@ class ConciergePlugin(Star):
 
     # ─────────────────────── LLM system_prompt 注入 ───────────────────────
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(priority=30)
     async def inject_employee_context(
         self,
         event: AstrMessageEvent,

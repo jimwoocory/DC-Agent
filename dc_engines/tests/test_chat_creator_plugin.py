@@ -50,3 +50,22 @@ async def test_group_help_request_replies_with_join_and_create_guidance() -> Non
     assert "添加机器人「巅池-Agent小助手」" in text
     assert "/chat new" in text
     assert "/chat invite" in text
+
+
+def test_is_feishu_event_accepts_dc_agent_feishu_platforms() -> None:
+    module = _load_chat_creator_plugin_module()
+    plugin = module.ChatCreatorPlugin(_FakeContext())
+
+    class _FakeEvent:
+        def __init__(self, platform_id: str, origin: str = "") -> None:
+            self._platform_id = platform_id
+            self.unified_msg_origin = origin
+
+        def get_platform_id(self) -> str:
+            return self._platform_id
+
+    assert plugin._is_feishu_event(_FakeEvent("巅池-Agent小助手")) is True
+    assert plugin._is_feishu_event(_FakeEvent("巅池-技术（DevOps）")) is True
+    assert plugin._is_feishu_event(_FakeEvent("qq", "lark:chat:ou_user")) is True
+    assert plugin._is_feishu_event(_FakeEvent("qq", "feishu:chat:ou_user")) is True
+    assert plugin._is_feishu_event(_FakeEvent("qq")) is False

@@ -88,7 +88,7 @@ class HarnessStateInjectorPlugin(Star):
             line += "\n" + "\n".join(material_lines)
         return line
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(priority=35)
     async def inject_active_tasks(
         self,
         event: AstrMessageEvent,

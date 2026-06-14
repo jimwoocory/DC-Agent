@@ -170,7 +170,7 @@ class FeishuDocFetcherPlugin(Star):
 
     # ─── 强约束：用户消息里出现飞书 URL 时，自动注入 system_prompt 强制 LLM 调工具 ───
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(priority=50)
     async def force_fetch_when_feishu_url(
         self,
         event: AstrMessageEvent,

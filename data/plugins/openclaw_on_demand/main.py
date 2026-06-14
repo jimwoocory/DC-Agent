@@ -44,6 +44,10 @@ class OpenClawOnDemandPlugin(Star):
         self.kick_port: int = int(cfg.get("kick_port", 9120))
         self.idle_timeout_seconds: int = int(cfg.get("idle_timeout_seconds", 7200))
         self.startup_wait_seconds: int = int(cfg.get("startup_wait_seconds", 30))
+        self.openclaw_health_path: str = str(cfg.get("openclaw_health_path", "/"))
+        self.openclaw_health_body_contains: str = str(
+            cfg.get("openclaw_health_body_contains", "OpenClaw")
+        )
         self.npm_cmd: list[str] = list(cfg.get("npm_cmd", ["npm", "run", "dev:ui"]))
         self.log_dir: Path = Path(
             cfg.get("log_dir", "/Users/dianchi/DC-Agent/logs/openclaw-control-center")
@@ -57,7 +61,7 @@ class OpenClawOnDemandPlugin(Star):
 
     async def initialize(self) -> None:
         # 接管：如果 4312 已经在 listen，读 PID 文件登记，不重启
-        if self._port_in_use(self.openclaw_port):
+        if self._openclaw_ready():
             existing_pid = self._read_pid_file()
             if existing_pid and self._pid_alive(existing_pid):
                 self._openclaw_pid = existing_pid
@@ -66,6 +70,12 @@ class OpenClawOnDemandPlugin(Star):
                     "[openclaw_on_demand] 接管已运行 OpenClaw PID=%s（idle 从现在计时）",
                     existing_pid,
                 )
+        elif self._port_in_use(self.openclaw_port):
+            logger.warning(
+                "[openclaw_on_demand] :%s 已监听但不是 OpenClaw health 响应，"
+                "不会接管或跳转。",
+                self.openclaw_port,
+            )
 
         # 起 kick aiohttp server
         app = web.Application()
@@ -102,7 +112,16 @@ class OpenClawOnDemandPlugin(Star):
     async def _handle_kick(self, request: web.Request) -> web.Response:
         """点 dashboard 按钮 → 这里 → 启 OpenClaw（如未起）→ 302 跳 4312。"""
         async with self._lock:
-            if not self._port_in_use(self.openclaw_port):
+            port_listening = self._port_in_use(self.openclaw_port)
+            if port_listening and not self._openclaw_ready():
+                return web.Response(
+                    text=(
+                        f"OpenClaw 服务不匹配：:{self.openclaw_port} 有进程监听，"
+                        "但 health 探针未通过。请检查端口占用。"
+                    ),
+                    status=503,
+                )
+            if not port_listening:
                 logger.info("[openclaw_on_demand] kick 触发启动 OpenClaw")
                 pid = self._spawn_openclaw()
                 if pid is None:
@@ -113,12 +132,12 @@ class OpenClawOnDemandPlugin(Star):
                 # 等 :4312 ready（最多 startup_wait_seconds 秒，每 0.5s 探一次）
                 for _ in range(self.startup_wait_seconds * 2):
                     await asyncio.sleep(0.5)
-                    if self._port_in_use(self.openclaw_port):
+                    if self._openclaw_ready():
                         break
                 else:
                     return web.Response(
                         text=(
-                            f"OpenClaw 启动超时（{self.startup_wait_seconds}s 内 :4312 仍无回应）。"
+                            f"OpenClaw 启动超时（{self.startup_wait_seconds}s 内 health 未通过）。"
                             f"看 {self.log_dir / 'control-center.err.log'}"
                         ),
                         status=504,
@@ -129,12 +148,23 @@ class OpenClawOnDemandPlugin(Star):
 
     async def _handle_status(self, request: web.Request) -> web.Response:
         """GET /status — 看门狗状态 JSON。"""
+        openclaw_listening = self._port_in_use(self.openclaw_port)
+        openclaw_ready = self._openclaw_ready() if openclaw_listening else False
+        availability = (
+            "ready"
+            if openclaw_ready
+            else "wrong_service"
+            if openclaw_listening
+            else "offline"
+        )
         return web.json_response(
             {
                 "kick_port": self.kick_port,
                 "openclaw_port": self.openclaw_port,
                 "openclaw_pid": self._openclaw_pid,
-                "openclaw_listening": self._port_in_use(self.openclaw_port),
+                "openclaw_listening": openclaw_listening,
+                "openclaw_ready": openclaw_ready,
+                "availability": availability,
                 "last_kick_at_unix": self._last_kick_at,
                 "idle_seconds": (
                     int(time.time() - self._last_kick_at)
@@ -227,6 +257,16 @@ class OpenClawOnDemandPlugin(Star):
         except (ConnectionRefusedError, OSError, TimeoutError):
             return False
 
+    def _openclaw_ready(self) -> bool:
+        if not self._port_in_use(self.openclaw_port):
+            return False
+        return _http_health_ready(
+            "127.0.0.1",
+            self.openclaw_port,
+            self.openclaw_health_path,
+            self.openclaw_health_body_contains,
+        )
+
     def _pid_alive(self, pid: int) -> bool:
         try:
             os.kill(pid, 0)
@@ -248,3 +288,49 @@ class OpenClawOnDemandPlugin(Star):
             (self.log_dir / "control-center.pid").write_text(str(pid))
         except OSError as exc:
             logger.debug("[openclaw_on_demand] 写 PID 文件失败：%s", exc)
+
+
+def _http_health_ready(
+    host: str,
+    port: int,
+    path: str,
+    body_contains: str = "",
+) -> bool:
+    try:
+        if not path.startswith("/"):
+            path = f"/{path}"
+        with socket.create_connection((host, port), timeout=0.75) as sock:
+            sock.settimeout(0.75)
+            request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {host}:{port}\r\n"
+                "User-Agent: DC-Agent-openclaw-health\r\n"
+                "Connection: close\r\n\r\n"
+            )
+            sock.sendall(request.encode("ascii"))
+            payload = _recv_http_response(sock)
+        header, _, body = payload.partition(b"\r\n\r\n")
+        status_line = header.splitlines()[0].decode("ascii", errors="ignore")
+        parts = status_line.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            return False
+        status = int(parts[1])
+        if not 200 <= status < 400:
+            return False
+        if body_contains:
+            return body_contains in body.decode("utf-8", errors="ignore")
+        return True
+    except Exception:
+        return False
+
+
+def _recv_http_response(sock: socket.socket) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while total < 65536:
+        chunk = sock.recv(min(4096, 65536 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)

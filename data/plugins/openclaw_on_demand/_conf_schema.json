@@ -24,6 +24,16 @@
     "description": "spawn 后等 OpenClaw :4312 ready 的最大秒数",
     "default": 30
   },
+  "openclaw_health_path": {
+    "type": "string",
+    "description": "判定 :4312 是否真是 OpenClaw 的 HTTP health path",
+    "default": "/"
+  },
+  "openclaw_health_body_contains": {
+    "type": "string",
+    "description": "OpenClaw health 响应体必须包含的签名文本；为空时只检查 HTTP 2xx/3xx",
+    "default": "OpenClaw"
+  },
   "npm_cmd": {
     "type": "list",
     "description": "spawn OpenClaw 用的命令（数组形式 argv）",

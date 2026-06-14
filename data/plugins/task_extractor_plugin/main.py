@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from dc_engines.employee_directory import requester_meta_from_event
@@ -26,8 +27,6 @@ from astrbot.api.star import Context, Star, register
 
 # 关键词触发器
 _TRIGGER_KEYWORDS: tuple[str, ...] = (
-    "提醒",
-    "待办",
     "汇总待办",
     "抽任务",
     "抽待办",
@@ -35,6 +34,34 @@ _TRIGGER_KEYWORDS: tuple[str, ...] = (
     "我的待办",
     "todo",
 )
+_EXACT_TRIGGER_KEYWORDS: tuple[str, ...] = (
+    "待办",
+    "todo",
+)
+
+_METACONV_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"明白了吗|懂了吗|知道了吗|我说什么", re.IGNORECASE),
+    re.compile(r"压力测试|stress.test|在测试你|测试一下", re.IGNORECASE),
+    re.compile(r"我.*就是.*部门|其实我是.*部", re.IGNORECASE),
+    re.compile(r"不是.*在测试吗|就是.*压力测试", re.IGNORECASE),
+    re.compile(r"^\s*(是|对|嗯|是的|没错)\s*[。!！]?\s*$"),
+)
+
+
+def _is_meta_conversation_text(text: str) -> bool:
+    """Return True if text is meta-conversational (pressure-test, confirmation checks, etc.)."""
+    t = text or ""
+    return any(pat.search(t) for pat in _METACONV_PATTERNS)
+
+
+def _has_task_extraction_intent(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    lower_t = t.lower()
+    if lower_t in _EXACT_TRIGGER_KEYWORDS:
+        return True
+    return any(kw in t for kw in _TRIGGER_KEYWORDS)
 
 
 @register(
@@ -164,8 +191,12 @@ class TaskExtractorPlugin(Star):
         if is_group and not getattr(event, "is_at_or_wake_command", False):
             return
 
-        # 必须命中关键词
-        if not any(kw in text for kw in _TRIGGER_KEYWORDS):
+        # Require an explicit extraction trigger.
+        if not _has_task_extraction_intent(text):
+            return
+
+        # Meta-conversation and pressure-test text should not create tasks.
+        if _is_meta_conversation_text(text):
             return
 
         # 找 provider

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import get_args
 
 from dc_engines.case import Case, CaseEngine, CaseStatus, CaseStore, archive_to_nas
+from dc_engines.case.knowledge_sync import CaseKnowledgeSync
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
@@ -33,6 +34,7 @@ class CasePlugin(Star):
         super().__init__(context)
         self.engine: CaseEngine | None = None
         self.store: CaseStore | None = None
+        self.knowledge_sync: CaseKnowledgeSync | None = None
 
     async def initialize(self) -> None:
         # 默认指向 ``<repo>/data/cases.db``；这也是 rsync 迁移过来的数据所在位置
@@ -50,13 +52,55 @@ class CasePlugin(Star):
         nas_root_str = case_cfg.get("nas_root", "/Volumes/NAS")
         nas_root = Path(nas_root_str)
         dlq_path = data_dir / "case_archive_dlq.jsonl"
+        self.knowledge_sync = CaseKnowledgeSync(
+            archive_root=data_dir / "case_archives",
+        )
 
-        store_for_hook = self.store
+        class _ArchiveStoreAdapter:
+            def __init__(self, engine: CaseEngine, store: CaseStore) -> None:
+                self._engine = engine
+                self._store = store
+
+            async def get_case_context(self, case_id: str) -> dict | None:
+                return await self._engine.get_case_context(case_id)
+
+            async def list_events(self, case_id: str):
+                return await self._store.list_events(case_id)
 
         async def _archive_hook(case: Case) -> None:
+            if self.knowledge_sync is not None:
+                try:
+                    sync_record = self.knowledge_sync.sync(
+                        case,
+                        source_path=self.store.db_path if self.store else "",
+                    )
+                    if sync_record.status == "synced":
+                        logger.info(
+                            "[case_plugin] case %s synced to %s",
+                            case.case_id[:8],
+                            sync_record.archive_path,
+                        )
+                    else:
+                        logger.warning(
+                            "[case_plugin] case %s knowledge sync failed: %s",
+                            case.case_id[:8],
+                            sync_record.error,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[case_plugin] case %s knowledge sync crashed: %s",
+                        case.case_id[:8],
+                        exc,
+                    )
+            if self.engine is None or self.store is None:
+                logger.warning(
+                    "[case_plugin] case %s archive skipped: engine not initialized",
+                    case.case_id[:8],
+                )
+                return
             result = await archive_to_nas(
                 case,
-                case_store=store_for_hook,
+                case_store=_ArchiveStoreAdapter(self.engine, self.store),
                 nas_root=nas_root,
                 dlq_path=dlq_path,
             )
@@ -165,7 +209,7 @@ class CasePlugin(Star):
 
     @filter.command(
         "case",
-        desc="Case 业务聚合：/case new|context|list|attach|archive|status",
+        desc="Case 业务聚合：/case new|context|list|attach|archive|sync-status|status",
     )
     async def case_command(self, event: AstrMessageEvent):
         text = (event.message_str or "").strip()
@@ -188,6 +232,8 @@ class CasePlugin(Star):
             await self._case_attach(event, rest)
         elif sub == "archive":
             await self._case_archive(event)
+        elif sub == "sync-status":
+            await self._case_sync_status(event, rest)
         elif sub == "status":
             await self._case_status(event, rest)
         else:
@@ -199,6 +245,7 @@ class CasePlugin(Star):
                 "  /case list\n"
                 "  /case attach <task_id>\n"
                 "  /case archive\n"
+                "  /case sync-status <case_id>\n"
                 "  /case status <" + "|".join(VALID_STATUSES) + ">",
             )
 
@@ -318,6 +365,39 @@ class CasePlugin(Star):
             event,
             f"Case 已归档：{archived.case_id[:8]} | {archived.name}",
         )
+
+    async def _case_sync_status(self, event: AstrMessageEvent, case_id: str) -> None:
+        if self.knowledge_sync is None:
+            self._reply(event, "Case 知识同步状态不可用。")
+            return
+        lookup = (case_id or "").strip()
+        if not lookup:
+            active_case = await self._resolve_active_case(event)
+            if active_case is None:
+                self._reply(event, "用法: /case sync-status <case_id>")
+                return
+            lookup = active_case.case_id
+
+        record = self.knowledge_sync.latest_record_for_case(lookup)
+        if record is None:
+            self._reply(
+                event,
+                f"未找到 case {lookup} 的知识同步记录，或该前缀不唯一。",
+            )
+            return
+
+        lines = [
+            f"Case 知识同步状态：{record.case_id[:8]}",
+            f"- status: {record.status}",
+            f"- archive_path: {record.archive_path or '—'}",
+            f"- source_path: {record.source_path or '—'}",
+            f"- deliverable_count: {record.deliverable_count}",
+            f"- task_count: {len(record.task_ids)}",
+            f"- created_at: {record.created_at or '—'}",
+        ]
+        if record.error:
+            lines.append(f"- error: {record.error}")
+        self._reply(event, "\n".join(lines))
 
     async def _case_status(self, event: AstrMessageEvent, status: str) -> None:
         normalized = (status or "").strip().lower()

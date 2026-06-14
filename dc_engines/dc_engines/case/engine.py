@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from .case_store import CaseStore
 from .contracts import Case, CaseStatus
+from .knowledge_sync import CaseKnowledgeSync
 
 if TYPE_CHECKING:
     from astrbot.core.harness import HarnessTaskStore
@@ -223,15 +224,17 @@ class CaseEngine:
                 exc,
             )
 
-    @staticmethod
-    def _default_archive_hook(case: Case) -> None:
+    def _default_archive_hook(self, case: Case) -> None:
+        sync = CaseKnowledgeSync()
+        record = sync.sync(case, source_path=self.store.db_path)
         logger.info(
-            "[CaseEngine] case archived (kb-sync stub) case_id=%s name=%s "
-            "deliverables=%d tasks=%d",
-            case.case_id,
-            case.name,
-            len(case.deliverables),
-            len(case.task_ids),
+            "[CaseEngine] case archived knowledge sync case_id=%s status=%s "
+            "archive_path=%s deliverables=%d tasks=%d",
+            record.case_id,
+            record.status,
+            record.archive_path,
+            record.deliverable_count,
+            len(record.task_ids),
         )
 
     @staticmethod

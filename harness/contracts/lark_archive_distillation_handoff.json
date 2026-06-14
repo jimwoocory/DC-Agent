@@ -1,0 +1,38 @@
+{
+  "contract_id": "lark_archive_distillation_handoff",
+  "title": "Lark chat archive to governed distillation handoff",
+  "scope": "Move NAS Lark chat archives into reviewable assistant distillation and Obsidian memory governance candidates without putting full archives into prompt context.",
+  "acceptance_criteria": [
+    {
+      "id": "ladh-001",
+      "description": "The handoff scans NAS JSONL records under knowledge/Chat/Lark Chat and groups records by Chinese department, employee, and day.",
+      "verification": "uv run pytest dc_engines/tests/test_lark_archive_distillation.py -q"
+    },
+    {
+      "id": "ladh-002",
+      "description": "The handoff can generate pending assistant_distillation candidates from repeated tone or intent feedback found in archived Lark chats.",
+      "verification": "uv run pytest dc_engines/tests/test_lark_archive_distillation.py -q"
+    },
+    {
+      "id": "ladh-003",
+      "description": "The handoff exports day-level need_review governed memory notes into Obsidian 40_MemoryGovernance/Inbox with source_path/source_hash evidence.",
+      "verification": "uv run pytest dc_engines/tests/test_lark_archive_distillation.py -q"
+    },
+    {
+      "id": "ladh-004",
+      "description": "The worker exposes Lark archive handoff flags so cron can run the distillation path without a separate script.",
+      "verification": "uv run pytest tests/harness/test_lark_archive_distillation_handoff_contract.py -q"
+    }
+  ],
+  "non_goals": [
+    "Do not inject full archived chat transcripts into LLM prompts.",
+    "Do not auto-approve governed memories or assistant language candidates.",
+    "Do not require an LLM to run the first production handoff."
+  ],
+  "paths": {
+    "nas_archive_root": "knowledge/Chat/Lark Chat",
+    "obsidian_inbox": "ObsidianVault/40_MemoryGovernance/Inbox",
+    "assistant_distillation_db": "data/assistant_distillation.db",
+    "governance_db": "data/governed_memory.db"
+  }
+}

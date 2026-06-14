@@ -1,0 +1,54 @@
+{
+  "contract_id": "case_archive_knowledge_sync",
+  "title": "Case archive knowledge sync",
+  "scope": "Materialize archived Case summaries into durable local knowledge-sync artifacts while preserving NAS/DLQ archive finalization and user-visible sync status.",
+  "acceptance_criteria": [
+    {
+      "id": "caks-001",
+      "description": "The standalone CaseEngine default archive hook writes markdown and JSONL sync records instead of logging a knowledge-sync stub.",
+      "verification": "uv run pytest dc_engines/tests/test_case_knowledge_sync.py -q"
+    },
+    {
+      "id": "caks-002",
+      "description": "The production case_plugin archive hook composes CaseKnowledgeSync with archive_root set to data_dir / \"case_archives\" before or alongside NAS/DLQ archiving.",
+      "verification": "uv run pytest dc_engines/tests/test_case_plugin.py -q"
+    },
+    {
+      "id": "caks-003",
+      "description": "Knowledge sync failures are recorded or logged without crashing archive finalization; NAS/DLQ archive behavior still proceeds.",
+      "verification": "uv run pytest dc_engines/tests/test_case_plugin.py dc_engines/tests/test_case_knowledge_sync.py -q"
+    },
+    {
+      "id": "caks-004",
+      "description": "Sync records are append-only JSONL entries with case_id, status, archive_path, source_path, task_ids, deliverable_count, error, and created_at.",
+      "verification": "uv run pytest dc_engines/tests/test_case_knowledge_sync.py -q"
+    },
+    {
+      "id": "caks-005",
+      "description": "Archived Case markdown is materialized under data/case_archives/<case_id>.md and includes Case identity, client/session/platform metadata, tasks, deliverables, payload, and generated timestamp.",
+      "verification": "uv run pytest dc_engines/tests/test_case_knowledge_sync.py dc_engines/tests/test_case_plugin.py -q"
+    },
+    {
+      "id": "caks-006",
+      "description": "The /case sync-status <case_id> command exposes the latest sync status, archive path, source path, deliverable count, task count, created_at, and error when present.",
+      "verification": "uv run pytest dc_engines/tests/test_case_plugin.py -q"
+    },
+    {
+      "id": "caks-007",
+      "description": "Generated data/case_archives runtime outputs are ignored by git, and custom case IDs are sanitized into archive filenames that remain inside archive_root while preserving the original case_id in records.",
+      "verification": "uv run pytest dc_engines/tests/test_case_knowledge_sync.py tests/harness/test_case_archive_knowledge_sync_contract.py -q"
+    }
+  ],
+  "non_goals": [
+    "Do not import archived Case markdown into a vector database in this step.",
+    "Do not make NAS availability a prerequisite for user-facing Case archive completion.",
+    "Do not store runtime data or generated archive outputs in git."
+  ],
+  "paths": {
+    "archive_root": "data/case_archives",
+    "sync_records": "data/case_archives/sync_records.jsonl",
+    "plugin": "data/plugins/case_plugin/main.py",
+    "engine": "dc_engines/dc_engines/case/engine.py",
+    "sync_component": "dc_engines/dc_engines/case/knowledge_sync.py"
+  }
+}

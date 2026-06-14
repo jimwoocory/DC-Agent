@@ -90,5 +90,10 @@
     "type": "int",
     "description": "每个话题或会话最多保留多少条近期消息用于蒸馏",
     "default": 30
+  },
+  "obsidian_vault_path": {
+    "type": "string",
+    "description": "Content SOP 螺旋记忆候选写入的 Obsidian vault 路径；为空时使用 DC-Agent/ObsidianVault",
+    "default": ""
   }
 }

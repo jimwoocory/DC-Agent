@@ -1,0 +1,25 @@
+{
+  "webhook_url": "http://localhost:8644/webhooks/astrbot_qq",
+  "task_webhook_url": "http://localhost:8644/webhooks/astrbot_task",
+  "secret": "${HERMES_BRIDGE_SECRET}",
+  "response_port": 8645,
+  "allowed_platforms": [
+    "example-platform"
+  ],
+  "excluded_platforms": [
+    "example-dev-platform"
+  ],
+  "memory_inject_enabled": true,
+  "memory_inject_limit": 5,
+  "direct_chat_enabled": false,
+  "topic_workflow_enabled": false,
+  "conversation_distill_enabled": true,
+  "skill_admin_only": true,
+  "skill_admin_user_ids": [],
+  "protected_identity_names": [],
+  "protected_identity_user_ids": [],
+  "skill_ops_require_confirm": true,
+  "topic_distill_enabled": true,
+  "topic_discussion_limit": 30,
+  "obsidian_vault_path": ""
+}

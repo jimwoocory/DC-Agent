@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from dc_engines.harness import HarnessTaskCreateRequest
+from dc_engines.harness import (
+    HarnessTaskCreateRequest,
+    allows_auto_complete_on_response,
+)
+from dc_engines.spiral_evolution import build_spiral_evolution_seed
 
 from .channel_policy import communication_channel_policy_for
+from .content_rule_overrides import attach_content_sop_rule_overrides
 from .contracts import (
     DepartmentWorkflow,
     DepartmentWorkflowMatch,
@@ -63,6 +69,7 @@ def build_content_sop_workflow_request(
     knowledge_context: str = "",
     source_citations: list[dict[str, str]] | None = None,
     material_assessment: MaterialIntakeAssessment | None = None,
+    rule_overrides_path: Path | str | None = None,
 ) -> HarnessTaskCreateRequest:
     payload = build_content_sop_workflow_payload(
         match,
@@ -73,6 +80,7 @@ def build_content_sop_workflow_request(
         knowledge_context=knowledge_context,
         source_citations=source_citations,
         material_assessment=material_assessment,
+        rule_overrides_path=rule_overrides_path,
     )
     return HarnessTaskCreateRequest(
         title=_build_content_sop_title(match.workflow, match.scenario, message_text),
@@ -138,7 +146,8 @@ def build_department_workflow_payload(
         "review_required_by_default": True,
     }
     if requester_meta:
-        payload.update(requester_meta)
+        payload.update(_requester_meta_only(requester_meta))
+    payload["auto_complete_on_response"] = allows_auto_complete_on_response(payload)
     return payload
 
 
@@ -152,6 +161,7 @@ def build_content_sop_workflow_payload(
     knowledge_context: str = "",
     source_citations: list[dict[str, str]] | None = None,
     material_assessment: MaterialIntakeAssessment | None = None,
+    rule_overrides_path: Path | str | None = None,
 ) -> dict[str, Any]:
     workflow = match.workflow
     scenario = match.scenario
@@ -202,14 +212,17 @@ def build_content_sop_workflow_payload(
         "review_required_by_default": True,
         "generation_allowed": not material_assessment.needs_followup,
     }
+    if requester_meta:
+        payload.update(_requester_meta_only(requester_meta))
+    attach_content_sop_rule_overrides(payload, path=rule_overrides_path)
     payload["communication_channel_policy"] = communication_channel_policy_for(
-        department_id=workflow.department_id,
+        department_id=payload["department_id"],
         message_text=message_text,
     )
     payload["quality_policy"] = build_content_sop_quality_policy()
     payload["quality_gate"] = evaluate_content_sop_payload(payload).to_dict()
-    if requester_meta:
-        payload.update(requester_meta)
+    payload["spiral_evolution"] = build_spiral_evolution_seed(payload)
+    payload["auto_complete_on_response"] = allows_auto_complete_on_response(payload)
     return payload
 
 
@@ -287,3 +300,7 @@ def _content_sop_next_actions(assessment: MaterialIntakeAssessment) -> list[str]
         "record_pending_inputs",
         *[f"collect:{label}" for label in labels],
     ]
+
+
+def _requester_meta_only(meta: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in meta.items() if key.startswith("requester_")}

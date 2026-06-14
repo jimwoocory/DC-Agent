@@ -23,8 +23,45 @@ def assemble_content_sop_source_context(
 
     lines: list[str] = []
     citations: list[dict[str, str]] = []
+    governed_memories = memory_context.get("governed_memories") or []
     project_items = memory_context.get("project_items") or []
     documents = memory_context.get("documents") or []
+
+    if governed_memories:
+        lines.append("Obsidian 已治理记忆:")
+        for memory in governed_memories[:5]:
+            if not isinstance(memory, dict):
+                continue
+            memory_id = str(memory.get("memory_id") or "")
+            title = str(memory.get("title") or "")
+            source_path = str(
+                memory.get("source_path") or memory.get("source_id") or ""
+            )
+            owner = str(memory.get("owner") or "未标注")
+            project_id = str(memory.get("project_id") or "未标注")
+            review_status = str(memory.get("review_status") or "")
+            sensitivity = str(memory.get("sensitivity") or "")
+            summary = _compact(
+                str(memory.get("canonical_text") or memory.get("summary") or "")
+            )[:360]
+            lines.append(
+                f"- 记忆={title or memory_id or '未标注'}；项目={project_id}；"
+                f"负责人={owner}；状态={review_status or 'unknown'}；"
+                f"敏感级别={sensitivity or 'unknown'}；来源={source_path}；摘要={summary}"
+            )
+            if source_path:
+                citations.append(
+                    {
+                        "type": "governed_memory",
+                        "title": title,
+                        "source_path": source_path,
+                        "memory_id": memory_id,
+                        "owner": owner,
+                        "project_id": project_id,
+                        "review_status": review_status,
+                        "sensitivity": sensitivity,
+                    }
+                )
 
     if project_items:
         lines.append("项目关系上下文:")

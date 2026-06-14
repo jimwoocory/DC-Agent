@@ -8,6 +8,17 @@ from harness.evaluator.kb_import_contract import (
 )
 
 CONTRACT = Path("harness/contracts/department_memory_proactive_prompting.json")
+RUNTIME_VERIFIER = (
+    "uv run pytest "
+    "tests/dc_router/test_dispatch_pipeline.py::"
+    "TestStage7DepartmentMemory::test_dept_memory_prompt_stops_dispatch "
+    "tests/dc_router/test_dispatch_pipeline.py::"
+    "TestStage8MemoryInjection::test_memory_injection_runs_when_dept_decision_says_inject "
+    "tests/dc_router/test_dispatch_pipeline.py::"
+    "TestStage8MemoryInjection::test_memory_injection_does_not_mutate_message_str "
+    "tests/dc_router/test_dispatch_pipeline.py::"
+    "TestStage1CardAction::test_card_action_text_routes_to_card_stage -q"
+)
 
 
 def test_department_memory_proactive_prompting_contract_is_valid() -> None:
@@ -32,7 +43,7 @@ def test_department_memory_proactive_prompting_contract_points_to_runtime_verifi
 
     assert list(dict.fromkeys(verification_commands(contract))) == [
         "uv run pytest tests/harness/test_department_memory_proactive_prompting_contract.py -q",
-        "uv run pytest data/plugins/llm_router/test_dc_router_path.py::test_department_memory_keyword_prompts_before_injection data/plugins/llm_router/test_dc_router_path.py::test_department_memory_confirmation_injects_original_request data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_confirms_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_dismisses_pending_prompt data/plugins/llm_router/test_dc_router_path.py::test_department_memory_card_action_rejects_untrusted_payload data/plugins/llm_router/test_dc_router_path.py::test_department_memory_prompt_sends_confirm_card_when_lark data/plugins/llm_router/test_dc_router_path.py::test_explicit_memory_lookup_skips_department_prompt -q",
+        RUNTIME_VERIFIER,
     ]
 
 

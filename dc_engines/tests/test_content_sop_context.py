@@ -39,6 +39,40 @@ def test_assemble_content_sop_source_context_from_memory_hits() -> None:
     }
 
 
+def test_assemble_content_sop_source_context_includes_governed_memories() -> None:
+    context = assemble_content_sop_source_context(
+        {
+            "governed_memories": [
+                {
+                    "memory_id": "mem_nas_001",
+                    "title": "客户部端午私域触达口径",
+                    "canonical_text": "公司客户触达默认使用飞书和私域，不使用邮件。",
+                    "source_path": "ObsidianVault/40_MemoryGovernance/Approved/mem_nas_001.md",
+                    "review_status": "approved",
+                    "sensitivity": "internal",
+                    "owner": "客户部",
+                    "project_id": "端午客户触达",
+                }
+            ],
+        }
+    )
+
+    assert "Obsidian 已治理记忆" in context.knowledge_context
+    assert "不使用邮件" in context.knowledge_context
+    assert context.source_citations == [
+        {
+            "type": "governed_memory",
+            "title": "客户部端午私域触达口径",
+            "source_path": "ObsidianVault/40_MemoryGovernance/Approved/mem_nas_001.md",
+            "memory_id": "mem_nas_001",
+            "owner": "客户部",
+            "project_id": "端午客户触达",
+            "review_status": "approved",
+            "sensitivity": "internal",
+        }
+    ]
+
+
 def test_strip_internal_memory_context_keeps_user_request() -> None:
     text = (
         "帮我写客户邀约文案\n\n"

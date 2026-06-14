@@ -1,0 +1,39 @@
+{
+  "feature": "memory_promotion_runtime",
+  "goal": "Keep the LLM main-chain memory promotion pipeline (task auto-complete -> complete_task result_json -> HarnessMemoryPromoter -> harness_memory.db) verifiably live, so completed work keeps producing long-term memory candidates instead of silently going dormant.",
+  "acceptance_criteria": [
+    {
+      "id": "mpr-001",
+      "description": "A successful LLM response for an auto-complete workflow task must complete the task with a non-empty result summary and promote a task_outcome memory record with a memory_promoted task event.",
+      "verification": "uv run pytest tests/harness/test_memory_promotion_runtime.py::test_llm_response_completes_task_and_promotes_memory -q"
+    },
+    {
+      "id": "mpr-002",
+      "description": "An LLM error response must fail the task and must not promote any task_outcome memory, so provider failures never become long-term memory.",
+      "verification": "uv run pytest tests/harness/test_memory_promotion_runtime.py::test_llm_error_response_fails_task_without_memory -q"
+    },
+    {
+      "id": "mpr-003",
+      "description": "An insufficient-material response must move the task to blocked without promoting memory, preserving the material-intake gate.",
+      "verification": "uv run pytest tests/harness/test_memory_promotion_runtime.py::test_insufficient_material_response_blocks_task_without_memory -q"
+    },
+    {
+      "id": "mpr-004",
+      "description": "Pre-stopped events entering the result-decorate stage must not be mis-attributed to the first on_decorating_result handler, and the core pipeline must not special-case plugins by name to work around mis-attribution.",
+      "verification": "uv run pytest tests/harness/test_memory_promotion_runtime_contract.py::test_result_decorate_stage_has_no_plugin_name_special_case -q"
+    }
+  ],
+  "non_goals": [
+    "Do not auto-complete review_required_by_default tasks; the review gate stays authoritative.",
+    "Do not promote memory from failed or blocked tasks.",
+    "Do not replace harness_memory.db hybrid recall with a vector store in this contract's scope."
+  ],
+  "known_incident": {
+    "date": "2026-06-04",
+    "summary": "memory_promoted events stopped after 2026-06-03 while tasks kept being created; root surface was a shrinking share of auto-complete-eligible tasks plus a core-pipeline stop-propagation mis-attribution patched by a plugin-name special case in result_decorate/stage.py. The special case is removed and attribution is now per-handler state-flip based."
+  },
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_memory_promotion_runtime_contract.py -q",
+    "integration": "uv run pytest tests/harness/test_memory_promotion_runtime.py -q"
+  }
+}

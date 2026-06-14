@@ -30,6 +30,7 @@ def test_employee_insight_loop_contract_points_to_required_verifiers() -> None:
     assert list(dict.fromkeys(verification_commands(contract))) == [
         "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q",
         "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q",
+        "uv run pytest tests/test_employee_insight_route.py -q",
     ]
 
 

@@ -1,4 +1,4 @@
-/* Auto-generated MDI subset – 275 icons */
+/* Auto-generated MDI subset – 276 icons */
 /* Do not edit manually. Run: pnpm run subset-icons */
 
 @font-face {
@@ -38,6 +38,10 @@
 
 .mdi-account-heart::before {
   content: "\F0899";
+}
+
+.mdi-account-multiple-check-outline::before {
+  content: "\F11FE";
 }
 
 .mdi-account-search-outline::before {
@@ -740,10 +744,6 @@
   content: "\F0369";
 }
 
-.mdi-message-text-clock-outline::before {
-  content: "\F1174";
-}
-
 .mdi-microphone::before {
   content: "\F036C";
 }
@@ -922,6 +922,10 @@
 
 .mdi-robot-outline::before {
   content: "\F167A";
+}
+
+.mdi-send-clock-outline::before {
+  content: "\F1164";
 }
 
 .mdi-server::before {

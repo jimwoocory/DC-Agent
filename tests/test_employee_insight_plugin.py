@@ -12,8 +12,10 @@ if str(DC_ENGINES_PATH) not in sys.path:
     sys.path.insert(0, str(DC_ENGINES_PATH))
 
 from dc_engines.employee_insight_loop import (  # noqa: E402
+    EmployeeInsightProfile,
     EmployeeInsightSessionStatus,
     EmployeeInsightStore,
+    PilotStatus,
 )
 
 
@@ -80,12 +82,21 @@ async def test_employee_insight_plugin_records_private_message_session(tmp_path:
     module = _load_plugin_module()
     plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
     await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+            unanswered_outreach_count=2,
+            last_outreach_at="2026-06-14T09:00:00Z",
+        )
+    )
     event = _FakeEvent("帮我写一个培训通知")
 
     await plugin.on_private_message(event)
 
     assert event.extras["employee_insight_session_id"]
-    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
     session = await store.get_session(event.extras["employee_insight_session_id"])
     assert session is not None
     assert session.channel == "lark_dm"
@@ -95,6 +106,8 @@ async def test_employee_insight_plugin_records_private_message_session(tmp_path:
         "employee_replied",
         "task_started",
     ]
+    profile = await store.get_profile("ou_user")
+    assert profile.unanswered_outreach_count == 0
 
 
 @pytest.mark.asyncio

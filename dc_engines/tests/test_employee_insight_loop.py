@@ -3,13 +3,18 @@ from dc_engines.employee_insight_loop import (
     EmployeeInsightCandidate,
     EmployeeInsightDashboardSnapshot,
     EmployeeInsightObsidianExporter,
+    EmployeeInsightOutreachDispatcher,
+    EmployeeInsightOutreachScheduler,
+    EmployeeInsightProfile,
     EmployeeInsightSession,
     EmployeeInsightSessionStatus,
     EmployeeInsightStore,
     HermesDeepDivePolicy,
     InsightEvent,
+    PilotStatus,
     ReviewStatus,
     TaskStatus,
+    TextSendResult,
     build_candidate_from_session,
     render_obsidian_candidate_note,
     transition_session,
@@ -47,6 +52,243 @@ def test_session_state_machine_rejects_completion_before_engagement() -> None:
         assert "illegal session transition" in str(exc)
     else:
         raise AssertionError("expected illegal transition to fail")
+
+
+async def test_store_persists_pilot_profiles_and_filters_active(tmp_path) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_active",
+            employee_hash="hash_active",
+            display_name="张三",
+            department_id="planning",
+            role="策划",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_paused",
+            employee_hash="hash_paused",
+            display_name="李四",
+            department_id="client",
+            role="客户",
+            pilot_status=PilotStatus.PAUSED,
+        )
+    )
+
+    active_profiles = await store.list_profiles(pilot_status=PilotStatus.ACTIVE)
+
+    assert [profile.employee_id for profile in active_profiles] == ["ou_active"]
+    assert (await store.get_profile("ou_active")).display_name == "张三"
+
+
+async def test_outreach_scheduler_respects_frequency_and_pause_policy(tmp_path) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            pilot_status=PilotStatus.ACTIVE,
+            department_id="planning",
+        )
+    )
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_today",
+            employee_hash="hash_today",
+            pilot_status=PilotStatus.ACTIVE,
+            last_outreach_at="2026-06-14T09:00:00Z",
+            unanswered_outreach_count=1,
+        )
+    )
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_paused",
+            employee_hash="hash_paused",
+            pilot_status=PilotStatus.PAUSED,
+        )
+    )
+
+    scheduler = EmployeeInsightOutreachScheduler(store)
+    plan = await scheduler.build_daily_plan(now="2026-06-14T10:00:00Z", limit=10)
+
+    assert [item["employee_id"] for item in plan["eligible"]] == ["ou_ready"]
+    skipped = {item["employee_id"]: item["reason"] for item in plan["skipped"]}
+    assert skipped["ou_today"] == "already_contacted_today"
+    assert skipped["ou_paused"] == "pilot_not_active"
+
+
+async def test_outreach_scheduler_applies_three_day_cooldown_after_two_unanswered(
+    tmp_path,
+) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_cooldown",
+            employee_hash="hash_cooldown",
+            pilot_status=PilotStatus.ACTIVE,
+            last_outreach_at="2026-06-13T09:00:00Z",
+            unanswered_outreach_count=2,
+        )
+    )
+
+    scheduler = EmployeeInsightOutreachScheduler(store)
+    blocked = await scheduler.build_daily_plan(now="2026-06-14T10:00:00Z", limit=10)
+    ready = await scheduler.build_daily_plan(now="2026-06-16T10:00:00Z", limit=10)
+
+    assert blocked["skipped"][0]["reason"] == "cooldown_after_unanswered"
+    assert ready["eligible"][0]["employee_id"] == "ou_cooldown"
+
+
+async def test_record_outreach_creates_sent_session_event_and_updates_profile(
+    tmp_path,
+) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    profile = EmployeeInsightProfile(
+        employee_id="ou_ready",
+        employee_hash="hash_ready",
+        pilot_status=PilotStatus.ACTIVE,
+        department_id="planning",
+    )
+    await store.upsert_profile(profile)
+    scheduler = EmployeeInsightOutreachScheduler(store)
+
+    session = await scheduler.record_outreach(
+        employee_id="ou_ready",
+        message_text="今天想试一个真实任务吗？",
+        now="2026-06-14T10:00:00Z",
+        actor="scheduler",
+    )
+
+    assert session.status == EmployeeInsightSessionStatus.SENT
+    assert session.trigger_type == "daily_outreach"
+    stored_profile = await store.get_profile("ou_ready")
+    assert stored_profile.last_outreach_at == "2026-06-14T10:00:00Z"
+    assert stored_profile.unanswered_outreach_count == 1
+    events = await store.list_events(session.session_id)
+    assert events[0].event_type == "outreach_sent"
+    audit = await store.list_audit_events(session.session_id)
+    assert audit[0].action == "outreach_sent"
+
+
+class _FakeSender:
+    def __init__(self, *, success: bool = True) -> None:
+        self.success = success
+        self.sent: list[tuple[str, str]] = []
+
+    async def send_text(self, employee_id: str, text: str) -> TextSendResult:
+        self.sent.append((employee_id, text))
+        if not self.success:
+            return TextSendResult(success=False, error="send failed")
+        return TextSendResult(
+            success=True,
+            provider_message_id=f"msg_{employee_id}",
+            raw={"employee_id": employee_id},
+        )
+
+
+async def test_outreach_dispatcher_dry_run_does_not_call_sender(tmp_path) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    sender = _FakeSender()
+    dispatcher = EmployeeInsightOutreachDispatcher(store, sender=sender)
+
+    result = await dispatcher.dispatch_daily_outreach(
+        now="2026-06-14T10:00:00Z",
+        approved=False,
+        dry_run=True,
+    )
+
+    assert result["mode"] == "dry_run"
+    assert result["sent"] == []
+    assert result["planned"][0]["employee_id"] == "ou_ready"
+    assert sender.sent == []
+
+
+async def test_outreach_dispatcher_requires_approval_for_real_send(tmp_path) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    dispatcher = EmployeeInsightOutreachDispatcher(store, sender=_FakeSender())
+
+    try:
+        await dispatcher.dispatch_daily_outreach(
+            now="2026-06-14T10:00:00Z",
+            approved=False,
+            dry_run=False,
+        )
+    except PermissionError as exc:
+        assert "approved=true is required" in str(exc)
+    else:
+        raise AssertionError("expected unapproved real send to fail")
+
+
+async def test_outreach_dispatcher_sends_and_records_success(tmp_path) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            pilot_status=PilotStatus.ACTIVE,
+            department_id="planning",
+        )
+    )
+    sender = _FakeSender()
+    dispatcher = EmployeeInsightOutreachDispatcher(store, sender=sender)
+
+    result = await dispatcher.dispatch_daily_outreach(
+        now="2026-06-14T10:00:00Z",
+        approved=True,
+        dry_run=False,
+    )
+
+    assert result["mode"] == "send"
+    assert result["sent"][0]["employee_id"] == "ou_ready"
+    assert result["sent"][0]["provider_message_id"] == "msg_ou_ready"
+    assert sender.sent == [("ou_ready", dispatcher.default_message_text)]
+    sessions = await store.list_sessions()
+    assert sessions[0].status == EmployeeInsightSessionStatus.SENT
+    assert sessions[0].metadata["provider_message_id"] == "msg_ou_ready"
+
+
+async def test_outreach_dispatcher_records_send_failure_without_marking_sent(
+    tmp_path,
+) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    dispatcher = EmployeeInsightOutreachDispatcher(
+        store, sender=_FakeSender(success=False)
+    )
+
+    result = await dispatcher.dispatch_daily_outreach(
+        now="2026-06-14T10:00:00Z",
+        approved=True,
+        dry_run=False,
+    )
+
+    assert result["failed"][0]["employee_id"] == "ou_ready"
+    profile = await store.get_profile("ou_ready")
+    assert profile.last_outreach_at == ""
+    audits = await store.list_audit_events("ou_ready")
+    assert audits[-1].action == "outreach_send_failed"
 
 
 def test_task_state_machine_requires_satisfaction_before_completion() -> None:

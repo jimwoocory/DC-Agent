@@ -16,6 +16,16 @@ type Candidate = {
   is_runtime_eligible: boolean;
 };
 
+type OutreachItem = {
+  employee_id: string;
+  employee_hash: string;
+  display_name: string;
+  department_id: string;
+  role: string;
+  reason: string;
+  unanswered_outreach_count: number;
+};
+
 type DashboardPayload = {
   metrics: Record<string, number>;
   top_scenarios: Array<{ scenario_id: string; count: number }>;
@@ -41,15 +51,21 @@ const emptyDashboard: DashboardPayload = {
 };
 
 const dashboard = ref<DashboardPayload>(emptyDashboard);
+const outreachPlan = ref<{ eligible: OutreachItem[]; skipped: OutreachItem[] }>({
+  eligible: [],
+  skipped: [],
+});
 const doctor = ref<Record<string, any>>({});
 const loading = ref(false);
+const dispatchLoading = ref(false);
 const errorText = ref("");
+const dispatchResult = ref<Record<string, any> | null>(null);
 
 const metricRows = computed(() => [
   {
-    label: "今日/累计会话",
-    value: dashboard.value.metrics.total_sessions || 0,
-    icon: "mdi-message-text-clock-outline",
+    label: "试点员工",
+    value: dashboard.value.metrics.active_pilots || 0,
+    icon: "mdi-account-multiple-check-outline",
     color: "primary",
   },
   {
@@ -76,9 +92,10 @@ async function refresh() {
   loading.value = true;
   errorText.value = "";
   try {
-    const [dashboardResponse, doctorResponse] = await Promise.all([
+    const [dashboardResponse, doctorResponse, planResponse] = await Promise.all([
       axios.get("/api/employee-insight/dashboard"),
       axios.get("/api/employee-insight/doctor"),
+      axios.get("/api/employee-insight/outreach-plan"),
     ]);
     if (dashboardResponse.data.status === "ok") {
       dashboard.value = dashboardResponse.data.data || emptyDashboard;
@@ -86,10 +103,35 @@ async function refresh() {
     if (doctorResponse.data.status === "ok") {
       doctor.value = doctorResponse.data.data || {};
     }
+    if (planResponse.data.status === "ok") {
+      outreachPlan.value = planResponse.data.data || { eligible: [], skipped: [] };
+    }
   } catch (error: any) {
     errorText.value = error?.response?.data?.message || error.message || "刷新失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function runDryDispatch() {
+  dispatchLoading.value = true;
+  errorText.value = "";
+  try {
+    const response = await axios.post("/api/employee-insight/outreach-dispatch", {
+      dry_run: true,
+    });
+    if (response.data.status !== "ok") {
+      throw new Error(response.data.message || "触达预演失败");
+    }
+    dispatchResult.value = response.data.data;
+    outreachPlan.value = {
+      eligible: response.data.data.planned || [],
+      skipped: response.data.data.skipped || [],
+    };
+  } catch (error: any) {
+    errorText.value = error?.response?.data?.message || error.message || "触达预演失败";
+  } finally {
+    dispatchLoading.value = false;
   }
 }
 
@@ -115,6 +157,15 @@ onMounted(refresh);
         @click="refresh"
       >
         刷新
+      </v-btn>
+      <v-btn
+        color="secondary"
+        :loading="dispatchLoading"
+        prepend-icon="mdi-send-clock-outline"
+        variant="tonal"
+        @click="runDryDispatch"
+      >
+        触达预演
       </v-btn>
     </div>
 
@@ -191,6 +242,26 @@ onMounted(refresh);
           <div class="status-row">
             <span>发布策略</span>
             <v-chip color="info" size="small">{{ doctor.runtime_policy?.mutation_policy || "approved-only" }}</v-chip>
+          </div>
+        </v-card-text>
+      </v-card>
+
+      <v-card>
+        <v-card-title>今日触达计划</v-card-title>
+        <v-card-text>
+          <div v-if="!outreachPlan.eligible.length" class="empty">暂无可触达员工</div>
+          <div
+            v-for="item in outreachPlan.eligible.slice(0, 8)"
+            :key="item.employee_id"
+            class="rank-row"
+          >
+            <span>{{ item.display_name || item.employee_hash || item.employee_id }}</span>
+            <v-chip color="success" size="small" variant="tonal">可触达</v-chip>
+          </div>
+          <v-divider class="my-3" />
+          <div class="muted-line">已跳过 {{ outreachPlan.skipped.length }} 人</div>
+          <div v-if="dispatchResult" class="muted-line">
+            最近预演：计划 {{ dispatchResult.planned?.length || 0 }} 人，实际发送 0 人
           </div>
         </v-card-text>
       </v-card>

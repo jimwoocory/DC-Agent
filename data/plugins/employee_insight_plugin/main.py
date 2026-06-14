@@ -89,6 +89,7 @@ class EmployeeInsightPlugin(Star):
             return
 
         scenario_id = self._infer_scenario(text)
+        await self.store.mark_profile_engaged(str(event.get_sender_id() or ""))
         session = await self._create_session(
             event,
             status=EmployeeInsightSessionStatus.ENGAGED,

@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import aiosqlite
 import yaml
@@ -55,6 +55,25 @@ class ReviewStatus(StrEnum):
     SENSITIVE_BLOCKED = "sensitive_blocked"
     RELEASED = "released"
     VALIDATED = "validated"
+
+
+class PilotStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    EXITED = "exited"
+
+
+@dataclass(slots=True)
+class TextSendResult:
+    success: bool
+    provider_message_id: str = ""
+    error: str = ""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+class EmployeeInsightTextSender(Protocol):
+    async def send_text(self, employee_id: str, text: str) -> TextSendResult:
+        """Send one text message to an employee id."""
 
 
 SESSION_TRANSITIONS: dict[
@@ -131,6 +150,27 @@ RUNTIME_ELIGIBLE_STATUSES = {
 }
 
 RUNTIME_BLOCKED_SENSITIVITY = {"secret", "sensitive_blocked"}
+
+
+@dataclass(slots=True)
+class EmployeeInsightProfile:
+    employee_id: str
+    employee_hash: str
+    display_name: str = ""
+    department_id: str = ""
+    role: str = ""
+    pilot_status: PilotStatus = PilotStatus.ACTIVE
+    preferred_touch_time: str = ""
+    last_outreach_at: str = ""
+    unanswered_outreach_count: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: _utcnow())
+    updated_at: str = field(default_factory=lambda: _utcnow())
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["pilot_status"] = self.pilot_status.value
+        return data
 
 
 @dataclass(slots=True)
@@ -387,8 +427,26 @@ class EmployeeInsightStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS employee_insight_profiles (
+                    employee_id TEXT PRIMARY KEY,
+                    employee_hash TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    department_id TEXT NOT NULL DEFAULT '',
+                    role TEXT NOT NULL DEFAULT '',
+                    pilot_status TEXT NOT NULL,
+                    preferred_touch_time TEXT NOT NULL DEFAULT '',
+                    last_outreach_at TEXT NOT NULL DEFAULT '',
+                    unanswered_outreach_count INTEGER NOT NULL DEFAULT 0,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_employee_insight_sessions_status
                 ON employee_insight_sessions(status, updated_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_employee_insight_profiles_status
+                ON employee_insight_profiles(pilot_status, updated_at DESC);
 
                 CREATE INDEX IF NOT EXISTS idx_employee_insight_events_session
                 ON employee_insight_events(session_id, created_at ASC);
@@ -402,6 +460,78 @@ class EmployeeInsightStore:
             )
             await db.commit()
         self._initialized = True
+
+    async def upsert_profile(self, profile: EmployeeInsightProfile) -> None:
+        await self.initialize()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO employee_insight_profiles (
+                    employee_id, employee_hash, display_name, department_id, role,
+                    pilot_status, preferred_touch_time, last_outreach_at,
+                    unanswered_outreach_count, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(employee_id) DO UPDATE SET
+                    employee_hash = excluded.employee_hash,
+                    display_name = excluded.display_name,
+                    department_id = excluded.department_id,
+                    role = excluded.role,
+                    pilot_status = excluded.pilot_status,
+                    preferred_touch_time = excluded.preferred_touch_time,
+                    last_outreach_at = excluded.last_outreach_at,
+                    unanswered_outreach_count = excluded.unanswered_outreach_count,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                _profile_row(profile),
+            )
+            await db.commit()
+
+    async def get_profile(self, employee_id: str) -> EmployeeInsightProfile | None:
+        await self.initialize()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (
+                await db.execute(
+                    """
+                    SELECT * FROM employee_insight_profiles
+                    WHERE employee_id = ?
+                    """,
+                    (employee_id,),
+                )
+            ).fetchone()
+        return _profile_from_row(row) if row else None
+
+    async def list_profiles(
+        self,
+        *,
+        pilot_status: PilotStatus | None = None,
+        limit: int = 500,
+    ) -> list[EmployeeInsightProfile]:
+        await self.initialize()
+        query = "SELECT * FROM employee_insight_profiles WHERE 1 = 1"
+        params: list[Any] = []
+        if pilot_status:
+            query += " AND pilot_status = ?"
+            params.append(pilot_status.value)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await (await db.execute(query, tuple(params))).fetchall()
+        return [_profile_from_row(row) for row in rows]
+
+    async def mark_profile_engaged(self, employee_id: str) -> None:
+        profile = await self.get_profile(employee_id)
+        if profile is None:
+            return
+        await self.upsert_profile(
+            replace(
+                profile,
+                unanswered_outreach_count=0,
+                updated_at=_utcnow(),
+            )
+        )
 
     async def upsert_session(self, session: EmployeeInsightSession) -> None:
         await self.initialize()
@@ -656,6 +786,236 @@ class EmployeeInsightObsidianExporter:
 
 
 @dataclass(slots=True)
+class EmployeeInsightOutreachScheduler:
+    store: EmployeeInsightStore
+    cooldown_after_unanswered: int = 2
+    unanswered_cooldown_days: int = 3
+
+    async def build_daily_plan(
+        self,
+        *,
+        now: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, list[dict[str, Any]]]:
+        now_value = now or _utcnow()
+        profiles = await self.store.list_profiles(limit=1000)
+        eligible: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for profile in profiles:
+            reason = self._skip_reason(profile, now_value)
+            item = {
+                "employee_id": profile.employee_id,
+                "employee_hash": profile.employee_hash,
+                "display_name": profile.display_name,
+                "department_id": profile.department_id,
+                "role": profile.role,
+                "pilot_status": profile.pilot_status.value,
+                "last_outreach_at": profile.last_outreach_at,
+                "unanswered_outreach_count": profile.unanswered_outreach_count,
+            }
+            if reason:
+                skipped.append({**item, "reason": reason})
+                continue
+            if len(eligible) < limit:
+                eligible.append({**item, "reason": "eligible"})
+            else:
+                skipped.append({**item, "reason": "plan_limit_reached"})
+        return {"eligible": eligible, "skipped": skipped}
+
+    async def record_outreach(
+        self,
+        *,
+        employee_id: str,
+        message_text: str,
+        now: str | None = None,
+        actor: str = "employee_insight_scheduler",
+    ) -> EmployeeInsightSession:
+        now_value = now or _utcnow()
+        profile = await self.store.get_profile(employee_id)
+        if profile is None:
+            raise ValueError(f"employee profile not found: {employee_id}")
+        reason = self._skip_reason(profile, now_value)
+        if reason:
+            raise ValueError(f"outreach not allowed: {reason}")
+
+        session = EmployeeInsightSession(
+            session_id=uuid.uuid4().hex,
+            employee_id=profile.employee_id,
+            channel="lark_dm",
+            trigger_type="daily_outreach",
+            status=EmployeeInsightSessionStatus.SENT,
+            department_id=profile.department_id,
+            role=profile.role,
+            scenario_id="daily_outreach",
+            original_request=message_text[:4000],
+            normalized_goal="每日主动触达员工，陪跑一个真实任务。",
+            metadata={
+                "employee_hash": profile.employee_hash,
+                "preferred_touch_time": profile.preferred_touch_time,
+            },
+            summary="系统按试点名单完成一次主动私聊触达记录。",
+            created_at=now_value,
+            updated_at=now_value,
+        )
+        await self.store.upsert_session(session)
+        await self.store.append_event(
+            InsightEvent(
+                event_id=uuid.uuid4().hex,
+                session_id=session.session_id,
+                event_type="outreach_sent",
+                actor=actor,
+                payload={
+                    "employee_id": profile.employee_id,
+                    "employee_hash": profile.employee_hash,
+                    "message_text": message_text,
+                },
+                created_at=now_value,
+            )
+        )
+        await self.store.upsert_profile(
+            replace(
+                profile,
+                last_outreach_at=now_value,
+                unanswered_outreach_count=profile.unanswered_outreach_count + 1,
+                updated_at=now_value,
+            )
+        )
+        await self.store.record_audit(
+            action="outreach_sent",
+            actor=actor,
+            target_id=session.session_id,
+            detail={
+                "employee_id": profile.employee_id,
+                "employee_hash": profile.employee_hash,
+                "channel": "lark_dm",
+            },
+        )
+        return session
+
+    async def record_failed_outreach(
+        self,
+        *,
+        employee_id: str,
+        error: str,
+        now: str | None = None,
+        actor: str = "employee_insight_scheduler",
+    ) -> None:
+        await self.store.record_audit(
+            action="outreach_send_failed",
+            actor=actor,
+            target_id=employee_id,
+            detail={
+                "employee_id": employee_id,
+                "error": error,
+                "created_at": now or _utcnow(),
+            },
+        )
+
+    def _skip_reason(self, profile: EmployeeInsightProfile, now: str) -> str:
+        if profile.pilot_status != PilotStatus.ACTIVE:
+            return "pilot_not_active"
+        if not profile.last_outreach_at:
+            return ""
+        last = _parse_iso(profile.last_outreach_at)
+        current = _parse_iso(now)
+        if last.date() == current.date():
+            return "already_contacted_today"
+        if profile.unanswered_outreach_count >= self.cooldown_after_unanswered:
+            elapsed_days = (current.date() - last.date()).days
+            if elapsed_days < self.unanswered_cooldown_days:
+                return "cooldown_after_unanswered"
+        return ""
+
+
+@dataclass(slots=True)
+class EmployeeInsightOutreachDispatcher:
+    store: EmployeeInsightStore
+    sender: EmployeeInsightTextSender
+    scheduler: EmployeeInsightOutreachScheduler | None = None
+    default_message_text: str = (
+        "今天想试一个真实工作任务吗？你可以直接把要做的事发给我，"
+        "也可以回复：查资料 / 写通知 / 整理文件 / 生成汇报 / 不知道怎么用。"
+    )
+
+    async def dispatch_daily_outreach(
+        self,
+        *,
+        now: str | None = None,
+        limit: int = 20,
+        approved: bool = False,
+        dry_run: bool = True,
+        actor: str = "employee_insight_dispatcher",
+        message_text: str | None = None,
+    ) -> dict[str, Any]:
+        scheduler = self.scheduler or EmployeeInsightOutreachScheduler(self.store)
+        plan = await scheduler.build_daily_plan(now=now, limit=limit)
+        if dry_run:
+            await self.store.record_audit(
+                action="outreach_dry_run",
+                actor=actor,
+                target_id="daily_outreach",
+                detail={
+                    "planned_count": len(plan["eligible"]),
+                    "now": now or _utcnow(),
+                },
+            )
+            return {
+                "mode": "dry_run",
+                "planned": plan["eligible"],
+                "skipped": plan["skipped"],
+                "sent": [],
+                "failed": [],
+            }
+        if not approved:
+            raise PermissionError("approved=true is required for real outreach send")
+
+        text = message_text or self.default_message_text
+        sent: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
+        for item in plan["eligible"]:
+            employee_id = item["employee_id"]
+            result = await self.sender.send_text(employee_id, text)
+            if not result.success:
+                failed.append({"employee_id": employee_id, "error": result.error})
+                await scheduler.record_failed_outreach(
+                    employee_id=employee_id,
+                    error=result.error or "unknown send error",
+                    now=now,
+                    actor=actor,
+                )
+                continue
+            session = await scheduler.record_outreach(
+                employee_id=employee_id,
+                message_text=text,
+                now=now,
+                actor=actor,
+            )
+            updated = replace(
+                session,
+                metadata={
+                    **session.metadata,
+                    "provider_message_id": result.provider_message_id,
+                    "send_raw": result.raw,
+                },
+            )
+            await self.store.upsert_session(updated)
+            sent.append(
+                {
+                    "employee_id": employee_id,
+                    "session_id": session.session_id,
+                    "provider_message_id": result.provider_message_id,
+                }
+            )
+        return {
+            "mode": "send",
+            "planned": plan["eligible"],
+            "skipped": plan["skipped"],
+            "sent": sent,
+            "failed": failed,
+        }
+
+
+@dataclass(slots=True)
 class EmployeeInsightDashboardSnapshot:
     metrics: dict[str, int]
     top_scenarios: list[dict[str, Any]]
@@ -681,6 +1041,11 @@ class EmployeeInsightDashboardSnapshot:
             if candidate.review_status == ReviewStatus.REVIEW_REQUIRED
         ]
         metrics = {
+            "active_pilots": sum(
+                1
+                for profile in await store.list_profiles()
+                if profile.pilot_status == PilotStatus.ACTIVE
+            ),
             "total_sessions": len(sessions),
             "outreach_sent": sum(
                 1
@@ -885,6 +1250,23 @@ def _session_row(session: EmployeeInsightSession) -> tuple[Any, ...]:
     )
 
 
+def _profile_row(profile: EmployeeInsightProfile) -> tuple[Any, ...]:
+    return (
+        profile.employee_id,
+        profile.employee_hash,
+        profile.display_name,
+        profile.department_id,
+        profile.role,
+        profile.pilot_status.value,
+        profile.preferred_touch_time,
+        profile.last_outreach_at,
+        profile.unanswered_outreach_count,
+        _dumps(profile.metadata),
+        profile.created_at,
+        profile.updated_at,
+    )
+
+
 def _candidate_row(candidate: EmployeeInsightCandidate) -> tuple[Any, ...]:
     return (
         candidate.candidate_id,
@@ -924,6 +1306,23 @@ def _session_from_row(row: sqlite3.Row | aiosqlite.Row) -> EmployeeInsightSessio
         friction_points=_loads(row["friction_points_json"], []),
         metadata=_loads(row["metadata_json"], {}),
         summary=row["summary"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _profile_from_row(row: sqlite3.Row | aiosqlite.Row) -> EmployeeInsightProfile:
+    return EmployeeInsightProfile(
+        employee_id=row["employee_id"],
+        employee_hash=row["employee_hash"],
+        display_name=row["display_name"],
+        department_id=row["department_id"],
+        role=row["role"],
+        pilot_status=PilotStatus(row["pilot_status"]),
+        preferred_touch_time=row["preferred_touch_time"],
+        last_outreach_at=row["last_outreach_at"],
+        unanswered_outreach_count=int(row["unanswered_outreach_count"]),
+        metadata=_loads(row["metadata_json"], {}),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -987,3 +1386,8 @@ def _loads(text: str, default: Any) -> Any:
 
 def _utcnow() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _parse_iso(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized)

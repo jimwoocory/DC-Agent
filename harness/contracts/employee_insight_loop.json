@@ -73,6 +73,21 @@
       "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
     },
     {
+      "id": "eil-002a",
+      "description": "Pilot employee profiles persist employee_hash, department, role, pilot_status, preferred_touch_time, last_outreach_at, and unanswered_outreach_count without requiring plaintext employee rosters in config.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-002b",
+      "description": "The outreach scheduler plans lark_dm proactive outreach only for active pilots, enforces one outreach per day, applies a three-day cooldown after two unanswered outreaches, and records outreach_sent sessions, events, and audit entries without performing direct message sending inside dashboard refresh paths.",
+      "verification": "uv run pytest tests/test_employee_insight_route.py -q"
+    },
+    {
+      "id": "eil-002c",
+      "description": "The outreach dispatcher defaults to dry-run, never calls a real sender during dashboard refresh, requires approved=true for real sends, records send failures as audit events without marking outreach as sent, and exposes dashboard dispatch as dry-run until a real sender is explicitly configured.",
+      "verification": "uv run pytest tests/test_employee_insight_route.py -q"
+    },
+    {
       "id": "eil-003",
       "description": "Employee coaching stores structured employee_insight_events instead of treating raw chat text as the only data model.",
       "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"

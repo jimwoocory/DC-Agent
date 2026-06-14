@@ -22,6 +22,22 @@ class EmployeeInsightRoute(Route):
             "/employee-insight/dashboard": ("GET", self.employee_insight_dashboard),
             "/employee-insight/sessions": ("GET", self.employee_insight_sessions),
             "/employee-insight/candidates": ("GET", self.employee_insight_candidates),
+            "/employee-insight/profiles": [
+                ("GET", self.employee_insight_profiles),
+                ("POST", self.employee_insight_upsert_profile),
+            ],
+            "/employee-insight/outreach-plan": (
+                "GET",
+                self.employee_insight_outreach_plan,
+            ),
+            "/employee-insight/outreach-record": (
+                "POST",
+                self.employee_insight_record_outreach,
+            ),
+            "/employee-insight/outreach-dispatch": (
+                "POST",
+                self.employee_insight_dispatch_outreach,
+            ),
             "/employee-insight/audit": ("GET", self.employee_insight_audit),
             "/employee-insight/doctor": ("GET", self.employee_insight_doctor),
         }
@@ -87,6 +103,144 @@ class EmployeeInsightRoute(Route):
             .ok({"items": [candidate.to_dict() for candidate in candidates]})
             .__dict__
         )
+
+    async def employee_insight_profiles(self):
+        self._ensure_import_path()
+        from dc_engines.employee_insight_loop import EmployeeInsightStore, PilotStatus
+
+        pilot_status_arg = (request.args.get("pilot_status") or "").strip()
+        pilot_status = None
+        if pilot_status_arg:
+            try:
+                pilot_status = PilotStatus(pilot_status_arg)
+            except ValueError:
+                return (
+                    Response()
+                    .error(f"invalid pilot_status: {pilot_status_arg}")
+                    .__dict__
+                )
+        limit = _positive_int(request.args.get("limit"), default=100, max_value=500)
+        store = EmployeeInsightStore(self._store_path())
+        profiles = await store.list_profiles(pilot_status=pilot_status, limit=limit)
+        return (
+            Response()
+            .ok({"items": [profile.to_dict() for profile in profiles]})
+            .__dict__
+        )
+
+    async def employee_insight_upsert_profile(self):
+        self._ensure_import_path()
+        from dc_engines.employee_insight_loop import (
+            EmployeeInsightProfile,
+            EmployeeInsightStore,
+            PilotStatus,
+        )
+
+        data = await request.get_json(silent=True) or {}
+        employee_id = str(data.get("employee_id") or "").strip()
+        if not employee_id:
+            return Response().error("employee_id is required").__dict__
+        try:
+            pilot_status = PilotStatus(str(data.get("pilot_status") or "active"))
+        except ValueError:
+            return Response().error("invalid pilot_status").__dict__
+        store = EmployeeInsightStore(self._store_path())
+        existing = await store.get_profile(employee_id)
+        profile = EmployeeInsightProfile(
+            employee_id=employee_id,
+            employee_hash=str(data.get("employee_hash") or employee_id),
+            display_name=str(data.get("display_name") or ""),
+            department_id=str(data.get("department_id") or ""),
+            role=str(data.get("role") or ""),
+            pilot_status=pilot_status,
+            preferred_touch_time=str(data.get("preferred_touch_time") or ""),
+            last_outreach_at=str(data.get("last_outreach_at") or "")
+            or (existing.last_outreach_at if existing else ""),
+            unanswered_outreach_count=int(
+                data.get(
+                    "unanswered_outreach_count",
+                    existing.unanswered_outreach_count if existing else 0,
+                )
+                or 0
+            ),
+            metadata=dict(data.get("metadata") or {}),
+        )
+        await store.upsert_profile(profile)
+        await store.record_audit(
+            action="profile_upserted",
+            actor="dashboard",
+            target_id=profile.employee_id,
+            detail={"pilot_status": profile.pilot_status.value},
+        )
+        return Response().ok(profile.to_dict()).__dict__
+
+    async def employee_insight_outreach_plan(self):
+        self._ensure_import_path()
+        from dc_engines.employee_insight_loop import (
+            EmployeeInsightOutreachScheduler,
+            EmployeeInsightStore,
+        )
+
+        now = (request.args.get("now") or "").strip() or None
+        limit = _positive_int(request.args.get("limit"), default=20, max_value=200)
+        store = EmployeeInsightStore(self._store_path())
+        scheduler = EmployeeInsightOutreachScheduler(store)
+        plan = await scheduler.build_daily_plan(now=now, limit=limit)
+        return Response().ok(plan).__dict__
+
+    async def employee_insight_record_outreach(self):
+        self._ensure_import_path()
+        from dc_engines.employee_insight_loop import (
+            EmployeeInsightOutreachScheduler,
+            EmployeeInsightStore,
+        )
+
+        data = await request.get_json(silent=True) or {}
+        employee_id = str(data.get("employee_id") or "").strip()
+        message_text = str(data.get("message_text") or "").strip()
+        if not employee_id:
+            return Response().error("employee_id is required").__dict__
+        if not message_text:
+            return Response().error("message_text is required").__dict__
+        store = EmployeeInsightStore(self._store_path())
+        scheduler = EmployeeInsightOutreachScheduler(store)
+        try:
+            session = await scheduler.record_outreach(
+                employee_id=employee_id,
+                message_text=message_text,
+                now=str(data.get("now") or "") or None,
+                actor="dashboard",
+            )
+        except ValueError as exc:
+            return Response().error(str(exc)).__dict__
+        return Response().ok(session.to_dict()).__dict__
+
+    async def employee_insight_dispatch_outreach(self):
+        self._ensure_import_path()
+        from dc_engines.employee_insight_loop import (
+            EmployeeInsightOutreachDispatcher,
+            EmployeeInsightStore,
+        )
+
+        data = await request.get_json(silent=True) or {}
+        dry_run = bool(data.get("dry_run", True))
+        approved = bool(data.get("approved", False))
+        if not dry_run:
+            return Response().error("real sender is not configured").__dict__
+        store = EmployeeInsightStore(self._store_path())
+        dispatcher = EmployeeInsightOutreachDispatcher(
+            store,
+            sender=_DisabledTextSender(),
+        )
+        payload = await dispatcher.dispatch_daily_outreach(
+            now=str(data.get("now") or "") or None,
+            limit=int(data.get("limit") or 20),
+            approved=approved,
+            dry_run=True,
+            actor="dashboard",
+            message_text=str(data.get("message_text") or "") or None,
+        )
+        return Response().ok(payload).__dict__
 
     async def employee_insight_audit(self):
         self._ensure_import_path()
@@ -183,3 +337,14 @@ def _positive_int(value: str | None, *, default: int, max_value: int) -> int:
     if parsed <= 0:
         return default
     return min(parsed, max_value)
+
+
+class _DisabledTextSender:
+    async def send_text(self, employee_id: str, text: str):
+        from dc_engines.employee_insight_loop import TextSendResult
+
+        return TextSendResult(
+            success=False,
+            error="real sender is not configured",
+            raw={"employee_id": employee_id, "text": text},
+        )

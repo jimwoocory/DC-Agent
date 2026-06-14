@@ -13,9 +13,11 @@ if str(DC_ENGINES_PATH) not in sys.path:
 from dc_engines.employee_insight_loop import (  # noqa: E402
     CandidateType,
     EmployeeInsightCandidate,
+    EmployeeInsightProfile,
     EmployeeInsightSession,
     EmployeeInsightSessionStatus,
     EmployeeInsightStore,
+    PilotStatus,
 )
 
 from astrbot.dashboard.routes.employee_insight import EmployeeInsightRoute  # noqa: E402
@@ -157,3 +159,121 @@ def test_employee_insight_frontend_entry_is_registered() -> None:
     assert "core.navigation.employeeInsight" in sidebar_source
     assert '"employeeInsight": "员工需求洞察"' in zh_navigation
     assert '"/employee-insight"' in static_source
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_profiles_and_outreach_plan_routes(
+    tmp_path: Path,
+) -> None:
+    store = EmployeeInsightStore(tmp_path / "data" / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            display_name="张三",
+            department_id="planning",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    app = Quart(__name__)
+    EmployeeInsightRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        profiles = await (await client.get("/api/employee-insight/profiles")).get_json()
+        plan = await (
+            await client.get(
+                "/api/employee-insight/outreach-plan?now=2026-06-14T10:00:00Z"
+            )
+        ).get_json()
+
+    assert profiles["status"] == "ok"
+    assert profiles["data"]["items"][0]["employee_id"] == "ou_ready"
+    assert plan["status"] == "ok"
+    assert plan["data"]["eligible"][0]["employee_id"] == "ou_ready"
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_upsert_profile_and_record_outreach_routes(
+    tmp_path: Path,
+) -> None:
+    app = Quart(__name__)
+    EmployeeInsightRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        created = await (
+            await client.post(
+                "/api/employee-insight/profiles",
+                json={
+                    "employee_id": "ou_ready",
+                    "employee_hash": "hash_ready",
+                    "display_name": "张三",
+                    "department_id": "planning",
+                    "pilot_status": "active",
+                },
+            )
+        ).get_json()
+        recorded = await (
+            await client.post(
+                "/api/employee-insight/outreach-record",
+                json={
+                    "employee_id": "ou_ready",
+                    "message_text": "今天想试一个真实任务吗？",
+                    "now": "2026-06-14T10:00:00Z",
+                },
+            )
+        ).get_json()
+
+    assert created["status"] == "ok"
+    assert recorded["status"] == "ok"
+    assert recorded["data"]["status"] == "sent"
+    store = EmployeeInsightStore(tmp_path / "data" / "employee_insight.db")
+    profile = await store.get_profile("ou_ready")
+    assert profile.unanswered_outreach_count == 1
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_outreach_dispatch_dry_run_route(
+    tmp_path: Path,
+) -> None:
+    store = EmployeeInsightStore(tmp_path / "data" / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    app = Quart(__name__)
+    EmployeeInsightRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        payload = await (
+            await client.post(
+                "/api/employee-insight/outreach-dispatch",
+                json={"dry_run": True, "now": "2026-06-14T10:00:00Z"},
+            )
+        ).get_json()
+
+    assert payload["status"] == "ok"
+    assert payload["data"]["mode"] == "dry_run"
+    assert payload["data"]["planned"][0]["employee_id"] == "ou_ready"
+    assert payload["data"]["sent"] == []
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_outreach_dispatch_real_send_requires_sender(
+    tmp_path: Path,
+) -> None:
+    app = Quart(__name__)
+    EmployeeInsightRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        payload = await (
+            await client.post(
+                "/api/employee-insight/outreach-dispatch",
+                json={"dry_run": False, "approved": True},
+            )
+        ).get_json()
+
+    assert payload["status"] == "error"
+    assert "sender is not configured" in payload["message"]

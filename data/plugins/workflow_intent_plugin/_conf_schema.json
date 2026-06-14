@@ -1,0 +1,7 @@
+{
+  "delegate_to_department_workflow": {
+    "type": "bool",
+    "description": "启用后，workflow_intent_plugin 不再自动建任务，交由 department_workflow_plugin 处理。",
+    "default": false
+  }
+}

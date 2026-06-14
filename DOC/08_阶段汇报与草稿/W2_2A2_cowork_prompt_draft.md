@@ -1,5 +1,7 @@
 # W2 / 2A-2 Cowork Prompt Draft — 任务提取和提醒
 
+> **⚠️ 历史档案（2026-06-05）**：2026-05 灰度期 Codex cowork 草稿，已废止。勿作现行任务依据。
+
 > **目的**：W1 完成合并后立即派给 cowork，避免每次再写 prompt 的延迟。
 >
 > **派发命令**：`spawn_task(title=..., tldr=..., prompt=<下方内容>, isolation="worktree")`

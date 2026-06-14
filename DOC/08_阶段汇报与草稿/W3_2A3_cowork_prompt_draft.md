@@ -1,5 +1,7 @@
 # W3 / 2A-3 Cowork Prompt Draft — 飞书资料读+写（含 G4 归档闭环）
 
+> **⚠️ 历史档案（2026-06-05）**：2026-05 灰度期 Codex cowork 草稿，已废止。勿作现行任务依据。
+
 > **目的**：W2 合并后立即派给 cowork。W3 是 Codex 时间表 05-25 ~ 05-31 启动的关键模块，覆盖飞书文档/表格查询 + Case 归档写回 KB 双向能力。
 >
 > **派发命令**：`spawn_task(title=..., tldr=..., prompt=<下方内容>, isolation="worktree")`

@@ -173,6 +173,7 @@ data/grok_worker_state.json
 data/onboarding_watch.log
 data/chitchat_guard_hits.jsonl
 data/chitchat_guard_misses.jsonl
+data/department_memory_prompt_audit.jsonl
 data/.onboarding_pushed_markers/
 data/attachments/
 data/card_runtime/

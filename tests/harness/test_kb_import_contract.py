@@ -26,7 +26,7 @@ def test_knowledge_base_import_contract_points_to_pytest_verifiers():
 
     assert verification_commands(contract) == [
         "uv run pytest tests/test_kb_import.py::test_import_documents -q",
-        "uv run pytest tests/test_kb_import.py::test_import_documents_returns_friendly_failure_message -q",
+        "uv run pytest tests/test_kb_import.py::test_import_documents_returns_friendly_failure_message tests/test_kb_import.py::test_import_documents_marks_mixed_result_as_partial tests/test_kb_import.py::test_upload_documents_marks_all_failed_uploads_as_failed -q",
         "uv run pytest tests/unit/test_sparse_retriever.py tests/unit/test_faiss_vec_db.py -q",
         "uv run pytest tests/test_kb_import.py::test_import_documents_passes_source_path_to_kb_helper tests/test_kb_import.py::test_upload_document_persists_source_path_as_file_path -q",
         "uv run pytest tests/unit/test_kb_source_citations.py -q",

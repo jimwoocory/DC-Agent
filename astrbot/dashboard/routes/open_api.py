@@ -331,6 +331,7 @@ class OpenApiRoute(Route):
         selected_provider = post_data.get("selected_provider")
         selected_model = post_data.get("selected_model")
         enable_streaming = post_data.get("enable_streaming", True)
+        llm_checkpoint_id = str(uuid4())
 
         back_queue = webchat_queue_mgr.get_or_create_back_queue(message_id, session_id)
         try:
@@ -345,6 +346,8 @@ class OpenApiRoute(Route):
                         "selected_model": selected_model,
                         "enable_streaming": enable_streaming,
                         "message_id": message_id,
+                        "llm_checkpoint_id": llm_checkpoint_id,
+                        "platform_history_id": "webchat",
                     },
                 )
             )
@@ -356,6 +359,7 @@ class OpenApiRoute(Route):
                 content={"type": "user", "message": message_parts_for_storage},
                 sender_id=effective_username,
                 sender_name=effective_username,
+                llm_checkpoint_id=llm_checkpoint_id,
             )
 
             await websocket.send_json(
@@ -465,6 +469,7 @@ class OpenApiRoute(Route):
                         message_parts_to_save,
                         agent_stats,
                         refs,
+                        llm_checkpoint_id,
                     )
                     if saved_record:
                         await websocket.send_json(

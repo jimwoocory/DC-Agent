@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 MEDIA_PLUGIN_PATHS = (
-    Path("data/plugins/llm_router/main.py"),
+    Path("data/plugins/dc_router/preprocessing/media_route.py"),
     Path("data/plugins/gpt_image_plugin/main.py"),
     Path("data/plugins/dreamina_plugin/main.py"),
 )

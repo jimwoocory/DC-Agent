@@ -9,8 +9,8 @@
     },
     {
       "id": "kb-import-002",
-      "description": "Embedding or upload failures are reported per file without marking the whole task as crashed.",
-      "verification": "uv run pytest tests/test_kb_import.py::test_import_documents_returns_friendly_failure_message -q"
+      "description": "Embedding or upload failures are reported per file and terminal task status is failed, partial, or completed according to actual successful documents.",
+      "verification": "uv run pytest tests/test_kb_import.py::test_import_documents_returns_friendly_failure_message tests/test_kb_import.py::test_import_documents_marks_mixed_result_as_partial tests/test_kb_import.py::test_upload_documents_marks_all_failed_uploads_as_failed -q"
     },
     {
       "id": "kb-import-003",

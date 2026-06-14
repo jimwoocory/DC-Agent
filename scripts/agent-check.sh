@@ -113,6 +113,15 @@ uv run pytest data/plugins/dc_router/test_routing_path.py -q
 uv run pytest tests/dc_router -q
 uv run pytest dc_engines/tests -q
 
+echo "==> Running skill preloader / loader checks"
+uv run python scripts/sync_bundled_skills.py
+uv run pytest \
+  tests/test_sync_bundled_skills.py \
+  tests/test_skill_loader.py \
+  tests/test_skill_preloader.py \
+  tests/harness/test_agent_skill_compatibility_contract.py \
+  -q
+
 if [[ "$PROFILE" == "full" ]]; then
   echo "==> Running format check"
   uv run ruff format --check .

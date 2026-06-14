@@ -20,7 +20,7 @@
     {
       "id": "truth-intake-004",
       "description": "When a blocked truth-intake task receives materials, the Harness task payload is merged with archive_dir and attachments before moving in_progress.",
-      "verification": "uv run env PYTHONPATH=.:dc_engines pytest data/plugins/llm_router/test_dc_router_path.py -k truth_intake -q"
+      "verification": "uv run env PYTHONPATH=.:dc_engines pytest tests/dc_router/test_dispatch_pipeline.py -k truth_intake -q"
     },
     {
       "id": "truth-intake-005",

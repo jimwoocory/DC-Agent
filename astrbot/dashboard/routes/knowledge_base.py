@@ -108,6 +108,25 @@ class KnowledgeBaseRoute(Route):
         if task_id in self.upload_progress:
             self.upload_progress[task_id]["status"] = status
 
+    @staticmethod
+    def _upload_result_status(success_count: int, failed_count: int) -> str:
+        if failed_count > 0 and success_count == 0:
+            return "failed"
+        if failed_count > 0:
+            return "partial"
+        return "completed"
+
+    @staticmethod
+    def _upload_result_error(result: dict[str, Any], status: str) -> str | None:
+        if status != "failed":
+            return None
+        failed = result.get("failed") or []
+        if failed and isinstance(failed[0], dict):
+            error = failed[0].get("error")
+            if error:
+                return str(error)
+        return "All documents failed to import."
+
     def _update_progress(
         self,
         task_id: str,
@@ -236,7 +255,16 @@ class KnowledgeBaseRoute(Route):
                 "failed_count": len(failed_docs),
             }
 
-            self._set_task_result(task_id, "completed", result=result)
+            status = self._upload_result_status(
+                result["success_count"],
+                result["failed_count"],
+            )
+            self._set_task_result(
+                task_id,
+                status,
+                result=result,
+                error=self._upload_result_error(result, status),
+            )
 
         except Exception as e:
             logger.error(f"后台上传任务 {task_id} 失败: {e}")
@@ -327,7 +355,16 @@ class KnowledgeBaseRoute(Route):
                 "failed_count": len(failed_docs),
             }
 
-            self._set_task_result(task_id, "completed", result=result)
+            status = self._upload_result_status(
+                result["success_count"],
+                result["failed_count"],
+            )
+            self._set_task_result(
+                task_id,
+                status,
+                result=result,
+                error=self._upload_result_error(result, status),
+            )
 
         except Exception as e:
             logger.error(f"后台导入任务 {task_id} 失败: {e}")
@@ -1078,8 +1115,8 @@ class KnowledgeBaseRoute(Route):
             if status == "processing" and task_id in self.upload_progress:
                 response_data["progress"] = self.upload_progress[task_id]
 
-            # 如果任务完成，返回结果
-            if status == "completed":
+            # Return per-file details for every terminal upload state.
+            if status in {"completed", "partial", "failed"} and task_info["result"]:
                 response_data["result"] = task_info["result"]
                 # 清理已完成的任务
                 # del self.upload_tasks[task_id]

@@ -811,6 +811,16 @@ def test_plugin_page_content_path_escapes_plugin_name():
     )
 
 
+def test_dc_hub_managed_plugins_are_marked_for_outer_list_hiding():
+    route = object.__new__(PluginRoute)
+
+    hidden = route._dc_hub_hidden_plugin_names()
+
+    assert "chat_creator_plugin" in hidden
+    assert "dc_router" in hidden
+    assert "dc_hub" not in hidden
+
+
 @pytest.mark.asyncio
 async def test_plugin_get_excludes_scanned_pages(
     app: Quart,

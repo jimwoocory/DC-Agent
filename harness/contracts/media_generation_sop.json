@@ -5,7 +5,7 @@
     {
       "id": "media-generation-sop-001",
       "description": "Router metadata marks copy plus image/video requests as mixed content and records material status.",
-      "verification": "uv run pytest tests/router/test_router_core.py::test_content_sop_metadata_routes_client_copy_image_request tests/router/test_router_core.py::test_content_sop_metadata_marks_attachment_request_partial -q"
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_content_sop_metadata_routes_client_copy_image_request tests/dc_router/test_router_core.py::test_content_sop_metadata_marks_attachment_request_partial -q"
     },
     {
       "id": "media-generation-sop-002",

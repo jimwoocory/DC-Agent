@@ -9,19 +9,25 @@ import os
 import sys
 from asyncio import Queue
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
 
-# 使用 tests/fixtures/helpers.py 中的共享工具函数，避免重复定义
-from tests.fixtures.helpers import create_mock_llm_response, create_mock_message_component
-
-# 将项目根目录添加到 sys.path
+# Add the project root to sys.path.
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# dc_engines lives under ./dc_engines/dc_engines. When the project root is on
+# sys.path, Python can cache the outer directory as a namespace package and
+# shadow the editable install. Add the inner package root before any test imports
+# dc_engines. Production uses runtime_bootstrap.configure_dc_engines_path.
+DC_ENGINES_ROOT = PROJECT_ROOT / "dc_engines"
+if str(DC_ENGINES_ROOT) not in sys.path:
+    sys.path.insert(0, str(DC_ENGINES_ROOT))
+
+# Reuse shared helpers from tests/fixtures/helpers.py instead of duplicating them.
 
 # 设置测试环境变量
 os.environ.setdefault("TESTING", "true")

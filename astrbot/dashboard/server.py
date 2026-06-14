@@ -178,6 +178,8 @@ class AstrBotDashboard:
         self.t2i_route = T2iRoute(self.context, core_lifecycle)
         self.kb_route = KnowledgeBaseRoute(self.context, core_lifecycle)
         self.memory_governance_route = MemoryGovernanceRoute(self.context)
+        self.content_sop_ops_route = ContentSopOpsRoute(self.context)
+        self.employee_insight_route = EmployeeInsightRoute(self.context)
         self.platform_route = PlatformRoute(self.context, core_lifecycle)
         self.backup_route = BackupRoute(self.context, db, core_lifecycle)
         self.live_chat_route = LiveChatRoute(self.context, db, core_lifecycle)

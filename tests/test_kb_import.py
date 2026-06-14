@@ -246,7 +246,7 @@ async def test_import_documents_returns_friendly_failure_message(
         max_retries=3,
     )
 
-    assert route.upload_tasks["task-1"]["status"] == "completed"
+    assert route.upload_tasks["task-1"]["status"] == "failed"
     result = route.upload_tasks["task-1"]["result"]
     assert result["success_count"] == 0
     assert result["failed_count"] == 1
@@ -256,6 +256,99 @@ async def test_import_documents_returns_friendly_failure_message(
     assert "期望 2，实际 1" in result["failed"][0]["error"]
     assert "not same nb of vectors as ids" not in result["failed"][0]["error"]
     assert kb_helper.upload_document.await_count == 1
+
+    kb_helper.upload_document.side_effect = None
+
+
+@pytest.mark.asyncio
+async def test_import_documents_marks_mixed_result_as_partial(
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    kb_helper = await core_lifecycle_td.kb_manager.get_kb("test_kb_id")
+    kb_helper.upload_document.reset_mock()
+    first_doc = KBDocument(
+        doc_id="doc-ok",
+        kb_id="test_kb_id",
+        doc_name="ok.txt",
+        file_type="txt",
+        file_size=100,
+        file_path="",
+        chunk_count=1,
+        media_count=0,
+    )
+    kb_helper.upload_document.side_effect = [
+        first_doc,
+        KnowledgeBaseUploadError(
+            stage="embedding",
+            user_message="向量化失败：嵌入模型不可用。",
+        ),
+    ]
+
+    route = KnowledgeBaseRoute.__new__(KnowledgeBaseRoute)
+    route.upload_progress = {}
+    route.upload_tasks = {}
+
+    await KnowledgeBaseRoute._background_import_task(
+        route,
+        task_id="task-partial",
+        kb_helper=kb_helper,
+        documents=[
+            {"file_name": "ok.txt", "chunks": ["chunk-ok"]},
+            {"file_name": "broken.txt", "chunks": ["chunk-broken"]},
+        ],
+        batch_size=32,
+        tasks_limit=3,
+        max_retries=3,
+    )
+
+    task_info = route.upload_tasks["task-partial"]
+    assert task_info["status"] == "partial"
+    assert task_info["error"] is None
+    assert task_info["result"]["success_count"] == 1
+    assert task_info["result"]["failed_count"] == 1
+    assert task_info["result"]["failed"][0]["file_name"] == "broken.txt"
+
+    kb_helper.upload_document.side_effect = None
+
+
+@pytest.mark.asyncio
+async def test_upload_documents_marks_all_failed_uploads_as_failed(
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    kb_helper = await core_lifecycle_td.kb_manager.get_kb("test_kb_id")
+    kb_helper.upload_document.reset_mock()
+    kb_helper.upload_document.side_effect = KnowledgeBaseUploadError(
+        stage="embedding",
+        user_message="向量化失败：嵌入模型不可用。",
+    )
+
+    route = KnowledgeBaseRoute.__new__(KnowledgeBaseRoute)
+    route.upload_progress = {}
+    route.upload_tasks = {}
+
+    await KnowledgeBaseRoute._background_upload_task(
+        route,
+        task_id="upload-failed",
+        kb_helper=kb_helper,
+        files_to_upload=[
+            {
+                "file_name": "broken.txt",
+                "file_content": b"broken",
+                "file_type": "txt",
+            }
+        ],
+        chunk_size=1000,
+        chunk_overlap=200,
+        batch_size=32,
+        tasks_limit=3,
+        max_retries=3,
+    )
+
+    task_info = route.upload_tasks["upload-failed"]
+    assert task_info["status"] == "failed"
+    assert "broken.txt" in task_info["error"]
+    assert task_info["result"]["success_count"] == 0
+    assert task_info["result"]["failed_count"] == 1
 
     kb_helper.upload_document.side_effect = None
 

@@ -470,6 +470,7 @@ class LiveChatRoute(Route):
                         "enable_streaming": enable_streaming,
                         "message_id": message_id,
                         "llm_checkpoint_id": llm_checkpoint_id,
+                        "platform_history_id": "webchat",
                     },
                 ),
             )

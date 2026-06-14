@@ -71,11 +71,15 @@ dependencies = [
 [dependency-groups]
 dev = [
   "commitizen>=4.9.1",
+  "dc-engines",
   "pytest>=8.4.1",
   "pytest-asyncio>=1.1.0",
   "pytest-cov>=6.2.1",
   "ruff>=0.15.0",
 ]
+
+[tool.uv.sources]
+dc-engines = { path = "dc_engines", editable = true }
 
 [project.scripts]
 astrbot = "astrbot.cli.__main__:cli"

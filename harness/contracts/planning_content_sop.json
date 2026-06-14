@@ -15,7 +15,7 @@
     {
       "id": "planning-content-sop-003",
       "description": "Router metadata identifies planning mixed-media requests and marks missing materials before generation.",
-      "verification": "uv run pytest tests/router/test_router_core.py::test_content_sop_metadata_routes_planning_video_image_request -q"
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_content_sop_metadata_routes_planning_video_image_request -q"
     },
     {
       "id": "planning-content-sop-004",

@@ -87,6 +87,11 @@ PLUGIN_COMPONENT_TYPE_ORDER = {
     "listener": 4,
     "hook": 5,
 }
+_DC_HUB_PLUGIN_ID = "dc_hub"
+_DC_HUB_MANAGED_PLUGIN_RE = re.compile(
+    r"HubModule\(\s*[\"']([^\"']+)[\"']",
+    re.MULTILINE,
+)
 
 
 @dataclass
@@ -1259,11 +1264,35 @@ class PluginRoute(Route):
             logger.warning(f"获取插件安装时间失败 {plugin.name}: {exc!s}")
             return None
 
+    def _dc_hub_hidden_plugin_names(self) -> set[str]:
+        """Names hidden from AstrBot's outer plugin list because DC-HUB owns them.
+
+        This only affects the display list. Detail, lifecycle, and actual plugin
+        loading remain unchanged so DC-HUB can still manage every module.
+        """
+        dc_hub_main = (
+            Path(__file__).resolve().parents[3]
+            / "data"
+            / "plugins"
+            / "dc_hub"
+            / "main.py"
+        )
+        try:
+            source = dc_hub_main.read_text(encoding="utf-8")
+        except OSError:
+            return set()
+        names = set(_DC_HUB_MANAGED_PLUGIN_RE.findall(source))
+        names.discard(_DC_HUB_PLUGIN_ID)
+        return names
+
     async def get_plugins(self):
         _plugin_resp = []
         plugin_name = request.args.get("name")
+        hidden_by_dc_hub = set() if plugin_name else self._dc_hub_hidden_plugin_names()
         for plugin in self.plugin_manager.context.get_all_stars():
             if plugin_name and plugin.name != plugin_name:
+                continue
+            if not plugin_name and plugin.name in hidden_by_dc_hub:
                 continue
             logo_url = None
             if plugin.logo_path:

@@ -44,7 +44,7 @@ def test_truth_intake_runtime_contract_points_to_runtime_verifiers():
         "uv run pytest tests/test_computer_fs_tools.py::test_restricted_member_can_read_active_truth_intake_archive tests/test_computer_fs_tools.py::test_restricted_member_grep_defaults_include_active_truth_intake_archive -q",
         "uv run pytest tests/test_computer_fs_tools.py::test_restricted_member_broad_data_grep_narrows_to_active_truth_intake tests/test_computer_fs_tools.py::test_restricted_member_still_cannot_read_unrelated_data_path -q",
         "uv run pytest tests/test_harness_state_injector.py -q",
-        "uv run env PYTHONPATH=.:dc_engines pytest data/plugins/llm_router/test_dc_router_path.py -k truth_intake -q",
+        "uv run env PYTHONPATH=.:dc_engines pytest tests/dc_router/test_dispatch_pipeline.py -k truth_intake -q",
         "uv run env PYTHONPATH=.:dc_engines pytest dc_engines/tests/test_harness_lifecycle.py::test_merge_payload_updates_task_and_records_event dc_engines/tests/test_harness_lifecycle.py::test_merge_payload_rejects_terminal_task -q",
         "uv run pytest dc_engines/tests/harness_sensor_plugin_truth_intake_test.py::test_sensor_classifies_missing_materials_as_insufficient dc_engines/tests/harness_sensor_plugin_truth_intake_test.py::test_sensor_blocks_instead_of_completes_when_materials_are_insufficient -q",
     ]

@@ -79,6 +79,7 @@
     }
     .dot.alive { background: var(--green); box-shadow: 0 0 0 3px rgba(16,185,129,.18); }
     .dot.dead  { background: var(--red); }
+    .dot.warning { background: #f59e0b; }
     .row2 {
       color: var(--muted);
       font-size: 12.5px;
@@ -183,12 +184,22 @@
         $meta.textContent = `${entries.length} 个服务 · 探测于 ${fmtTime(t)}`;
 
         $grid.innerHTML = entries.map((e) => {
-          const alive = !!e.alive;
+          const availability = e.availability || (e.alive === true ? 'unknown' : e.alive === false ? 'offline' : 'unknown');
+          const alive = availability === 'ready';
+          const checking = availability === 'unknown';
+          const warning = availability === 'wrong_service' || availability === 'tcp_listening';
+          const statusLabel = alive ? '在线' : availability === 'wrong_service'
+            ? '服务不匹配'
+            : availability === 'tcp_listening'
+              ? '仅端口监听'
+              : checking
+                ? '检查中'
+                : '离线';
           const hasUrl = !!e.url;
           const hasKick = !!e.on_demand_kick;
           const url = browserLocalUrl(e.url);
           const kickUrl = browserLocalUrl(e.on_demand_kick);
-          const cardClasses = ['card', alive ? 'alive' : 'dead', hasUrl ? '' : 'no-url']
+          const cardClasses = ['card', alive ? 'alive' : 'dead', checking ? 'checking' : '', warning ? 'warning' : '', hasUrl ? '' : 'no-url']
             .filter(Boolean).join(' ');
 
           const actions = [];
@@ -213,7 +224,7 @@
               <div class="row1">
                 <span class="icon">${esc(e.icon || '⚙️')}</span>
                 <span class="name">${esc(e.name)}</span>
-                <span class="dot ${alive ? 'alive' : 'dead'}" title="${alive ? '在线' : '离线'}"></span>
+                <span class="dot ${alive ? 'alive' : warning ? 'warning' : 'dead'}" title="${statusLabel}"></span>
               </div>
               <div class="row2">${esc(e.hint || '')}</div>
               ${hasUrl ? `<div class="url">${esc(url)}</div>` : '<div class="url">（无 UI · 仅探活）</div>'}

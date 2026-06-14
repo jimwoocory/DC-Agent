@@ -1,13 +1,14 @@
 {
   "entries": {
     "type": "list",
-    "description": "要在 dashboard '系统入口' 页显示的服务列表。每条 dict：name / url / probe_host / probe_port / hint / icon / [on_demand_kick]",
+    "description": "要在 dashboard '系统入口' 页显示的服务列表。每条 dict：name / url / probe_host / probe_port / hint / icon / [health_url|health_path] / [health_body_contains] / [on_demand_kick]",
     "default": [
       {
         "name": "Hermes Agent 官方 WebUI",
         "url": "http://localhost:9119/",
         "probe_host": "127.0.0.1",
         "probe_port": 9119,
+        "health_path": "/",
         "hint": "Hermes Agent 官方 UI / sessions 列表",
         "icon": "🤖"
       },
@@ -16,6 +17,7 @@
         "url": "http://localhost:8787/",
         "probe_host": "127.0.0.1",
         "probe_port": 8787,
+        "health_path": "/",
         "hint": "EKKOLearnAI/hermes-web-ui 第三方界面",
         "icon": "💬"
       },
@@ -24,9 +26,28 @@
         "url": "http://localhost:4312/",
         "probe_host": "127.0.0.1",
         "probe_port": 4312,
+        "health_path": "/",
         "hint": "按需启动 / 看门狗 :9120/kick",
         "icon": "🖥️",
         "on_demand_kick": "http://localhost:9120/kick"
+      },
+      {
+        "name": "记忆治理",
+        "url": "/#/memory-governance",
+        "probe_host": null,
+        "probe_port": null,
+        "hint": "NAS / Obsidian 记忆治理看板",
+        "icon": "🧠",
+        "pinned": true
+      },
+      {
+        "name": "内容 SOP 运营",
+        "url": "/#/content-sop-ops",
+        "probe_host": null,
+        "probe_port": null,
+        "hint": "内容 SOP 规则、记忆和审计运营看板",
+        "icon": "📋",
+        "pinned": true
       },
       {
         "name": "Hermes Gateway",

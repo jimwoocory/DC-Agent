@@ -20,10 +20,78 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from astrbot.api import logger
 from astrbot.api.star import Context, Star, register
+
+DEFAULT_ENTRIES: list[dict] = [
+    {
+        "name": "Hermes Agent 官方 WebUI",
+        "url": "http://localhost:9119/",
+        "probe_host": "127.0.0.1",
+        "probe_port": 9119,
+        "health_path": "/",
+        "hint": "Hermes Agent 官方 UI / sessions 列表",
+        "icon": "🤖",
+    },
+    {
+        "name": "Hermes Agent 第三方 WebUI",
+        "url": "http://localhost:8787/",
+        "probe_host": "127.0.0.1",
+        "probe_port": 8787,
+        "health_path": "/",
+        "hint": "EKKOLearnAI/hermes-web-ui 第三方界面",
+        "icon": "💬",
+    },
+    {
+        "name": "OpenClaw",
+        "url": "http://localhost:4312/",
+        "probe_host": "127.0.0.1",
+        "probe_port": 4312,
+        "health_path": "/",
+        "hint": "按需启动 / 看门狗 :9120/kick",
+        "icon": "🖥️",
+        "on_demand_kick": "http://localhost:9120/kick",
+    },
+    {
+        "name": "Hermes Gateway",
+        "url": None,
+        "probe_host": "127.0.0.1",
+        "probe_port": 8644,
+        "hint": "Hermes webhook 网关（后端，无 UI）",
+        "icon": "🔌",
+    },
+    {
+        "name": "AstrBot Response 通道",
+        "url": None,
+        "probe_host": "127.0.0.1",
+        "probe_port": 8645,
+        "hint": "Hermes → AstrBot 回调端口",
+        "icon": "🔁",
+    },
+]
+
+PINNED_DASHBOARD_ENTRIES: list[dict] = [
+    {
+        "name": "记忆治理",
+        "url": "/#/memory-governance",
+        "probe_host": None,
+        "probe_port": None,
+        "hint": "NAS / Obsidian 记忆治理看板",
+        "icon": "🧠",
+        "pinned": True,
+    },
+    {
+        "name": "内容 SOP 运营",
+        "url": "/#/content-sop-ops",
+        "probe_host": None,
+        "probe_port": None,
+        "hint": "内容 SOP 规则、记忆和审计运营看板",
+        "icon": "📋",
+        "pinned": True,
+    },
+]
 
 
 @register(
@@ -36,50 +104,10 @@ class SystemEntriesPlugin(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
         cfg = config or {}
-        # 默认 4 个入口；通过 _conf_schema.json 可定制
-        self.entries: list[dict] = cfg.get("entries") or [
-            {
-                "name": "Hermes Agent 官方 WebUI",
-                "url": "http://localhost:9119/",
-                "probe_host": "127.0.0.1",
-                "probe_port": 9119,
-                "hint": "Hermes Agent 官方 UI / sessions 列表",
-                "icon": "🤖",
-            },
-            {
-                "name": "Hermes Agent 第三方 WebUI",
-                "url": "http://localhost:8787/",
-                "probe_host": "127.0.0.1",
-                "probe_port": 8787,
-                "hint": "EKKOLearnAI/hermes-web-ui 第三方界面",
-                "icon": "💬",
-            },
-            {
-                "name": "OpenClaw",
-                "url": "http://localhost:4312/",
-                "probe_host": "127.0.0.1",
-                "probe_port": 4312,
-                "hint": "按需启动 / 看门狗 :9120/kick",
-                "icon": "🖥️",
-                "on_demand_kick": "http://localhost:9120/kick",
-            },
-            {
-                "name": "Hermes Gateway",
-                "url": None,  # 后端服务，无 UI
-                "probe_host": "127.0.0.1",
-                "probe_port": 8644,
-                "hint": "Hermes webhook 网关（后端，无 UI）",
-                "icon": "🔌",
-            },
-            {
-                "name": "AstrBot Response 通道",
-                "url": None,
-                "probe_host": "127.0.0.1",
-                "probe_port": 8645,
-                "hint": "Hermes → AstrBot 回调端口",
-                "icon": "🔁",
-            },
-        ]
+        self.entries: list[dict] = _merge_entries(
+            cfg.get("entries") or DEFAULT_ENTRIES,
+            PINNED_DASHBOARD_ENTRIES,
+        )
         self.cache_ttl_seconds: int = int(cfg.get("cache_ttl_seconds", 5))
         self.watchdogctl_path: Path = Path(
             cfg.get(
@@ -132,16 +160,41 @@ class SystemEntriesPlugin(Star):
         if self._cache and now - self._cache_at < self.cache_ttl_seconds:
             return self._cache
 
-        # 并发探活各端口（TCP connect，0.5s 超时）
+        # Run probes concurrently; TCP alone is not service readiness.
         async def _probe(e):
             host = e.get("probe_host") or "127.0.0.1"
             port = int(e.get("probe_port") or 0)
             if not port:
-                return {**e, "alive": None}
+                return {**e, "alive": None, "availability": "unknown"}
             alive = await asyncio.get_event_loop().run_in_executor(
                 None, _tcp_alive, host, port
             )
-            return {**e, "alive": alive}
+            if not alive:
+                return {
+                    **e,
+                    "alive": False,
+                    "tcp_listening": False,
+                    "availability": "offline",
+                }
+            health_url = _entry_health_url(e, host, port)
+            if not health_url:
+                return {
+                    **e,
+                    "alive": True,
+                    "tcp_listening": True,
+                    "availability": "tcp_listening",
+                }
+            health_ready = await asyncio.get_event_loop().run_in_executor(
+                None, _http_health_ready, health_url, e
+            )
+            return {
+                **e,
+                "alive": health_ready,
+                "tcp_listening": True,
+                "health_url": health_url,
+                "health_ok": health_ready,
+                "availability": "ready" if health_ready else "wrong_service",
+            }
 
         entries_with_status = await asyncio.gather(*(_probe(e) for e in self.entries))
 
@@ -286,6 +339,92 @@ def _tcp_alive(host: str, port: int) -> bool:
             return True
     except (ConnectionRefusedError, OSError, TimeoutError):
         return False
+
+
+def _entry_health_url(entry: dict, host: str, port: int) -> str | None:
+    health_url = str(entry.get("health_url") or "").strip()
+    if health_url:
+        return health_url
+    health_path = str(entry.get("health_path") or "").strip()
+    if not health_path:
+        return None
+    if not health_path.startswith("/"):
+        health_path = f"/{health_path}"
+    scheme = str(entry.get("health_scheme") or "http").strip() or "http"
+    return f"{scheme}://{host}:{port}{health_path}"
+
+
+def _http_health_ready(url: str, entry: dict) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != "http" or not parsed.hostname:
+            return False
+        port = int(parsed.port or 80)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        with socket.create_connection((parsed.hostname, port), timeout=0.75) as sock:
+            sock.settimeout(0.75)
+            request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {parsed.hostname}:{port}\r\n"
+                "User-Agent: DC-Agent-system-entries-health\r\n"
+                "Connection: close\r\n\r\n"
+            )
+            sock.sendall(request.encode("ascii"))
+            payload = _recv_http_response(sock)
+        header, _, body = payload.partition(b"\r\n\r\n")
+        status_line = header.splitlines()[0].decode("ascii", errors="ignore")
+        parts = status_line.split()
+        if len(parts) < 2 or not parts[1].isdigit():
+            return False
+        if not _health_status_matches(int(parts[1]), entry):
+            return False
+        body_contains = str(entry.get("health_body_contains") or "")
+        if body_contains:
+            return body_contains in body.decode("utf-8", errors="ignore")
+        return True
+    except Exception:
+        return False
+
+
+def _recv_http_response(sock: socket.socket) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while total < 65536:
+        chunk = sock.recv(min(4096, 65536 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
+def _health_status_matches(status: int, entry: dict) -> bool:
+    expected = entry.get("health_status")
+    if expected is None:
+        expected = entry.get("health_status_code")
+    if expected is None:
+        expected = entry.get("health_status_codes")
+    if expected is None:
+        return 200 <= status < 400
+    if isinstance(expected, list):
+        return status in {int(item) for item in expected}
+    return status == int(expected)
+
+
+def _merge_entries(entries: list[dict], pinned_entries: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for entry in [*entries, *pinned_entries]:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        merged.append(entry)
+    return merged
 
 
 def _extract_query(request) -> dict[str, list[str]]:

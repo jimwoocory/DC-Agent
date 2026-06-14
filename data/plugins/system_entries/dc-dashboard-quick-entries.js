@@ -26,6 +26,20 @@
       alive: null,
       on_demand_kick: "http://localhost:9120/kick",
     },
+    {
+      name: "记忆治理",
+      url: "/#/memory-governance",
+      hint: "NAS / Obsidian 记忆治理看板",
+      alive: null,
+      pinned: true,
+    },
+    {
+      name: "内容 SOP 运营",
+      url: "/#/content-sop-ops",
+      hint: "内容 SOP 规则、记忆和审计运营看板",
+      alive: null,
+      pinned: true,
+    },
   ];
   var GROUPS = ["nas", "watchdog", "night", "sync", "dianchi-tech", "onboarding"];
   var GROUP_LABELS = {
@@ -130,6 +144,9 @@
       " .dcqe-link[data-state='offline'] .dcqe-dot{background:#ef4444;box-shadow:none}" +
       "#" +
       ROOT_ID +
+      " .dcqe-link[data-state='warning'] .dcqe-dot{background:#f59e0b;box-shadow:none}" +
+      "#" +
+      ROOT_ID +
       " .dcqe-panel{position:absolute;top:48px;right:0;width:min(900px,calc(100vw - 20px));max-height:min(680px,calc(100vh - 76px));overflow:auto;border:1px solid rgba(148,163,184,.36);border-radius:8px;background:rgba(255,255,255,.98);box-shadow:0 18px 50px rgba(15,23,42,.18);padding:14px;color:#0f172a}" +
       "#" +
       ROOT_ID +
@@ -187,22 +204,22 @@
       " .dcqe-pill{display:inline-flex;align-items:center;min-height:20px;border-radius:999px;padding:2px 8px;background:#e2e8f0;color:#334155;font-weight:650}" +
       "#" +
       ROOT_ID +
-      " .dcqe-pill[data-state*='disabled'],#" +
-      ROOT_ID +
-      " .dcqe-pill[data-state='PAUSED'],#" +
-      ROOT_ID +
-      " .dcqe-pill[data-state='not-installed'],#" +
-      ROOT_ID +
-      " .dcqe-pill[data-state='not-loaded']{background:#dcfce7;color:#166534}" +
-      "#" +
-      ROOT_ID +
       " .dcqe-pill[data-state*='enabled'],#" +
       ROOT_ID +
       " .dcqe-pill[data-state='ACTIVE'],#" +
       ROOT_ID +
       " .dcqe-pill[data-state='installed'],#" +
       ROOT_ID +
-      " .dcqe-pill[data-state='loaded']{background:#fee2e2;color:#991b1b}" +
+      " .dcqe-pill[data-state='loaded']{background:#dcfce7;color:#166534}" +
+      "#" +
+      ROOT_ID +
+      " .dcqe-pill[data-state*='disabled'],#" +
+      ROOT_ID +
+      " .dcqe-pill[data-state='PAUSED'],#" +
+      ROOT_ID +
+      " .dcqe-pill[data-state='not-installed'],#" +
+      ROOT_ID +
+      " .dcqe-pill[data-state='not-loaded']{background:#fef3c7;color:#92400e}" +
       "#" +
       ROOT_ID +
       " .dcqe-empty{font-size:12px;color:#64748b;padding:8px 0}" +
@@ -274,21 +291,35 @@
     document.head.appendChild(style);
   }
 
-  function stateName(alive) {
-    if (alive === true) return "online";
+  function stateName(alive, availability) {
+    if (availability === "ready") return "online";
+    if (availability === "offline") return "offline";
+    if (availability === "wrong_service" || availability === "tcp_listening")
+      return "warning";
+    if (availability) return "checking";
+    if (alive === true) return "checking";
     if (alive === false) return "offline";
     return "checking";
   }
 
-  function stateLabel(alive) {
-    if (alive === true) return "在线";
+  function stateLabel(alive, availability) {
+    if (availability === "ready") return "在线";
+    if (availability === "offline") return "离线";
+    if (availability === "wrong_service") return "服务不匹配";
+    if (availability === "tcp_listening") return "仅端口监听";
+    if (availability) return "检查中";
+    if (alive === true) return "检查中";
     if (alive === false) return "离线";
     return "检查中";
   }
 
   function visibleEntries() {
     return state.entries.filter(function (entry) {
-      return entry && entry.url && /Hermes.*WebUI|OpenClaw/i.test(entry.name || "");
+      return (
+        entry &&
+        entry.url &&
+        (entry.pinned === true || /Hermes.*WebUI|OpenClaw/i.test(entry.name || ""))
+      );
     });
   }
 
@@ -665,7 +696,7 @@
 
     entries.forEach(function (entry) {
       var link = document.createElement("a");
-      var status = stateLabel(entry.alive);
+      var status = stateLabel(entry.alive, entry.availability);
       var href =
         entry.alive === false && entry.on_demand_kick
           ? browserLocalUrl(entry.url)
@@ -674,7 +705,7 @@
       link.href = href;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
-      link.dataset.state = stateName(entry.alive);
+      link.dataset.state = stateName(entry.alive, entry.availability);
       link.title = (entry.hint || entry.name) + " - " + status;
 
       var dot = document.createElement("span");

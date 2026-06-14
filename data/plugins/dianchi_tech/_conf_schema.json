@@ -18,5 +18,10 @@
     "type": "int",
     "description": "API /recent 返最近几天的报告元信息",
     "default": 14
+  },
+  "max_report_age_days": {
+    "type": "int",
+    "description": "API /health 允许最近 report.md 作为健康状态的最大天数",
+    "default": 2
   }
 }

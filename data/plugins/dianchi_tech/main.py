@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from astrbot.api import logger
@@ -31,6 +32,7 @@ class DianchiTechPlugin(Star):
             cfg.get("data_root", "/Users/dianchi/DC-Agent/data/dianchi_tech")
         )
         self.recent_limit: int = int(cfg.get("recent_limit", 14))
+        self.max_report_age_days: int = int(cfg.get("max_report_age_days", 2))
         self.cai_ting_open_id: str = str(cfg.get("cai_ting_open_id", "") or "").strip()
         self.wiki_space_name: str = str(cfg.get("wiki_space_name", "DC-Agent 运维"))
 
@@ -141,7 +143,16 @@ class DianchiTechPlugin(Star):
     async def _api_health(self, *args, **kwargs):
         """看门狗探活用：检查最近一次跑得是否成功。"""
         if not self.data_root.exists():
-            return {"status": "ok", "message": "no data yet", "data": {"healthy": True}}
+            return {
+                "status": "warning",
+                "message": "no data yet",
+                "data": {
+                    "healthy": False,
+                    "reason": "no_data",
+                    "latest_report_date": None,
+                    "cai_ting_configured": bool(self.cai_ting_open_id),
+                },
+            }
 
         day_dirs = sorted(
             [d for d in self.data_root.iterdir() if d.is_dir() and len(d.name) == 10],
@@ -153,12 +164,42 @@ class DianchiTechPlugin(Star):
                 latest_report_date = d.name
                 break
 
+        if latest_report_date is None:
+            return {
+                "status": "warning",
+                "message": "no report found",
+                "data": {
+                    "healthy": False,
+                    "reason": "no_report",
+                    "latest_report_date": None,
+                    "cai_ting_configured": bool(self.cai_ting_open_id),
+                },
+            }
+
+        report_age_days = (date.today() - date.fromisoformat(latest_report_date)).days
+        if report_age_days > self.max_report_age_days:
+            return {
+                "status": "warning",
+                "message": "latest report is stale",
+                "data": {
+                    "healthy": False,
+                    "reason": "stale_report",
+                    "latest_report_date": latest_report_date,
+                    "report_age_days": report_age_days,
+                    "max_report_age_days": self.max_report_age_days,
+                    "cai_ting_configured": bool(self.cai_ting_open_id),
+                },
+            }
+
         return {
             "status": "ok",
             "message": None,
             "data": {
-                "healthy": latest_report_date is not None,
+                "healthy": True,
+                "reason": "latest_report_available",
                 "latest_report_date": latest_report_date,
+                "report_age_days": report_age_days,
+                "max_report_age_days": self.max_report_age_days,
                 "cai_ting_configured": bool(self.cai_ting_open_id),
             },
         }

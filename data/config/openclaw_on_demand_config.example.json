@@ -1,0 +1,15 @@
+{
+  "openclaw_cwd": "/path/to/openclaw-control-center",
+  "openclaw_port": 4312,
+  "kick_port": 9120,
+  "idle_timeout_seconds": 7200,
+  "startup_wait_seconds": 30,
+  "openclaw_health_path": "/",
+  "openclaw_health_body_contains": "OpenClaw",
+  "npm_cmd": [
+    "npm",
+    "run",
+    "dev:ui"
+  ],
+  "log_dir": "/path/to/DC-Agent/logs/openclaw-control-center"
+}

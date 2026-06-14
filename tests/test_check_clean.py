@@ -57,10 +57,6 @@ def test_config_templates_are_allowed_in_status() -> None:
 
 def test_reviewed_live_configs_are_allowed_when_staged() -> None:
     assert (
-        violation_for("data/config/openclaw_on_demand_config.json", source="staged")
-        is None
-    )
-    assert (
         violation_for("data/config/system_entries_config.json", source="staged")
         is None
     )
@@ -88,6 +84,10 @@ def test_sensitive_config_guard_requires_template_suffix() -> None:
     assert violation_for("data/config/template_secret.yaml", source="status") is None
     assert (
         violation_for("data/config/example_config.template.json", source="staged")
+        == "sensitive local config change"
+    )
+    assert (
+        violation_for("data/config/openclaw_on_demand_config.json", source="staged")
         == "sensitive local config change"
     )
 

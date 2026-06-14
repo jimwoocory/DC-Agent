@@ -89,7 +89,6 @@ dashboard/bun.lock
 !data/plugins/
 !data/plugins/**
 !data/config/
-!data/config/openclaw_on_demand_config.json
 !data/feishu_whitelist.example.yaml
 
 # Treat config as sensitive by default; explicitly unignore reviewed templates/configs.
@@ -105,7 +104,6 @@ data/config/*.key
 !data/config/*.example.yaml
 !data/config/*.example.yml
 !data/config/knowledge_cycle.env
-!data/config/openclaw_on_demand_config.json
 !data/config/system_entries_config.json
 
 # 再 ignore 我们的 plugin 下的 __pycache__ / pyc

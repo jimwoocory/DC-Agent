@@ -1,15 +1,10 @@
-"""LLM 回复自动渲染成飞书 interactive card。
+"""Render LLM replies as Feishu interactive cards.
 
-关键钩子：`@filter.on_decorating_result()` —— LLM 出 result 后、AstrBot
-还没发出去之前介入。
+The decoration hook runs after the LLM produces a result and before AstrBot
+sends it, allowing this plugin to finalize a waiting card or render a fallback
+card while consuming the original text result.
 
-流程：
-1. LLM 排队/调用前为任务类请求发等待卡；闲聊保持飞书原生气泡
-2. LLM 出结果后优先把等待卡 finalize 成回复卡，**清空原 result**
-   避免 AstrBot 重复发纯文本
-3. 若没有等待卡，则长结构化内容仍会兜底转卡片
-
-只对 lark 平台生效（需要 feishu_streamers 已挂在 context 上）。
+Only applies to Lark platforms with ``feishu_streamers`` mounted on context.
 """
 
 from __future__ import annotations
@@ -37,24 +32,25 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
+from astrbot.core.message.message_event_result import ResultContentType
 
-# 占位卡 stream_id 在 event 上的 key（on_llm_request 写入，on_decorating_result 读）
+# Event key for the waiting-card stream id.
 _STREAM_KEY = "_daily_card_thinking_stream_id"
 _BRIEF_KEY = "_daily_card_user_brief"
 
-# 等待卡只给明确任务使用；普通闲聊用飞书原生气泡更自然。
+# Waiting cards are reserved for task-like requests.
 MIN_THINKING_PLACEHOLDER_CHARS = 1
 
-# 触发卡片渲染的最小字符数（降低门槛让中等长度也享受卡片）
+# Minimum text length for structured-card fallback.
 MIN_CARD_CHARS = 150
 
-# 结构化 markdown 标记（任一存在就视为长结构化内容）
+# Structured markdown markers.
 _STRUCTURE_MARKERS = re.compile(
     r"^#{1,4} |\*\*[^*]+\*\*|^\|.+\|.+\||^- |^\d+\. |^> ",
     re.MULTILINE,
 )
 
-# 给 LLM 的格式偏好（注入到 system_prompt 尾部，鼓励多用 markdown）
+# Format preference appended to the system prompt.
 _FORMAT_HINT = (
     "\n\n## 📋 回复格式偏好（飞书展示用）\n"
     "- 超过 80 字的回复，请用 markdown 结构化：用 `## 章节标题` 分块、"
@@ -66,14 +62,109 @@ _FORMAT_HINT = (
 
 
 def _is_card_worthy(text: str) -> bool:
-    """判断是否值得渲染成卡片：长度 ≥ 150 + 至少 1 个结构化标记。"""
+    """Return whether a reply should be rendered as a structured card."""
     if not text or len(text) < MIN_CARD_CHARS:
         return False
     return bool(_STRUCTURE_MARKERS.search(text))
 
 
+def _strip_model_thinking(text: str) -> str:
+    """Strip likely internal thinking or reasoning preambles."""
+    if not text or len(text) < 80:
+        return text
+
+    lines = text.split("\n")
+    if len(lines) < 3:
+        return text
+
+    first_line = lines[0].strip()
+    # Detect likely thinking preambles.
+    thinking_prefixes = (
+        "i will",
+        "i'm going to",
+        "i am going to",
+        "let me",
+        "我来",
+        "我将",
+    )
+    if not any(first_line.lower().startswith(p) for p in thinking_prefixes):
+        return text
+
+    # Find the boundary between thinking text and the user-facing reply.
+    boundary = None
+    for i in range(len(lines) - 1):
+        curr = lines[i].rstrip()
+        nxt = lines[i + 1].strip()
+
+        if curr.endswith((".", "?")) and nxt:
+            if "\u4e00" <= nxt[0] <= "\u9fff":
+                boundary = i
+                break
+            if nxt[0].isupper() and not nxt.startswith("/") and not nxt.startswith("`"):
+                boundary = i
+                break
+
+    if boundary is None:
+        first_p = lines[0]
+        has_file_path = bool(re.search(r"/[Uu]sers/|/data/|/DC-|/astrbot", first_p))
+        ends_with_reason = bool(
+            re.search(
+                r"\bto (understand|see|check|verify|find|determine)\b",
+                first_p,
+                re.IGNORECASE,
+            )
+        )
+        if has_file_path or ends_with_reason:
+            return text
+        return text
+
+    remaining_lines = lines[boundary + 1 :]
+    if len(remaining_lines) < 2:
+        return text
+
+    result_text = "\n".join(remaining_lines).strip()
+    logger.debug(
+        "[daily_card_renderer] stripped thinking block (%d lines → %d lines, %d → %d chars)",
+        len(lines),
+        len(remaining_lines),
+        len(text),
+        len(result_text),
+    )
+    return result_text
+
+
+def _rebuild_streamer_from_event(event: AstrMessageEvent, context):
+    """Rebuild a missing streamer from context.platform_manager as fallback."""
+    from dc_engines.feishu_card_streamer.streamer import FeishuCardStreamer
+
+    try:
+        platform_manager = getattr(context, "platform_manager", None)
+        if not platform_manager:
+            return None
+        platform_insts = getattr(platform_manager, "platform_insts", None) or []
+        for inst in platform_insts:
+            lark_api = getattr(inst, "lark_api", None)
+            if lark_api is not None:
+                platform_id = event.get_platform_id() or ""
+                streamer = FeishuCardStreamer(lark_api)
+                # Register it back onto context for later calls.
+                streamers = getattr(context, "feishu_streamers", None) or {}
+                if not isinstance(streamers, dict):
+                    streamers = {}
+                streamers[platform_id] = streamer
+                context.feishu_streamers = streamers  # type: ignore[attr-defined]
+                logger.info(
+                    "[daily_card_renderer] 重建 streamer 成功 platform=%s",
+                    platform_id,
+                )
+                return streamer
+    except Exception:
+        pass
+    return None
+
+
 def _extract_title(text: str) -> str | None:
-    """从 markdown 抽第一个 # 标题作为卡片头部。没有则返 None。"""
+    """Extract the first markdown heading as the card title."""
     for line in text.split("\n", 5):
         s = line.strip()
         if s.startswith("# "):
@@ -84,7 +175,7 @@ def _extract_title(text: str) -> str | None:
 
 
 def _should_use_waiting_card(event: AstrMessageEvent) -> bool:
-    intent = str(event.get_extra("llm_router_intent") or "").strip()
+    intent = str(event.get_extra("dc_router_intent") or "").strip()
     return should_start_waiting_card(
         intent=intent,
         message=event.message_str or "",
@@ -93,11 +184,17 @@ def _should_use_waiting_card(event: AstrMessageEvent) -> bool:
 
 
 def _should_render_casual_card(event: AstrMessageEvent, text: str) -> bool:
-    intent = str(event.get_extra("llm_router_intent") or "").strip()
+    intent = str(event.get_extra("dc_router_intent") or "").strip()
     return should_render_casual_reply_card(
         intent=intent,
         message=event.message_str or "",
     )
+
+
+def _consume_rendered_result(result) -> None:
+    """Mark an already-rendered model result as consumed by card delivery."""
+    result.chain.clear()
+    result.set_result_content_type(ResultContentType.GENERAL_RESULT)
 
 
 @register(
@@ -107,9 +204,16 @@ def _should_render_casual_card(event: AstrMessageEvent, text: str) -> bool:
     "1.1.0",
 )
 class DailyCardRendererPlugin(Star):
+    # Plugin-level dedup consumes duplicate results so AstrBot does not send
+    # them as plain text. The streamer also dedupes duplicate patch calls.
+    _FINALIZED_DEDUP_CAP = 1024
+
     def __init__(self, context: Context) -> None:
         super().__init__(context)
         self._log_card_system_health()
+        # Track finalized stream ids so later re-entry consumes the result
+        # without recording a false plain-text fallback.
+        self._finalized_stream_ids: dict[str, None] = {}
 
     def _log_card_system_health(self) -> None:
         report = run_card_system_health()
@@ -121,8 +225,8 @@ class DailyCardRendererPlugin(Star):
             )
             return
         failed = [name for name, ok in report.checks.items() if not ok]
-        logger.error(
-            "[card_system] health FAILED: %s details=%s",
+        logger.warning(
+            "[card_system] health CHECK FAILED (non-blocking): %s details=%s",
             ", ".join(failed),
             report.details,
         )
@@ -193,45 +297,46 @@ class DailyCardRendererPlugin(Star):
         self,
         event: AstrMessageEvent,
     ) -> None:
-        """LLM 排队等锁前发等待卡，避免锁等待期间没有任何视觉反馈。"""
+        """Send a waiting card before queue/lock waits when needed."""
         await self._start_thinking_card_if_needed(event)
 
-    @filter.on_llm_request()
+    @filter.on_llm_request(priority=10)
     async def inject_format_preference_and_ensure_thinking_card(
         self,
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
-        """LLM 调用前两件事：
-        1. 注入「回复用 markdown 结构化」偏好（鼓励 LLM 出长结构化内容）
-        2. 兜底确保"思考中"卡片已创建 —— 兼容绕过等待钩子的旧路径
-        """
+        """Inject formatting preference and ensure the waiting card exists."""
         req.system_prompt = (req.system_prompt or "") + _FORMAT_HINT
         await self._start_thinking_card_if_needed(event)
 
-    @filter.on_decorating_result()
+    @filter.on_decorating_result(priority=30)
     async def finalize_or_render_card(
         self,
         event: AstrMessageEvent,
     ) -> None:
-        """LLM 出结果后：
-        - 有占位卡（_STREAM_KEY 已存）→ finalize 替换为结果卡 + clear 原 result
-        - 没占位卡 + 长结构化内容 → 异步发新卡 + clear 原 result
-        - 没占位卡 + 短内容 → 不动，让 AstrBot 默认发纯文本
-        """
+        """Finalize waiting cards or render a fallback card for the LLM result."""
         platform_id = event.get_platform_id() or ""
         if not platform_id:
+            logger.warning("[daily_card_renderer] 无法获取 platform_id，跳过卡片渲染")
             return
         streamers = ensure_streamers_on_context(self.context)
         streamer = streamers.get(platform_id)
         if streamer is None:
-            return
+            streamer = _rebuild_streamer_from_event(event, self.context)
+            if streamer is None:
+                logger.warning(
+                    "[daily_card_renderer] streamer 缺失（platform=%s），跳过卡片渲染。文本将裸发。"
+                    " 如此消息频繁出现请检查 platform_manager 是否正确加载飞书平台。",
+                    platform_id,
+                )
+                return
 
         result = event.get_result()
         if not result or not result.chain:
             return
 
-        # 抽 Plain 文本
+        # Extract Plain text.
         plain_parts: list[str] = []
         for comp in result.chain:
             if isinstance(comp, Plain):
@@ -240,10 +345,25 @@ class DailyCardRendererPlugin(Star):
         if not full_text:
             return
 
-        # ─── 优先：有占位卡 → finalize 替换（所有长度都走这里，体验一致）───
+        # Strip internal thinking before deciding which card to render.
+        full_text = _strip_model_thinking(full_text)
+
+        # Prefer finalizing an existing waiting card.
         stream_id = event.get_extra(_STREAM_KEY)
         if stream_id:
-            # 判断头部颜色 + 标题
+            # Multi-turn LLM flows can re-enter this hook with the same stream.
+            # Consume duplicate results instead of recording false fallbacks.
+            if stream_id in self._finalized_stream_ids:
+                logger.debug(
+                    "[daily_card_renderer] 重复 finalize 跳过 (dedup hit) "
+                    "stream_id=%s full_text_len=%d",
+                    stream_id,
+                    len(full_text),
+                )
+                _consume_rendered_result(result)
+                return
+
+            # Choose header color and title.
             title = _extract_title(full_text) or "巅池-Agent小助手"
             header_color = "blue"
             first200 = full_text[:200]
@@ -267,9 +387,12 @@ class DailyCardRendererPlugin(Star):
             )
             if not ok:
                 return
-            # clear 原 result 避免重复发纯文本
-            result.chain.clear()
-            result.chain.append(Plain(""))
+            # Remember finalized streams with FIFO eviction.
+            if len(self._finalized_stream_ids) >= self._FINALIZED_DEDUP_CAP:
+                oldest = next(iter(self._finalized_stream_ids))
+                self._finalized_stream_ids.pop(oldest, None)
+            self._finalized_stream_ids[stream_id] = None
+            _consume_rendered_result(result)
             logger.info(
                 "[daily_card_renderer] 占位卡 finalize message_id=%s len=%d",
                 stream_id,
@@ -277,14 +400,13 @@ class DailyCardRendererPlugin(Star):
             )
             return
 
-        # ─── 闲聊：不走任务等待卡，但回复仍用轻量闲聊卡渲染 ───
-        if _should_render_casual_card(event, full_text):
+        async def _send_casual_card(detail: str) -> bool:
             raw_msg = getattr(event.message_obj, "raw_message", None)
             chat_id = getattr(raw_msg, "chat_id", None) or ""
             if not chat_id:
                 chat_id = event.get_group_id() or event.get_sender_id() or ""
             if not chat_id:
-                return
+                return False
             receive_id_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
             card = build_casual_response_card(
                 content_md=full_text,
@@ -299,26 +421,33 @@ class DailyCardRendererPlugin(Star):
                 card=card,
                 platform_id=platform_id,
                 event="start",
-                detail="daily renderer casual reply",
+                detail=detail,
             )
             if not stream:
-                return
+                return False
             s = streamer.get_stream(stream.message_id)
             if s:
                 s.finalized = True
 
-            result.chain.clear()
-            result.chain.append(Plain(""))
+            _consume_rendered_result(result)
             logger.info(
-                "[daily_card_renderer] 闲聊转卡片 platform=%s chat=%s len=%d",
+                "[daily_card_renderer] 轻量回复转卡片 platform=%s chat=%s len=%d detail=%s",
                 platform_id,
                 chat_id[:20],
                 len(full_text),
+                detail,
             )
+            return True
+
+        # Casual replies skip waiting cards but still render lightweight cards.
+        if _should_render_casual_card(event, full_text):
+            await _send_casual_card("daily renderer casual reply")
             return
 
-        # ─── 无占位卡（例如短任务没触发占位）→ 走旧的"长内容才转卡片"逻辑 ───
+        # Without a waiting card, long replies use detailed cards and short
+        # replies use lightweight cards.
         if not _is_card_worthy(full_text):
+            await _send_casual_card("daily renderer short reply fallback")
             return
 
         raw_msg = getattr(event.message_obj, "raw_message", None)
@@ -358,8 +487,7 @@ class DailyCardRendererPlugin(Star):
         if s:
             s.finalized = True
 
-        result.chain.clear()
-        result.chain.append(Plain(""))
+        _consume_rendered_result(result)
         logger.info(
             "[daily_card_renderer] 长回复转卡片 platform=%s chat=%s len=%d title=%r",
             platform_id,

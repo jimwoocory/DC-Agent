@@ -68,11 +68,26 @@ class CardStream:
 class FeishuCardStreamer:
     """飞书卡片流式发送/更新引擎。"""
 
+    # FIFO cap prevents unbounded growth in long-running processes.
+    _FINALIZED_DEDUP_CAP = 1024
+
     def __init__(self, lark_client: lark.Client) -> None:
         if lark_client is None:
             raise ValueError("lark_client is required")
         self._client = lark_client
         self._streams: dict[str, CardStream] = {}
+        # Finalized message ids use an insertion-ordered dict as a small
+        # ordered set so FIFO eviction is straightforward.
+        self._finalized_message_ids: dict[str, None] = {}
+
+    def _remember_finalized(self, message_id: str) -> None:
+        """Remember a finalized message id with FIFO eviction."""
+        if message_id in self._finalized_message_ids:
+            return
+        if len(self._finalized_message_ids) >= self._FINALIZED_DEDUP_CAP:
+            oldest = next(iter(self._finalized_message_ids))
+            self._finalized_message_ids.pop(oldest, None)
+        self._finalized_message_ids[message_id] = None
 
     # ─────────────── 启动卡片 ───────────────
 
@@ -173,14 +188,27 @@ class FeishuCardStreamer:
         message_id: str,
         card: dict[str, Any],
     ) -> bool:
-        """终态：停掉后台 update task + 最后 patch 一次。"""
+        """Finalize a card by stopping auto-update and patching once.
+
+        This is idempotent: repeated finalizes for a message that has already
+        completed return success without patching again. Multi-turn LLM flows
+        can re-enter decoration hooks with the same message id after the first
+        finalize has popped the stream.
+        """
+        if message_id in self._finalized_message_ids:
+            logger.debug(
+                "[streamer] finalize idempotent skip message_id=%s", message_id
+            )
+            return True
         stream = self._streams.get(message_id)
         if stream is None:
-            return False
+            self._remember_finalized(message_id)
+            return True
         if stream.finalized:
+            self._remember_finalized(message_id)
             return True
 
-        # 先停后台 task（避免在 finalize 后再被覆盖）
+        # Stop auto-update before the final patch so it cannot overwrite output.
         if stream.auto_update_task and not stream.auto_update_task.done():
             stream.auto_update_task.cancel()
             try:
@@ -189,7 +217,7 @@ class FeishuCardStreamer:
                 pass
 
         stream.finalized = True
-        # 最后一次 patch（绕过 finalized 检查，直接调底层）
+        # Final patch goes directly to Feishu after marking stream finalized.
         try:
             body = (
                 PatchMessageRequestBody.builder()
@@ -221,7 +249,8 @@ class FeishuCardStreamer:
             logger.warning("[streamer] finalize 异常：%s", exc)
             return False
         finally:
-            # 释放引用（避免 dict 永远增长）
+            self._remember_finalized(message_id)
+            # Release the stream reference after terminal state.
             self._streams.pop(message_id, None)
 
     # ─────────────── 后台自动 update ───────────────

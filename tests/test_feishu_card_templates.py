@@ -5,6 +5,7 @@ from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
     build_antigravity_queue_card,
     build_case_overview_card,
+    build_casual_response_card,
     build_daily_response_card,
     build_deleted_skill_list_card,
     build_devops_status_card,
@@ -78,6 +79,21 @@ def test_daily_response_card_uses_stable_heading_sizes():
     assert sizes == ["heading_1", "heading_2", "heading_3", "normal"]
 
 
+def test_casual_response_card_renders_user_quote_inside_card():
+    card = build_casual_response_card(
+        content_md="刚才模型返回了空内容，我已收到消息。请您再发一次。",
+        user_msg="好像这几天柳州的汛期来了，都是狂风暴雨",
+    )
+
+    body = _body_elements(card)
+
+    assert body[0]["tag"] == "markdown"
+    assert body[0]["text_size"] == "notation"
+    assert "回复：好像这几天柳州的汛期来了，都是狂风暴雨" in body[0]["content"]
+    assert body[1]["tag"] == "hr"
+    assert body[2]["content"] == "刚才模型返回了空内容，我已收到消息。请您再发一次。"
+
+
 def test_daily_response_card_centers_compact_markdown_tables():
     card = build_daily_response_card(
         content_md=(
@@ -123,6 +139,93 @@ def test_progress_card_pulse_changes_with_elapsed_time():
     assert "任务进度" in first_progress
     assert "⏱️已等待" in first_progress
     assert waiting_track(0) != waiting_track(3)
+
+
+def test_progress_card_routes_first_reply_to_memory_loading_hub_branch_then_task_card():
+    memory_card = build_progress_card(
+        title="任务推理中",
+        brief="最近柳州的汛期来了，好像还有台风预警",
+        elapsed_sec=9,
+        current_stage="正在调用知识库检索：柳州汛期、台风预警",
+    )
+    task_card = build_progress_card(
+        title="任务推理中",
+        brief="最近柳州的汛期来了，好像还有台风预警",
+        elapsed_sec=12,
+        current_stage="任务推理中（这个问题稍复杂）",
+    )
+
+    contents = _markdown_contents(memory_card)
+    joined = "\n".join(contents)
+    task_joined = "\n".join(_markdown_contents(task_card))
+
+    assert memory_card["header"]["title"]["content"] == "🧠 DC-Agent 记忆系统"
+    assert "DC-Agent 记忆系统加载中" in joined
+    assert "知识库 · 柳州汛期、台风预警" in joined
+    assert "加载进度" in joined
+    assert "5%" in joined
+    assert "已等待 9 秒" in joined
+    assert "正在调用知识库检索" not in joined
+    assert "任务推理中" not in joined
+    assert "任务进度" not in joined
+    assert "中等推理" not in joined
+    assert not any(
+        content.startswith("<font color='red'>Running") for content in contents
+    )
+
+    stage_blocks = [
+        element
+        for element in _body_elements(memory_card)
+        if element.get("tag") == "markdown"
+        and "DC-Agent 记忆系统加载中" in element.get("content", "")
+    ]
+    assert len(stage_blocks) == 1
+    assert stage_blocks[0]["text_size"] == "notation"
+
+    body = _body_elements(memory_card)
+    first_markdown = next(
+        element for element in body if element.get("tag") == "markdown"
+    )
+    divider_index = next(
+        index for index, element in enumerate(body) if element.get("tag") == "hr"
+    )
+    title_index = next(
+        index
+        for index, element in enumerate(body)
+        if element.get("tag") == "markdown"
+        and element.get("content") == "**读取知识库和记忆**"
+    )
+    progress_index = next(
+        index
+        for index, element in enumerate(body)
+        if element.get("tag") == "markdown" and "加载进度" in element.get("content", "")
+    )
+    assert (
+        first_markdown["content"]
+        == "<font color='grey'>最近柳州的汛期来了，好像还有台风预警</font>"
+    )
+    assert divider_index < title_index < progress_index
+    assert body[progress_index]["text_size"] == "heading_3"
+
+    assert "DC-Agent 记忆系统加载中" not in task_joined
+    assert "任务推理中（这个问题稍复杂）" in task_joined
+    assert task_card["header"]["title"]["content"] == "🚀 任务推理中"
+
+
+def test_progress_card_keeps_default_hub_branch_for_non_memory_work():
+    card = build_progress_card(
+        title="任务推理中",
+        brief="帮我写一段端午客户微信问候话术",
+        elapsed_sec=9,
+        current_stage="任务推理中（这个问题稍复杂）",
+    )
+
+    contents = _markdown_contents(card)
+    joined = "\n".join(contents)
+
+    assert "DC-Agent 记忆系统加载中" not in joined
+    assert "任务推理中（这个问题稍复杂）" in joined
+    assert any(content.startswith("<font color='red'>Running") for content in contents)
 
 
 def test_antigravity_queue_card_uses_real_queue_fields_and_fallback_button():

@@ -335,6 +335,83 @@ def smart_thinking_hint(elapsed_sec: float) -> str:
     return "超长任务处理中"
 
 
+_KNOWLEDGE_STAGE_RE = re.compile(r"(知识库|资料|文档|检索|引用|来源)")
+_KNOWLEDGE_STAGE_PREFIX_RE = re.compile(
+    r"^(正在|已|开始)?(调用|查询|检索|读取)?(知识库|资料|文档|来源)?(检索)?[：:，,\s]*"
+)
+_WAITING_HUB_BRANCH_MEMORY_LOADING = "memory_loading"
+
+
+def _is_knowledge_stage(stage: str) -> bool:
+    return bool(_KNOWLEDGE_STAGE_RE.search(stage or ""))
+
+
+def _knowledge_stage_summary(stage: str) -> str:
+    cleaned = _KNOWLEDGE_STAGE_PREFIX_RE.sub("", stage.strip(), count=1).strip()
+    return cleaned or "公司知识库"
+
+
+def _waiting_hub_branch(stage: str) -> str:
+    if _is_knowledge_stage(stage):
+        return _WAITING_HUB_BRANCH_MEMORY_LOADING
+    return "default"
+
+
+def _memory_loading_stage_element(
+    stage: str, *, elapsed_sec: float = 0
+) -> dict[str, Any]:
+    summary = _safe_md(_knowledge_stage_summary(stage), 80)
+    content = (
+        f"{waiting_pulse(elapsed_sec)} {_ink('DC-Agent 记忆系统加载中')} · "
+        f"{_muted('知识库 · ' + summary)} ›"
+    )
+    return _md(content, "notation")
+
+
+def _waiting_hub_stage_element(stage: str, *, elapsed_sec: float = 0) -> dict[str, Any]:
+    """Render one branch inside the waiting-card HUB."""
+    branch = _waiting_hub_branch(stage)
+    if branch == _WAITING_HUB_BRANCH_MEMORY_LOADING:
+        return _memory_loading_stage_element(stage, elapsed_sec=elapsed_sec)
+    return _activity_line("Running", _safe_md(stage, 200), WARNING_RED)
+
+
+def _build_memory_loading_hub_card(
+    *,
+    brief: str,
+    current_stage: str,
+    elapsed_sec: float = 0,
+) -> dict[str, Any]:
+    summary = _safe_md(_knowledge_stage_summary(current_stage), 80)
+    bar = progress_bar(elapsed_sec)
+    progress_line = (
+        f"{waiting_pulse(elapsed_sec)} {_ink('读取知识库和记忆')} · "
+        f"{_muted('加载进度')} **{bar}** · "
+        f"{_muted('⏱️已等待 ' + _format_elapsed(elapsed_sec))}"
+    )
+    loading_line = (
+        f"{_ink('DC-Agent 记忆系统加载中')} · {_muted('知识库 · ' + summary)} ›"
+    )
+    elements: list[dict[str, Any]] = [
+        _md(_muted(_safe_md(brief, 200)), "normal"),
+        {"tag": "hr"},
+        _md("**读取知识库和记忆**", "heading_2"),
+        _md(_status_dot("正在读取知识库和长期记忆", KAMI_INK), "notation"),
+        _md(progress_line, "heading_3"),
+        _md(loading_line, "notation"),
+        _md(_muted("加载完成后会进入任务推理卡。"), "notation"),
+    ]
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True, "wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "🧠 DC-Agent 记忆系统"},
+            "template": "indigo",
+        },
+        "body": {"elements": elements},
+    }
+
+
 # ─────────────────────────── 1. 进度卡片（运行中）───────────────────────────
 
 
@@ -353,6 +430,16 @@ def build_progress_card(
     eta_text: str | None = None,
 ) -> dict[str, Any]:
     """长任务运行中的进度卡片（自适应进度条 + 推理级别友好显示）。"""
+    if (
+        current_stage
+        and _waiting_hub_branch(current_stage) == _WAITING_HUB_BRANCH_MEMORY_LOADING
+    ):
+        return _build_memory_loading_hub_card(
+            brief=brief,
+            current_stage=current_stage,
+            elapsed_sec=elapsed_sec,
+        )
+
     bar = progress_bar(elapsed_sec, estimated_sec)
     hint = smart_thinking_hint(elapsed_sec)
     progress_line = (
@@ -422,7 +509,7 @@ def build_progress_card(
 
     if current_stage:
         elements.append(
-            _activity_line("Running", _safe_md(current_stage, 200), WARNING_RED)
+            _waiting_hub_stage_element(current_stage, elapsed_sec=elapsed_sec)
         )
 
     elements.append(
@@ -3041,10 +3128,21 @@ def build_casual_response_card(
     """轻量闲聊卡片：不显示任务、模型、进度，只保留对话感。"""
     content = str(content_md or "").strip()
     has_structure = bool(CASUAL_STRUCTURE_RE.search(content))
+    elements: list[dict[str, Any]] = []
+    quoted_user_msg = str(user_msg or "").strip()
+    if quoted_user_msg:
+        quote = _safe_md(quoted_user_msg.replace("\n", " "), 240)
+        elements.extend(
+            [
+                _md(_muted(f"回复：{quote}"), "notation"),
+                {"tag": "hr"},
+            ]
+        )
+
     if len(content) <= 180 and not has_structure:
-        elements: list[dict[str, Any]] = [_md(content, "normal")]
+        elements.append(_md(content, "normal"))
     else:
-        elements = _md_blocks_from_text(content, max_chars=2400)
+        elements.extend(_md_blocks_from_text(content, max_chars=2400))
 
     if footer_hint:
         elements.append(_md(_muted(footer_hint), "notation"))

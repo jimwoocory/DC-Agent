@@ -61,6 +61,9 @@ class OnboardingGuidePlugin(Star):
         super().__init__(context)
 
     async def on_message(self, event: AstrMessageEvent) -> None:
+        if self._employee_onboarding_active():
+            return
+
         umo = event.unified_msg_origin
 
         state = await sp.get_async(
@@ -143,3 +146,10 @@ class OnboardingGuidePlugin(Star):
             key=_SP_KEY_SESSION,
             value=session_config,
         )
+
+    def _employee_onboarding_active(self) -> bool:
+        get_registered_star = getattr(self.context, "get_registered_star", None)
+        if not callable(get_registered_star):
+            return False
+        star = get_registered_star("employee_onboarding")
+        return bool(getattr(star, "activated", False))

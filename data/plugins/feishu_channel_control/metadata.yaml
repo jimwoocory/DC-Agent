@@ -1,0 +1,7 @@
+name: feishu_channel_control
+desc: OpenClaw-style Feishu/Lark channel governance for DC-Agent
+author: dc_agent
+version: 0.1.0
+repo: ""
+platform:
+  - lark

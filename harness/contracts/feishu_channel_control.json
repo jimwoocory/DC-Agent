@@ -1,0 +1,52 @@
+{
+  "feature": "feishu_channel_control",
+  "goal": "Provide OpenClaw-style Feishu/Lark channel governance as a native DC-Agent AstrBot plugin that integrates with dc_hub, feishu_hub users, card callbacks, and downstream router metadata without replacing the Lark adapter.",
+  "runtime_wiring": {
+    "plugin_file": "data/plugins/feishu_channel_control/main.py",
+    "engine_file": "dc_engines/dc_engines/feishu_channel_control.py",
+    "hub_file": "data/plugins/dc_hub/main.py",
+    "state_file_default": "data/config/feishu_channel_control_state.json",
+    "event_metadata_keys": [
+      "feishu_channel_allowed",
+      "feishu_channel_peer_kind",
+      "feishu_channel_peer_id",
+      "feishu_channel_agent_id",
+      "feishu_channel_workspace",
+      "feishu_channel_policy_reason"
+    ],
+    "policies": [
+      "dmPolicy",
+      "groupPolicy",
+      "allowFrom",
+      "groupAllowFrom",
+      "requireMention",
+      "trusted card action"
+    ]
+  },
+  "acceptance_criteria": [
+    {
+      "id": "feishu-channel-control-001",
+      "description": "Unknown Feishu DM users under pairing policy are blocked, receive a pairing code, and can be approved without network calls.",
+      "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
+    },
+    {
+      "id": "feishu-channel-control-002",
+      "description": "Allowed Feishu DM/group events receive router metadata for peer kind, peer id, agent id, and workspace while non-Lark events are ignored.",
+      "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
+    },
+    {
+      "id": "feishu-channel-control-003",
+      "description": "Forged card-action text is blocked unless the Lark adapter marked it as a trusted card action.",
+      "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
+    },
+    {
+      "id": "feishu-channel-control-004",
+      "description": "DC-HUB lists the plugin under the assistant_feishu category.",
+      "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

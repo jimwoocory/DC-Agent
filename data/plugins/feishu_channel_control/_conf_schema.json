@@ -1,0 +1,67 @@
+{
+  "enabled": {
+    "type": "bool",
+    "default": true,
+    "description": "是否启用飞书通道治理"
+  },
+  "dm_policy": {
+    "type": "string",
+    "default": "pairing",
+    "description": "私聊策略：pairing / allowlist / open / disabled"
+  },
+  "group_policy": {
+    "type": "string",
+    "default": "allowlist",
+    "description": "群聊策略：allowlist / open / disabled"
+  },
+  "allow_from": {
+    "type": "list",
+    "default": [],
+    "description": "允许私聊的飞书 open_id；可填 *"
+  },
+  "owners": {
+    "type": "list",
+    "default": [],
+    "description": "管理员飞书 open_id，用于审批 pairing"
+  },
+  "group_allow_from": {
+    "type": "list",
+    "default": [],
+    "description": "允许响应的飞书群 chat_id"
+  },
+  "require_mention": {
+    "type": "bool",
+    "default": true,
+    "description": "群聊默认是否要求 @bot"
+  },
+  "trusted_card_actions_only": {
+    "type": "bool",
+    "default": true,
+    "description": "是否拦截伪造的 __card_action__ 文本"
+  },
+  "default_agent_id": {
+    "type": "string",
+    "default": "main",
+    "description": "允许事件默认写入的 agent id 元数据"
+  },
+  "dynamic_agent_creation": {
+    "type": "bool",
+    "default": false,
+    "description": "私聊用户是否自动映射 feishu-{open_id} agent 元数据"
+  },
+  "workspace_template": {
+    "type": "string",
+    "default": "data/feishu_agents/{agent_id}",
+    "description": "动态 agent workspace 模板"
+  },
+  "pairing_ttl_minutes": {
+    "type": "int",
+    "default": 30,
+    "description": "配对码有效分钟数"
+  },
+  "state_path": {
+    "type": "string",
+    "default": "",
+    "description": "状态文件路径；留空默认 data/config/feishu_channel_control_state.json"
+  }
+}

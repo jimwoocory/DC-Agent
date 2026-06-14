@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DC-HUB · DC-Agent</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #202124;
+      --muted: #667085;
+      --border: #d9dde5;
+      --accent: #0f766e;
+      --on: #15803d;
+      --off: #9a3412;
+      --missing: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --panel: #1f2937;
+        --text: #f3f4f6;
+        --muted: #a7b0c0;
+        --border: #3a4556;
+        --accent: #2dd4bf;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+    .meta { margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .button {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+    .button:hover { border-color: var(--accent); color: var(--accent); }
+    .button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric, .category {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric strong { display: block; font-size: 26px; margin-bottom: 4px; }
+    .metric span { color: var(--muted); font-size: 13px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 14px;
+    }
+    .category h2 {
+      margin: 0 0 4px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+    .family {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .module {
+      border-top: 1px solid var(--border);
+      padding: 10px 0;
+    }
+    .module:first-of-type { border-top: 0; }
+    .module-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+    .title { font-weight: 650; }
+    .plugin-id {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      margin-top: 2px;
+    }
+    .role {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: 6px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .action {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      border-radius: 7px;
+      padding: 5px 9px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .action:hover { border-color: var(--accent); color: var(--accent); }
+    .action.danger:hover { border-color: var(--missing); color: var(--missing); }
+    .badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .badge {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .on { color: var(--on); border-color: color-mix(in srgb, var(--on) 35%, var(--border)); }
+    .off { color: var(--off); border-color: color-mix(in srgb, var(--off) 35%, var(--border)); }
+    .missing { color: var(--missing); border-color: color-mix(in srgb, var(--missing) 35%, var(--border)); }
+    .empty, .error {
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+    }
+  </style>
+  <script src="/api/plugin/page/bridge-sdk.js"></script>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>DC-HUB 集成插座</h1>
+      <div id="meta" class="meta">加载中...</div>
+    </div>
+    <button id="refresh" class="button">刷新</button>
+  </header>
+
+  <section id="summary" class="summary"></section>
+  <section id="grid" class="grid">
+    <div class="empty">加载中...</div>
+  </section>
+
+  <script>
+    const bridge = window.AstrBotPluginPage;
+    const meta = document.getElementById('meta');
+    const summary = document.getElementById('summary');
+    const grid = document.getElementById('grid');
+    const refresh = document.getElementById('refresh');
+    let busy = false;
+
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c]);
+    }
+
+    function moduleHtml(module) {
+      const lifecycle = module.lifecycle || (module.installed ? 'active' : 'missing');
+      const enabledClass = lifecycle === 'active' ? 'on' : lifecycle === 'missing' ? 'missing' : 'off';
+      const enabledText = lifecycle === 'active' ? 'Plugin: on' : lifecycle === 'disabled' ? 'Plugin: off' : lifecycle;
+      const installedClass = module.installed ? '' : 'missing';
+      const installedText = module.installed ? 'installed' : 'missing';
+      const actions = Array.isArray(module.actions) ? module.actions : [];
+      const actionLabels = {
+        enable: '开启',
+        disable: '关闭',
+        reload: '重载',
+        update: '更新',
+        install: '安装',
+        uninstall: '卸载',
+      };
+      const actionHtml = actions.map((action) => `
+        <button
+          class="action ${action === 'uninstall' ? 'danger' : ''}"
+          data-action="${esc(action)}"
+          data-plugin-id="${esc(module.plugin_id)}"
+        >${esc(actionLabels[action] || action)}</button>
+      `).join('');
+      return `
+        <div class="module">
+          <div class="module-head">
+            <div>
+              <div class="title">${esc(module.title)}</div>
+              <div class="plugin-id">${esc(module.plugin_id)}</div>
+            </div>
+            <div class="badges">
+              <span class="badge ${enabledClass}">${enabledText}</span>
+              <span class="badge ${installedClass}">${installedText}</span>
+            </div>
+          </div>
+          <div class="role">${esc(module.role)}</div>
+          ${actionHtml ? `<div class="actions">${actionHtml}</div>` : ''}
+        </div>
+      `;
+    }
+
+    async function runAction(action, pluginId) {
+      if (busy) return;
+      const body = { action, plugin_id: pluginId };
+      if (action === 'uninstall') {
+        const ok = window.confirm(`确认卸载 ${pluginId}？这会删除该插件目录。`);
+        if (!ok) return;
+        body.confirm = true;
+      }
+      if (action === 'install') {
+        const repoUrl = window.prompt('如本地目录已存在会直接加载；否则请输入 repo_url：', '');
+        if (repoUrl) body.repo_url = repoUrl;
+      }
+      busy = true;
+      refresh.disabled = true;
+      try {
+        await bridge.apiPost('action', body);
+        await load();
+      } catch (err) {
+        window.alert(err && err.message ? err.message : String(err));
+      } finally {
+        busy = false;
+        refresh.disabled = false;
+      }
+    }
+
+    async function load() {
+      try {
+        const data = await bridge.apiGet('summary');
+        if (!data) {
+          grid.innerHTML = '<div class="error">加载失败：空响应</div>';
+          return;
+        }
+        meta.textContent = `v${data.version} · 纳管 ${data.total} 个模块 · 插件启用 ${data.enabled} 个`;
+        summary.innerHTML = `
+          <div class="metric"><strong>${esc(data.total)}</strong><span>纳管模块</span></div>
+          <div class="metric"><strong>${esc(data.enabled)}</strong><span>插件启用</span></div>
+          <div class="metric"><strong>${esc(data.categories.length)}</strong><span>能力分类</span></div>
+        `;
+        grid.innerHTML = data.categories.map((category) => `
+          <article class="category">
+            <h2>${esc(category.label)} <span class="meta">${esc(category.enabled)}/${esc(category.total)}</span></h2>
+            <div class="family">${esc(category.family || 'DC-Agent')}</div>
+            ${category.modules.map(moduleHtml).join('')}
+          </article>
+        `).join('');
+      } catch (err) {
+        grid.innerHTML = `<div class="error">加载失败：${esc(err && err.message ? err.message : err)}</div>`;
+      }
+    }
+
+    refresh.addEventListener('click', load);
+    grid.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const button = target.closest('button[data-action][data-plugin-id]');
+      if (!button) return;
+      runAction(button.dataset.action || '', button.dataset.pluginId || '');
+    });
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+name: dc_hub
+display_name: DC-HUB 集成插座
+author: dc_agent
+version: 0.1.0
+desc: DC-HUB 集成插座：统一纳管小助手、飞书协作、Harness、内容和运维插件
+short_desc: 统一纳管 DC-Agent 插件能力
+support_platforms:
+  - lark
+pages:
+  - dashboard

@@ -1,0 +1,12 @@
+{
+  "state_path": {
+    "type": "string",
+    "description": "DC-HUB 状态文件路径。留空默认 data/config/dc_hub_state.json。V0.1.0 只保存 HUB 侧功能开关，不卸载原插件。",
+    "default": ""
+  },
+  "allow_state_mutation": {
+    "type": "bool",
+    "description": "是否允许 /dc-hub enable|disable 写入 HUB 侧开关状态。",
+    "default": true
+  }
+}

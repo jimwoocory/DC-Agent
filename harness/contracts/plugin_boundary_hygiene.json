@@ -1,0 +1,31 @@
+{
+  "feature": "plugin_boundary_hygiene",
+  "goal": "Keep DC-Agent plugin ownership explicit so AstrBot adapters stay thin, reusable business logic lives in dc_engines/harness/dc_router, and runtime data never hides under plugin source trees.",
+  "acceptance_criteria": [
+    {
+      "id": "plugin-boundary-001",
+      "description": "High-risk DC-Agent plugins have machine-readable roles, boundary status, adapter entrypoints, responsibilities, engine owners, config paths, and runtime data patterns.",
+      "verification": "uv run pytest tests/test_plugin_boundaries.py -q"
+    },
+    {
+      "id": "plugin-boundary-002",
+      "description": "Registered runtime data patterns stay outside data/plugins so source plugins remain commit-safe while local data is governed by repository hygiene checks.",
+      "verification": "uv run pytest tests/test_plugin_boundaries.py::test_plugin_boundary_runtime_data_stays_outside_plugin_source_tree -q"
+    }
+  ],
+  "roles": {
+    "core_adapter": "Bridge code that adapts AstrBot to an external runtime or core execution path.",
+    "runtime_gateway": "Routing or provider gateway code that controls execution selection and telemetry.",
+    "product_plugin": "User-facing business entrypoint whose reusable logic should live in dc_engines or harness.",
+    "ops_plugin": "Operator/admin surface for review, rollback, health, or dashboard workflows."
+  },
+  "boundary_status": {
+    "thin_adapter": "Plugin mostly adapts AstrBot events/cards/commands to reusable engine modules.",
+    "mixed": "Plugin has an engine boundary but still owns meaningful orchestration or policy.",
+    "plugin_heavy": "Reusable business behavior still lives mostly inside data/plugins and should be extracted later.",
+    "runtime_service": "Plugin owns a long-running bridge, callback, or execution service boundary."
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "contract_id": "dc_hub_v0_1",
+  "description": "DC-HUB provides one product-level AstrBot plugin that catalogs DC-Agent plugins by business capability and exposes lifecycle management actions for hot-plug style enable, disable, reload, update, install, and uninstall operations.",
+  "acceptance_criteria": [
+    "DC-HUB registers as one AstrBot plugin named dc_hub with version 0.1.0.",
+    "DC-HUB classifies existing DC-Agent plugins into assistant, Feishu collaboration, workflow/Harness, content/media, ops/system, and independent capability groups.",
+    "DC-HUB exposes summary, module detail, and lifecycle action APIs for dashboard pages and automation checks.",
+    "DC-HUB provides /dc-hub commands to list categories, inspect modules, enable, disable, reload, update, install, and uninstall managed plugins.",
+    "Enable and disable actions call AstrBot's plugin lifecycle manager, not only HUB display state.",
+    "DC-HUB summary and module payloads count only registered activated plugins as enabled, and expose HUB desired_enabled separately so missing or unloaded modules are never shown as runtime enabled.",
+    "Uninstall actions require explicit confirmation and DC-HUB cannot disable or uninstall itself.",
+    "Install supports loading an existing local plugin directory or installing from an explicit repository URL."
+  ],
+  "verification": [
+    "uv run pytest dc_engines/tests/test_dc_hub_plugin.py",
+    "ruff format data/plugins/dc_hub dc_engines/tests/test_dc_hub_plugin.py",
+    "ruff check data/plugins/dc_hub dc_engines/tests/test_dc_hub_plugin.py"
+  ]
+}

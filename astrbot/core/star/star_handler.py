@@ -155,17 +155,14 @@ class StarHandlerRegistry(Generic[T]):
     ) -> list[StarHandlerMetadata]:
         handlers = []
         for handler in self._handlers:
-            # 过滤事件类型
             if handler.event_type != event_type:
                 continue
             if not handler.enabled:
                 continue
-            # 过滤启用状态
             if only_activated:
                 plugin = star_map.get(handler.handler_module_path)
                 if not (plugin and plugin.activated):
                     continue
-            # 过滤插件白名单
             if plugins_name is not None and plugins_name != ["*"]:
                 plugin = star_map.get(handler.handler_module_path)
                 if not plugin:

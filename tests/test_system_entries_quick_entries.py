@@ -30,6 +30,7 @@ def test_system_entries_merges_pinned_dashboard_entries() -> None:
     assert "OpenClaw" in names
     assert "记忆治理" in names
     assert "内容 SOP 运营" in names
+    assert "员工需求洞察" in names
 
 
 def test_system_entries_pinned_entries_are_unknown_not_ready() -> None:
@@ -43,7 +44,11 @@ def test_system_entries_pinned_entries_are_unknown_not_ready() -> None:
     payload = asyncio.run(plugin._api_status())
     entries = payload["data"]["entries"]
 
-    assert {entry["name"] for entry in entries} == {"记忆治理", "内容 SOP 运营"}
+    assert {entry["name"] for entry in entries} == {
+        "记忆治理",
+        "内容 SOP 运营",
+        "员工需求洞察",
+    }
     assert all(entry["alive"] is None for entry in entries)
     assert all(entry["availability"] == "unknown" for entry in entries)
 
@@ -116,9 +121,16 @@ def test_quick_entries_top_bar_allows_pinned_dashboard_entries() -> None:
 
     assert 'name: "记忆治理"' in source
     assert 'name: "内容 SOP 运营"' in source
+    assert 'name: "员工需求洞察"' in source
+    assert source.index('name: "员工需求洞察"') < source.index(
+        'name: "Hermes Agent 官方 WebUI"'
+    )
     assert 'url: "/#/memory-governance"' in source
     assert 'url: "/#/content-sop-ops"' in source
+    assert 'url: "/#/employee-insight"' in source
     assert "entry.pinned === true" in source
+    assert "mergeDefaultPinnedEntries(data.entries)" in source
+    assert "DEFAULT_ENTRIES.forEach" in source
     assert 'availability === "ready"' in source
     assert 'availability === "offline"' in source
     assert 'availability === "wrong_service"' in source
@@ -151,6 +163,7 @@ def test_dashboard_static_route_serves_pinned_entry_paths() -> None:
 
     assert '"/memory-governance"' in source
     assert '"/content-sop-ops"' in source
+    assert '"/employee-insight"' in source
 
 
 def _start_closing_tcp_server():

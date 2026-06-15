@@ -31,6 +31,8 @@ def test_employee_insight_loop_contract_points_to_required_verifiers() -> None:
         "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q",
         "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q",
         "uv run pytest tests/test_employee_insight_route.py -q",
+        "uv run pytest dc_engines/tests/test_employee_insight_loop.py dc_engines/tests/test_card_system_dedup.py tests/test_employee_insight_route.py -q",
+        "uv run pytest tests/test_employee_insight_plugin.py -q",
     ]
 
 
@@ -52,6 +54,23 @@ def test_employee_insight_loop_contract_requires_governed_closed_loop() -> None:
         "must not auto-publish skill",
         "append-only audit",
         "dashboard",
+        "real_send_approval_token",
+        "real_sender_enabled",
+        "verification/status",
+        "verification/report",
+        "verification/run",
+        "verification_scope",
+        "employee_insight_welcome",
+        "daily_outreach_enabled",
+        "simulated_reply_recorded",
+        "simulated_pause_recorded",
+        "加入灰度验证",
+        "self_registered",
+        "sent_rate",
+        "open_rate",
+        "submit_rate",
+        "anomaly_rate",
+        "rollback",
     ]:
         assert required in text
 

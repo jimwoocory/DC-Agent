@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from dc_engines.feishu_hub import (
     FeishuHub,
     HubStats,
@@ -20,7 +19,7 @@ from dc_engines.feishu_hub import (
     is_enabled,
 )
 from dc_engines.feishu_hub.credentials import load_credentials
-
+from dc_engines.feishu_writer import FeishuPrivateMessageSender
 
 # ────────────────────────── credentials 加载 ──────────────────────────
 
@@ -46,7 +45,9 @@ def test_credentials_main_yaml_only(tmp_path: Path) -> None:
 
 def test_credentials_fallback_to_nas_sync(tmp_path: Path) -> None:
     """主 yaml 没凭证，nas_sync/config.yaml 有 → 回退到 nas_sync。"""
-    _write_yaml(tmp_path / "data/feishu_whitelist.yaml", "documents: []\n")  # 无 feishu 段
+    _write_yaml(
+        tmp_path / "data/feishu_whitelist.yaml", "documents: []\n"
+    )  # 无 feishu 段
     _write_yaml(
         tmp_path / "nas_sync/config.yaml",
         "feishu:\n  app_id: cli_nas\n  app_secret: secret_nas\n",
@@ -167,3 +168,108 @@ def test_hub_stats_snapshot_shape() -> None:
         "last_error_at",
     }
     assert required_keys.issubset(snap.keys())
+
+
+class _FakeMessageResponseData:
+    message_id = "om_message_001"
+
+
+class _FakeMessageResponse:
+    data = _FakeMessageResponseData()
+
+    def success(self) -> bool:
+        return True
+
+
+class _FakeMessageResource:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def acreate(self, request):
+        self.requests.append(request)
+        return _FakeMessageResponse()
+
+
+class _FakeMessageClient:
+    def __init__(self) -> None:
+        self.im = type(
+            "FakeIm",
+            (),
+            {
+                "v1": type(
+                    "FakeV1",
+                    (),
+                    {"message": _FakeMessageResource()},
+                )()
+            },
+        )()
+
+
+@pytest.mark.asyncio
+async def test_private_message_sender_maps_successful_feishu_response() -> None:
+    """飞书私聊 sender 成功时返回 provider_message_id，并保留原始 open_id。"""
+    client = _FakeMessageClient()
+    sender = FeishuPrivateMessageSender(client=client)
+
+    result = await sender.send_text("ou_employee", "今天试一个真实任务吗？")
+
+    assert result.success is True
+    assert result.provider_message_id == "om_message_001"
+    assert result.raw["employee_id"] == "ou_employee"
+    assert len(client.im.v1.message.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_private_message_sender_can_send_interactive_card() -> None:
+    """飞书私聊 sender 支持发送 interactive card，用于小白入口按钮卡。"""
+    client = _FakeMessageClient()
+    sender = FeishuPrivateMessageSender(client=client)
+
+    result = await sender.send_interactive_card(
+        "ou_employee",
+        {"config": {"wide_screen_mode": True}, "elements": []},
+    )
+
+    assert result.success is True
+    assert result.provider_message_id == "om_message_001"
+    assert len(client.im.v1.message.requests) == 1
+
+
+class _FakeFailedMessageResponse:
+    code = 999
+    msg = "no permission"
+    data = None
+
+    def success(self) -> bool:
+        return False
+
+
+class _FakeFailedMessageResource:
+    async def acreate(self, request):
+        return _FakeFailedMessageResponse()
+
+
+class _FakeFailedMessageClient:
+    def __init__(self) -> None:
+        self.im = type(
+            "FakeIm",
+            (),
+            {
+                "v1": type(
+                    "FakeV1",
+                    (),
+                    {"message": _FakeFailedMessageResource()},
+                )()
+            },
+        )()
+
+
+@pytest.mark.asyncio
+async def test_private_message_sender_maps_feishu_api_failure() -> None:
+    """飞书 API 拒绝发送时不抛异常，返回可审计的失败结果。"""
+    sender = FeishuPrivateMessageSender(client=_FakeFailedMessageClient())
+
+    result = await sender.send_text("ou_employee", "hello")
+
+    assert result.success is False
+    assert "code=999" in result.error

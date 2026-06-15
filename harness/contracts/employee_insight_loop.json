@@ -88,6 +88,36 @@
       "verification": "uv run pytest tests/test_employee_insight_route.py -q"
     },
     {
+      "id": "eil-002d",
+      "description": "Dashboard-triggered real Lark private-message sends require real_sender_enabled=true, approved=true, a matching real_send_approval_token, active pilot profiles, and Feishu writer sender results must be recorded as append-only session/audit metadata.",
+      "verification": "uv run pytest tests/test_employee_insight_route.py -q"
+    },
+    {
+      "id": "eil-002e",
+      "description": "The dashboard exposes /employee-insight/verification/status and /employee-insight/verification/run so grey verification can automatically check config, dry-run behavior, wrong-token blocking, append-only audit, and one-person test sending only to active profiles marked metadata.verification_scope=true.",
+      "verification": "uv run pytest tests/test_employee_insight_route.py -q"
+    },
+    {
+      "id": "eil-002f",
+      "description": "Beginner outreach prefers the employee_insight_welcome interactive card, falls back to text when cards are unavailable, and grey verification records simulated_reply_recorded and simulated_pause_recorded checks before expanding beyond one test open_id.",
+      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py dc_engines/tests/test_card_system_dedup.py tests/test_employee_insight_route.py -q"
+    },
+    {
+      "id": "eil-002g",
+      "description": "The AstrBot employee insight plugin can register a daily_outreach_enabled cron job for automatic outreach; it defaults to dry-run and requires explicit approval configuration before real sends.",
+      "verification": "uv run pytest tests/test_employee_insight_plugin.py -q"
+    },
+    {
+      "id": "eil-002h",
+      "description": "A tester can self-register without knowing open_id by sending 加入灰度验证 in Lark DM; the plugin stores the sender id as an active verification profile with metadata.verification_scope=true and metadata.self_registered=true.",
+      "verification": "uv run pytest tests/test_employee_insight_plugin.py -q"
+    },
+    {
+      "id": "eil-002i",
+      "description": "The dashboard exposes /employee-insight/verification/report with grey verification sent_rate, open_rate, form_open_rate, submit_rate, anomaly_rate, go/no-go thresholds, and rollback reasons so expansion decisions are metric-gated instead of manual judgement.",
+      "verification": "uv run pytest tests/test_employee_insight_route.py -q"
+    },
+    {
       "id": "eil-003",
       "description": "Employee coaching stores structured employee_insight_events instead of treating raw chat text as the only data model.",
       "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
@@ -131,6 +161,11 @@
   "runtime_policy": {
     "employee_channel": "lark_dm",
     "outreach_frequency_limit": "At most one proactive private-message outreach per active pilot employee per day; reduce to every three days after two unanswered outreaches.",
+    "real_send_policy": "Real proactive sends are disabled by default. Dashboard dispatch can send only when real_sender_enabled=true, approved=true, and approval_token matches real_send_approval_token.",
+    "verification_policy": "Grey verification uses /employee-insight/verification/status, /employee-insight/verification/run, and /employee-insight/verification/report. One-person test sends are limited to active employee profiles with metadata.verification_scope=true. Expansion requires metric thresholds for sent_rate, open_rate, form_open_rate, submit_rate, and anomaly_rate, with rollback required when thresholds fail.",
+    "beginner_entry_policy": "Beginner outreach uses the employee_insight_welcome interactive card when available, with text fallback. Verification must pass simulated_reply_recorded and simulated_pause_recorded before expansion.",
+    "daily_outreach_policy": "daily_outreach_enabled may register an automatic AstrBot cron job, but the job defaults to dry-run unless explicit approval settings are present.",
+    "self_registration_policy": "Testers do not need to know open_id. Sending 加入灰度验证 in Lark DM creates an active verification profile marked verification_scope=true and self_registered=true.",
     "opt_out": "Employees can reply pause, later, stop, or exit equivalents to pause or exit pilot outreach.",
     "save_policy": "Structured events and short summaries may be stored; full chat archives follow lark_chat_memory_watermarks and are not default LLM prompt context.",
     "governance_policy": "All distillation outputs default to review_required and are blocked from runtime mutation until approved in Obsidian.",

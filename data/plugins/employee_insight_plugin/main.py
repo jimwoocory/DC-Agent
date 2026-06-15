@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import Any
 
 from dc_engines.employee_insight_loop import (
+    EmployeeInsightProfile,
     EmployeeInsightSession,
     EmployeeInsightSessionStatus,
     EmployeeInsightStore,
     InsightEvent,
+    PilotStatus,
 )
 
 from astrbot.api import logger
@@ -23,6 +26,20 @@ from astrbot.api.event.filter import EventMessageType
 from astrbot.api.star import Context, Star, register
 
 _PAUSE_WORDS = {"暂停", "先不用", "稍后", "退出", "停止", "stop", "pause", "later"}
+_VERIFICATION_JOIN_WORDS = {
+    "加入灰度验证",
+    "加入灰度",
+    "灰度验证",
+    "登记测试",
+    "注册测试",
+}
+_DEFAULT_LARK_PLATFORM_MARKERS = (
+    "lark",
+    "feishu",
+    "飞书",
+    "巅池-agent小助手",
+    "agent小助手",
+)
 
 
 @register(
@@ -36,9 +53,11 @@ class EmployeeInsightPlugin(Star):
         super().__init__(context)
         self.store: EmployeeInsightStore | None = None
         self.enabled = True
+        self.config: dict = {}
 
     async def initialize(self) -> None:
         cfg = self.context.get_config() if hasattr(self.context, "get_config") else {}
+        self.config = cfg if isinstance(cfg, dict) else {}
         if isinstance(cfg, dict):
             self.enabled = bool(cfg.get("enabled", True))
         data_dir = Path(
@@ -55,16 +74,36 @@ class EmployeeInsightPlugin(Star):
         logger.info(
             "[employee_insight] store 启动：%s", data_dir / "employee_insight.db"
         )
+        await self._register_daily_outreach_job()
 
-    @filter.event_message_type(EventMessageType.PRIVATE_MESSAGE, priority=75)
+    @filter.event_message_type(EventMessageType.PRIVATE_MESSAGE, priority=110)
     async def on_private_message(self, event: AstrMessageEvent):
         if not self.enabled or self.store is None:
-            return
-        if not self._is_private_lark_event(event):
             return
 
         text = (getattr(event, "message_str", "") or "").strip()
         if not text:
+            return
+        if not self._is_private_lark_event(event):
+            if self._is_verification_join_text(text):
+                logger.warning(
+                    "[employee_insight] 收到灰度登记口令但未识别为飞书私聊：platform_name=%s platform_id=%s origin=%s group_id=%s msg_type=%s",
+                    event.get_platform_name() or "",
+                    event.get_platform_id() or "",
+                    getattr(event, "unified_msg_origin", "") or "",
+                    self._safe_group_id(event),
+                    self._message_type(event),
+                )
+            return
+
+        await self._ensure_observed_profile(event)
+
+        if self._is_verification_join_text(text):
+            await self._register_verification_profile(event)
+            self._reply(
+                event,
+                "已把你加入灰度验证测试名单。现在后台可以直接用你这个测试账号跑一键灰度验证，不需要手填 open_id。",
+            )
             return
 
         if self._is_pause_text(text):
@@ -131,15 +170,25 @@ class EmployeeInsightPlugin(Star):
     ) -> EmployeeInsightSession:
         assert self.store is not None
         sender_id = str(event.get_sender_id() or "")
+        directory_employee = await self._get_directory_employee(sender_id)
+        event_department_id = (
+            str(event.get_extra("department_id") or "")
+            if hasattr(event, "get_extra")
+            else ""
+        )
+        department_id = (
+            str(getattr(directory_employee, "department", "") or "")
+            or event_department_id
+        )
+        role = str(getattr(directory_employee, "role", "") or "")
         session = EmployeeInsightSession(
             session_id=uuid.uuid4().hex,
             employee_id=sender_id,
             channel="lark_dm",
             trigger_type="employee_reply",
             status=status,
-            department_id=str(event.get_extra("department_id") or "")
-            if hasattr(event, "get_extra")
-            else "",
+            department_id=department_id,
+            role=role,
             scenario_id=scenario_id,
             original_request=original_request[:4000],
             normalized_goal=original_request[:500],
@@ -148,6 +197,10 @@ class EmployeeInsightPlugin(Star):
                 "platform_name": event.get_platform_name() or "",
                 "session_id": getattr(event, "unified_msg_origin", "") or "",
                 "sender_name": event.get_sender_name() or "",
+                "directory_display_name": str(
+                    getattr(directory_employee, "display_name", "") or ""
+                ),
+                "directory_source": "employees_db" if directory_employee else "",
             },
             summary=summary,
         )
@@ -165,22 +218,55 @@ class EmployeeInsightPlugin(Star):
         return session
 
     def _is_private_lark_event(self, event: AstrMessageEvent) -> bool:
-        if (event.get_platform_name() or "").lower() != "lark":
+        if not self._is_lark_platform_event(event):
             return False
-        msg_obj = getattr(event, "message_obj", None)
-        msg_type = str(getattr(msg_obj, "type", "") or "")
-        if msg_type == "GroupMessage":
+        if self._event_is_private_chat(event):
+            return True
+        msg_type = self._message_type(event)
+        if "group" in msg_type.lower():
             return False
-        try:
-            if event.get_group_id():
-                return False
-        except Exception:  # noqa: BLE001
-            pass
+        if self._safe_group_id(event):
+            return False
         return True
+
+    def _event_is_private_chat(self, event: AstrMessageEvent) -> bool:
+        try:
+            return bool(event.is_private_chat())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _is_lark_platform_event(self, event: AstrMessageEvent) -> bool:
+        evidence = " ".join(
+            value
+            for value in (
+                str(event.get_platform_name() or ""),
+                str(event.get_platform_id() or ""),
+                str(getattr(event, "unified_msg_origin", "") or ""),
+            )
+            if value
+        ).lower()
+        markers = self.config.get("platform_allow_keywords")
+        if not isinstance(markers, list) or not markers:
+            markers = list(_DEFAULT_LARK_PLATFORM_MARKERS)
+        return any(str(marker).lower() in evidence for marker in markers)
+
+    def _message_type(self, event: AstrMessageEvent) -> str:
+        msg_obj = getattr(event, "message_obj", None)
+        return str(getattr(msg_obj, "type", "") or "")
+
+    def _safe_group_id(self, event: AstrMessageEvent) -> str:
+        try:
+            return str(event.get_group_id() or "")
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _is_pause_text(self, text: str) -> bool:
         compact = "".join(text.lower().split())
         return compact in _PAUSE_WORDS
+
+    def _is_verification_join_text(self, text: str) -> bool:
+        compact = "".join(text.lower().split())
+        return compact in _VERIFICATION_JOIN_WORDS
 
     def _infer_scenario(self, text: str) -> str:
         if any(word in text for word in ("通知", "文案", "公告")):
@@ -195,3 +281,178 @@ class EmployeeInsightPlugin(Star):
 
     def _reply(self, event: AstrMessageEvent, text: str) -> None:
         event.set_result(MessageEventResult().message(text).use_t2i(False).stop_event())
+
+    async def _ensure_observed_profile(self, event: AstrMessageEvent) -> None:
+        assert self.store is not None
+        employee_id = str(event.get_sender_id() or "").strip()
+        if not employee_id:
+            return
+        existing = await self.store.get_profile(employee_id)
+        directory_employee = await self._get_directory_employee(employee_id)
+        auto_verification_scope = bool(
+            self.config.get("auto_verification_scope_from_dm", True)
+        )
+        existing_metadata = existing.metadata if existing else {}
+        profile = EmployeeInsightProfile(
+            employee_id=employee_id,
+            employee_hash=(existing.employee_hash if existing else employee_id),
+            display_name=(
+                str(getattr(directory_employee, "display_name", "") or "")
+                or str(event.get_sender_name() or "")
+            ),
+            department_id=(
+                str(getattr(directory_employee, "department", "") or "")
+                or (existing.department_id if existing else "")
+            ),
+            role=(
+                str(getattr(directory_employee, "role", "") or "")
+                or (existing.role if existing else "自然私聊观察")
+            ),
+            pilot_status=(existing.pilot_status if existing else PilotStatus.ACTIVE),
+            preferred_touch_time=existing.preferred_touch_time if existing else "",
+            last_outreach_at=existing.last_outreach_at if existing else "",
+            unanswered_outreach_count=(
+                existing.unanswered_outreach_count if existing else 0
+            ),
+            metadata={
+                **existing_metadata,
+                "observed_from_dm": True,
+                "verification_scope": bool(
+                    existing_metadata.get("verification_scope", False)
+                    or auto_verification_scope
+                ),
+                "platform_id": event.get_platform_id() or "",
+                "platform_name": event.get_platform_name() or "",
+                "directory_source": "employees_db" if directory_employee else "",
+            },
+        )
+        await self.store.upsert_profile(profile)
+        if existing is None:
+            await self.store.record_audit(
+                action="profile_observed_from_lark_dm",
+                actor="employee_insight_plugin",
+                target_id=employee_id,
+                detail={
+                    "verification_scope": profile.metadata["verification_scope"],
+                    "platform_id": event.get_platform_id() or "",
+                },
+            )
+            logger.info(
+                "[employee_insight] 自然私聊已登记观察对象：employee_id=%s platform_name=%s platform_id=%s",
+                employee_id,
+                event.get_platform_name() or "",
+                event.get_platform_id() or "",
+            )
+
+    async def _register_verification_profile(self, event: AstrMessageEvent) -> None:
+        assert self.store is not None
+        employee_id = str(event.get_sender_id() or "").strip()
+        if not employee_id:
+            return
+        existing = await self.store.get_profile(employee_id)
+        directory_employee = await self._get_directory_employee(employee_id)
+        profile = EmployeeInsightProfile(
+            employee_id=employee_id,
+            employee_hash=(existing.employee_hash if existing else employee_id),
+            display_name=(
+                str(getattr(directory_employee, "display_name", "") or "")
+                or str(event.get_sender_name() or "")
+            ),
+            department_id=(
+                str(getattr(directory_employee, "department", "") or "")
+                or (existing.department_id if existing else "")
+            ),
+            role=(
+                str(getattr(directory_employee, "role", "") or "")
+                or (existing.role if existing else "灰度测试")
+            ),
+            pilot_status=PilotStatus.ACTIVE,
+            preferred_touch_time=existing.preferred_touch_time if existing else "",
+            last_outreach_at=existing.last_outreach_at if existing else "",
+            unanswered_outreach_count=(
+                existing.unanswered_outreach_count if existing else 0
+            ),
+            metadata={
+                **(existing.metadata if existing else {}),
+                "verification_scope": True,
+                "self_registered": True,
+                "platform_id": event.get_platform_id() or "",
+                "platform_name": event.get_platform_name() or "",
+                "directory_source": "employees_db" if directory_employee else "",
+            },
+        )
+        await self.store.upsert_profile(profile)
+        await self.store.record_audit(
+            action="verification_profile_registered",
+            actor="employee_insight_plugin",
+            target_id=employee_id,
+            detail={
+                "verification_scope": True,
+                "platform_id": event.get_platform_id() or "",
+            },
+        )
+        logger.info(
+            "[employee_insight] 灰度验证账号已登记：employee_id=%s platform_name=%s platform_id=%s",
+            employee_id,
+            event.get_platform_name() or "",
+            event.get_platform_id() or "",
+        )
+
+    async def _register_daily_outreach_job(self) -> None:
+        if not self.config.get("daily_outreach_enabled", False):
+            return
+        cron_manager = getattr(self.context, "cron_job_manager", None)
+        if cron_manager is None or not hasattr(cron_manager, "add_basic_job"):
+            logger.warning("[employee_insight] cron manager 不可用，跳过每日触达任务")
+            return
+        await cron_manager.add_basic_job(
+            name="员工需求洞察每日触达",
+            cron_expression=str(self.config.get("daily_outreach_cron") or "0 10 * * *"),
+            timezone=str(self.config.get("daily_outreach_timezone") or "Asia/Shanghai"),
+            handler=self._run_daily_outreach_job,
+            description="按试点画像执行员工需求洞察触达；默认 dry-run。",
+            payload={},
+            enabled=True,
+            persistent=True,
+        )
+
+    async def _run_daily_outreach_job(self) -> dict:
+        assert self.store is not None
+        from dc_engines.employee_insight_loop import EmployeeInsightOutreachDispatcher
+        from dc_engines.feishu_writer import FeishuPrivateMessageSender
+
+        dry_run = not bool(self.config.get("daily_outreach_real_send_enabled", False))
+        approved = bool(self.config.get("daily_outreach_approved", False)) and bool(
+            self.config.get("daily_outreach_approval_token")
+        )
+        dispatcher = EmployeeInsightOutreachDispatcher(
+            self.store,
+            sender=FeishuPrivateMessageSender(),
+        )
+        try:
+            return await dispatcher.dispatch_daily_outreach(
+                limit=int(self.config.get("daily_outreach_limit") or 20),
+                approved=approved,
+                dry_run=dry_run,
+                actor="employee_insight_cron",
+                message_text=str(self.config.get("daily_outreach_message") or "")
+                or None,
+            )
+        except PermissionError as exc:
+            await self.store.record_audit(
+                action="daily_outreach_blocked",
+                actor="employee_insight_cron",
+                target_id="daily_outreach",
+                detail={"error": str(exc), "dry_run": dry_run},
+            )
+            return {"mode": "blocked", "error": str(exc)}
+
+    async def _get_directory_employee(self, employee_id: str) -> Any | None:
+        store = getattr(self.context, "employee_store", None)
+        if store is None or not hasattr(store, "get_employee"):
+            return None
+        try:
+            return await store.get_employee(employee_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("[employee_insight] employee directory lookup failed")
+            return None

@@ -15,7 +15,7 @@ content.
 
 from __future__ import annotations
 
-from dc_engines.card_system import _dedupe_consecutive_failures
+from dc_engines.card_system import _dedupe_consecutive_failures, build_sample_card
 
 
 def _ev(
@@ -188,3 +188,14 @@ class TestDedupeConsecutiveFailures:
         assert len(distinct_failures) == 2
         # Verify it stays under the <= 3 threshold
         assert len(distinct_failures) <= 3
+
+
+def test_employee_insight_welcome_card_has_beginner_actions() -> None:
+    card = build_sample_card("employee_insight_welcome")
+    payload = str(card)
+
+    assert "写通知" in payload
+    assert "整理资料" in payload
+    assert "生成汇报" in payload
+    assert "我不知道怎么用" in payload
+    assert "employee_insight_action" in payload

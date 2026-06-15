@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from dc_engines.employee_directory import Employee, EmployeeMemoryBridge
@@ -127,6 +128,89 @@ async def test_inject_employee_context_runs_on_daily_feishu_platform(
     traces = await employee_store.list_context_injections("ou_boss_daily", limit=5)
     assert len(traces) == 1
     assert traces[0]["platform_id"] == "巅池-技术"
+
+
+async def test_employee_directory_auto_sync_uses_feishu_as_authoritative_source(
+    employee_store: EmployeeStore,
+    monkeypatch,
+) -> None:
+    plugin = _plugin()
+    plugin.store = employee_store
+    plugin.feishu_client = SimpleNamespace(enabled=True)
+    plugin.config = {}
+    calls = []
+
+    async def fake_sync_from_feishu(store, client, **kwargs):
+        calls.append((store, client, kwargs))
+        return SimpleNamespace(
+            success=True,
+            departments_scanned=1,
+            department_names=["活动统筹部"],
+            users_added=3,
+            users_updated=0,
+            users_skipped=0,
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        "data.plugins.concierge_plugin.main.sync_from_feishu",
+        fake_sync_from_feishu,
+    )
+
+    result = await plugin._run_employee_directory_sync("startup")
+
+    assert result["success"] is True
+    assert result["department_names"] == ["活动统筹部"]
+    assert result["users_added"] == 3
+    assert calls == [
+        (
+            employee_store,
+            plugin.feishu_client,
+            {"authoritative": True},
+        )
+    ]
+
+
+async def test_employee_org_coverage_reports_missing_people_and_departments(
+    employee_store: EmployeeStore,
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    config_dir = data_dir / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "company_org_structure.json").write_text(
+        json.dumps(
+            {
+                "people": {
+                    "肖焕辉": {"department": "活动统筹部", "role": "活动统筹"},
+                    "曾紫红": {"department": "活动统筹部", "role": "活动统筹"},
+                    "黄柳泉": {"department": "设计部", "role": "设计"},
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    await employee_store.get_or_create(
+        "ou_activity",
+        platform_id="巅池-Agent小助手",
+        display_name="肖焕辉",
+    )
+    await employee_store.update_profile(
+        "ou_activity",
+        department="活动统筹部",
+        role="活动统筹",
+    )
+    plugin = _plugin()
+    plugin.store = employee_store
+    plugin.data_dir = data_dir
+
+    coverage = await plugin._build_employee_org_coverage()
+
+    assert coverage["expected_people"] == 3
+    assert coverage["matched_people"] == 1
+    assert coverage["missing_people"] == ["曾紫红", "黄柳泉"]
+    assert coverage["missing_departments"] == ["活动统筹部", "设计部"]
 
 
 async def test_inject_employee_context_appends_kb_bridge_context(

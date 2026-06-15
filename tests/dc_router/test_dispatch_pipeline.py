@@ -1088,6 +1088,51 @@ class TestStage12V1Fallback:
         patched_dispatch["dc"].assert_not_awaited()
         patched_dispatch["v1"].assert_awaited()
 
+    @pytest.mark.asyncio
+    async def test_v1_fallback_defaults_managed_platform_when_classifier_times_out(
+        self,
+    ) -> None:
+        event = _make_event(text="这是一句没有关键词的真实私聊")
+        ctx = _make_context()
+
+        with (
+            patch.object(_dispatch, "reason_with_llm_v1", AsyncMock(return_value=None)),
+            patch.object(
+                _dispatch,
+                "apply_provider_pin",
+                AsyncMock(return_value=True),
+            ) as pin,
+        ):
+            handled = await _dispatch._v1_fallback(ctx, event, event.message_str)
+
+        assert handled is True
+        pin.assert_awaited_once()
+        kwargs = pin.await_args.kwargs
+        assert kwargs["target_provider_id"] == "aihubmix/qwen3.6-flash"
+        assert kwargs["source"] == "default"
+        assert kwargs["intent"] == "casual"
+
+    @pytest.mark.asyncio
+    async def test_v1_fallback_keeps_no_match_for_unmanaged_platform(self) -> None:
+        event = _make_event(
+            text="这是一句没有关键词的真实私聊",
+            platform_id="unknown-platform",
+        )
+        ctx = _make_context()
+
+        with (
+            patch.object(_dispatch, "reason_with_llm_v1", AsyncMock(return_value=None)),
+            patch.object(
+                _dispatch,
+                "apply_provider_pin",
+                AsyncMock(return_value=True),
+            ) as pin,
+        ):
+            handled = await _dispatch._v1_fallback(ctx, event, event.message_str)
+
+        assert handled is False
+        pin.assert_not_awaited()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Pipeline ordering — the order of stages is contractually sensitive

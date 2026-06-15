@@ -924,6 +924,57 @@ def build_onboarding_role_card(*, dept_name: str) -> dict[str, Any]:
     )
 
 
+def build_employee_insight_welcome_card(
+    *,
+    employee_name: str = "",
+    today_hint: str = "今天想试一个真实工作任务吗？",
+) -> dict[str, Any]:
+    """员工需求洞察第一张小白入口卡。"""
+    greet = f"{employee_name}，{today_hint}" if employee_name else today_hint
+    actions = [
+        ("写通知", "write_notice", "帮我写通知"),
+        ("整理资料", "organize_materials", "帮我整理资料"),
+        ("生成汇报", "generate_report", "帮我生成汇报"),
+        ("我不知道怎么用", "unknown_how_to_start", "我不知道怎么用"),
+    ]
+    buttons = [
+        {
+            "text": label,
+            "value": {
+                "employee_insight_action": action,
+                "prefill_text": prefill,
+            },
+            "type": "primary" if action != "unknown_how_to_start" else "default",
+        }
+        for label, action, prefill in actions
+    ]
+    return _business_card(
+        title="小助手陪你做一件事",
+        template="blue",
+        elements=[
+            _kami_lede(greet, "不用会写 prompt，点一个方向，我会一步步问你。"),
+            _md(
+                _aligned_fields(
+                    [
+                        ("方式", _ink("飞书私聊陪跑")),
+                        ("范围", "只记录任务类型、卡点和反馈"),
+                        ("退出", "随时回复“暂停”或“退出”"),
+                    ]
+                )
+            ),
+            {"tag": "hr"},
+            _md("你可以直接发任务，也可以先点一个入口："),
+            _button_row(buttons),
+            _md(
+                _muted(
+                    "如果不确定怎么开始，点“我不知道怎么用”，我会给你几个简单例子。"
+                ),
+                "notation",
+            ),
+        ],
+    )
+
+
 def build_onboarding_name_prompt_card(*, role_name: str) -> dict[str, Any]:
     """选完角色后推第 3 张卡：提示输入姓名。"""
     return _business_card(

@@ -10,8 +10,43 @@
     "default": true
   },
   "daily_outreach_limit": {
-    "description": "每名员工每日最多主动触达次数",
+    "description": "每日自动触达最多处理的试点员工数量",
     "type": "int",
-    "default": 1
+    "default": 20
+  },
+  "daily_outreach_enabled": {
+    "description": "是否注册每日自动触达任务；默认关闭，需要灰度验证通过后再开启",
+    "type": "bool",
+    "default": false
+  },
+  "daily_outreach_cron": {
+    "description": "每日自动触达 cron 表达式",
+    "type": "string",
+    "default": "0 10 * * *"
+  },
+  "daily_outreach_timezone": {
+    "description": "每日自动触达时区",
+    "type": "string",
+    "default": "Asia/Shanghai"
+  },
+  "daily_outreach_real_send_enabled": {
+    "description": "是否允许每日任务真实发送飞书私聊；默认关闭，关闭时只 dry-run",
+    "type": "bool",
+    "default": false
+  },
+  "daily_outreach_approved": {
+    "description": "每日任务真实发送审批开关；必须与 approval token 同时配置才会真实发送",
+    "type": "bool",
+    "default": false
+  },
+  "daily_outreach_approval_token": {
+    "description": "每日任务真实发送审批 token；不要提交真实值",
+    "type": "string",
+    "default": ""
+  },
+  "daily_outreach_message": {
+    "description": "每日触达文本回退文案；支持卡片时优先发送小白入口卡片",
+    "type": "string",
+    "default": ""
   }
 }

@@ -74,6 +74,15 @@ DEFAULT_ENTRIES: list[dict] = [
 
 PINNED_DASHBOARD_ENTRIES: list[dict] = [
     {
+        "name": "员工需求洞察",
+        "url": "/#/employee-insight",
+        "probe_host": None,
+        "probe_port": None,
+        "hint": "飞书私聊灰度验证、触达计划和员工需求闭环看板",
+        "icon": "🧭",
+        "pinned": True,
+    },
+    {
         "name": "记忆治理",
         "url": "/#/memory-governance",
         "probe_host": None,

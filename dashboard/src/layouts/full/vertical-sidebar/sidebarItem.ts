@@ -88,6 +88,15 @@ const sidebarItem: menu[] = [
     to: '/knowledge-base',
   },
   {
+    title: 'core.navigation.employeeInsight',
+    icon: 'mdi-account-search-outline',
+    to: '/employee-insight',
+    chip: '灰度',
+    chipColor: 'primary',
+    chipVariant: 'tonal',
+    chipIcon: 'mdi-shield-check-outline'
+  },
+  {
     title: 'core.navigation.persona',
     icon: 'mdi-heart',
     to: '/persona'
@@ -125,11 +134,6 @@ const sidebarItem: menu[] = [
         title: 'core.navigation.contentSopOps',
         icon: 'mdi-clipboard-pulse-outline',
         to: '/content-sop-ops'
-      },
-      {
-        title: 'core.navigation.employeeInsight',
-        icon: 'mdi-account-search-outline',
-        to: '/employee-insight'
       },
       {
         title: 'core.navigation.dashboard',

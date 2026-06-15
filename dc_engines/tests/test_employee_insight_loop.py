@@ -188,6 +188,22 @@ class _FakeSender:
         )
 
 
+class _FakeCardSender(_FakeSender):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cards: list[tuple[str, dict]] = []
+
+    async def send_interactive_card(
+        self, employee_id: str, card: dict
+    ) -> TextSendResult:
+        self.cards.append((employee_id, card))
+        return TextSendResult(
+            success=True,
+            provider_message_id=f"card_{employee_id}",
+            raw={"employee_id": employee_id, "msg_type": "interactive"},
+        )
+
+
 async def test_outreach_dispatcher_dry_run_does_not_call_sender(tmp_path) -> None:
     store = EmployeeInsightStore(tmp_path / "employee_insight.db")
     await store.upsert_profile(
@@ -261,6 +277,33 @@ async def test_outreach_dispatcher_sends_and_records_success(tmp_path) -> None:
     sessions = await store.list_sessions()
     assert sessions[0].status == EmployeeInsightSessionStatus.SENT
     assert sessions[0].metadata["provider_message_id"] == "msg_ou_ready"
+
+
+async def test_outreach_dispatcher_prefers_beginner_welcome_card(tmp_path) -> None:
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_ready",
+            employee_hash="hash_ready",
+            display_name="测试员工",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    sender = _FakeCardSender()
+    dispatcher = EmployeeInsightOutreachDispatcher(store, sender=sender)
+
+    result = await dispatcher.dispatch_daily_outreach(
+        now="2026-06-14T10:00:00Z",
+        approved=True,
+        dry_run=False,
+    )
+
+    assert sender.sent == []
+    assert sender.cards[0][0] == "ou_ready"
+    assert "employee_insight_action" in str(sender.cards[0][1])
+    assert result["sent"][0]["provider_message_id"] == "card_ou_ready"
+    sessions = await store.list_sessions()
+    assert sessions[0].metadata["message_type"] == "interactive_card"
 
 
 async def test_outreach_dispatcher_records_send_failure_without_marking_sent(

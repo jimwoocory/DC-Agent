@@ -257,8 +257,12 @@ async def _v1_fallback(
             # 3) keyword
             classification = classify_intent_v1(text, dynamic_aliases=dynamic)
             if classification is None:
-                return False
-            source = "keyword"
+                if not is_dc_router_managed_platform(event.get_platform_id() or ""):
+                    return False
+                classification = SimpleNamespace(intent="casual", source="default")
+                source = "default"
+            else:
+                source = "keyword"
             target_provider = V1_INTENT_TO_PROVIDER.get(classification.intent)
     else:
         target_provider = V1_INTENT_TO_PROVIDER.get(classification.intent)

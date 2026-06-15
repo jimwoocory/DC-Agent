@@ -177,6 +177,14 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         triggers=("department selected",),
         fallback="plain_text",
     ),
+    "employee_insight_welcome": CardSpec(
+        card_type="employee_insight_welcome",
+        version="1.0",
+        owner="employee_insight_plugin",
+        builder="build_employee_insight_welcome_card",
+        triggers=("daily employee insight outreach", "unknown how to start"),
+        fallback="plain_text",
+    ),
     "training_lesson": CardSpec(
         card_type="training_lesson",
         version="1.0",
@@ -661,6 +669,7 @@ def _sample_payload(builder_name: str) -> dict[str, Any]:
         },
         "build_onboarding_dept_card": {"welcome_name": "蔡挺"},
         "build_onboarding_role_card": {"dept_name": "策划"},
+        "build_employee_insight_welcome_card": {"employee_name": "测试员工"},
         "build_tutorial_lesson_card": {"lesson_id": "lesson_reasoning"},
         "build_quiz_question_card": {"q_num": 1, "total": 5},
         "build_skill_list_card": {

@@ -852,6 +852,12 @@ class EmployeeInsightOutreachScheduler:
             metadata={
                 "employee_hash": profile.employee_hash,
                 "preferred_touch_time": profile.preferred_touch_time,
+                "verification_scope": bool(
+                    profile.metadata.get("verification_scope", False)
+                ),
+                "metric_sample": bool(
+                    profile.metadata.get("verification_scope", False)
+                ),
             },
             summary="系统按试点名单完成一次主动私聊触达记录。",
             created_at=now_value,
@@ -974,7 +980,7 @@ class EmployeeInsightOutreachDispatcher:
         failed: list[dict[str, Any]] = []
         for item in plan["eligible"]:
             employee_id = item["employee_id"]
-            result = await self.sender.send_text(employee_id, text)
+            result, message_type = await self._send_beginner_message(item, text)
             if not result.success:
                 failed.append({"employee_id": employee_id, "error": result.error})
                 await scheduler.record_failed_outreach(
@@ -995,6 +1001,7 @@ class EmployeeInsightOutreachDispatcher:
                 metadata={
                     **session.metadata,
                     "provider_message_id": result.provider_message_id,
+                    "message_type": message_type,
                     "send_raw": result.raw,
                 },
             )
@@ -1013,6 +1020,29 @@ class EmployeeInsightOutreachDispatcher:
             "sent": sent,
             "failed": failed,
         }
+
+    async def _send_beginner_message(
+        self,
+        item: dict[str, Any],
+        text: str,
+    ) -> tuple[TextSendResult, str]:
+        employee_id = item["employee_id"]
+        card_sender = getattr(self.sender, "send_interactive_card", None)
+        if callable(card_sender):
+            from dc_engines.feishu_card_streamer import (
+                build_employee_insight_welcome_card,
+            )
+
+            card_result = await card_sender(
+                employee_id,
+                build_employee_insight_welcome_card(
+                    employee_name=str(item.get("display_name") or ""),
+                ),
+            )
+            if card_result.success:
+                return card_result, "interactive_card"
+        text_result = await self.sender.send_text(employee_id, text)
+        return text_result, "text"
 
 
 @dataclass(slots=True)

@@ -39,27 +39,68 @@ def _load_plugin_module():
 
 
 class _FakeContext:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, employee_store=None) -> None:
         self.employee_insight_data_dir = data_dir
+        self.cron_job_manager = None
+        self.employee_store = employee_store
 
     def get_config(self):
         return {}
 
 
+class _FakeCronJobManager:
+    def __init__(self) -> None:
+        self.jobs = []
+
+    async def add_basic_job(self, **kwargs):
+        self.jobs.append(kwargs)
+        return SimpleNamespace(job_id="job_employee_insight_daily")
+
+
+class _FakeConfiguredContext(_FakeContext):
+    def __init__(self, data_dir: Path, config: dict) -> None:
+        super().__init__(data_dir)
+        self._config = config
+        self.cron_job_manager = _FakeCronJobManager()
+
+    def get_config(self):
+        return self._config
+
+
+class _FakeEmployeeStore:
+    def __init__(self, employees: dict[str, SimpleNamespace]) -> None:
+        self.employees = employees
+
+    async def get_employee(self, open_id: str):
+        return self.employees.get(open_id)
+
+
 class _FakeEvent:
-    def __init__(self, text: str, sender_id: str = "ou_user") -> None:
+    def __init__(
+        self,
+        text: str,
+        sender_id: str = "ou_user",
+        *,
+        platform_name: str = "lark",
+        platform_id: str = "巅池-Agent小助手",
+        private_chat: bool = True,
+    ) -> None:
         self.message_str = text
-        self.unified_msg_origin = f"巅池-Agent小助手:FriendMessage:{sender_id}"
+        self.unified_msg_origin = f"{platform_id}:FriendMessage:{sender_id}"
         self.message_obj = SimpleNamespace(type="PrivateMessage")
         self.extras = {}
         self.result = None
         self._sender_id = sender_id
+        self._platform_name = platform_name
+        self._platform_id = platform_id
+        self._private_chat = private_chat
+        self._group_id = ""
 
     def get_platform_name(self):
-        return "lark"
+        return self._platform_name
 
     def get_platform_id(self):
-        return "巅池-Agent小助手"
+        return self._platform_id
 
     def get_sender_id(self):
         return self._sender_id
@@ -68,7 +109,10 @@ class _FakeEvent:
         return "测试员工"
 
     def get_group_id(self):
-        return ""
+        return self._group_id
+
+    def is_private_chat(self):
+        return self._private_chat
 
     def set_extra(self, key, value):
         self.extras[key] = value
@@ -111,6 +155,63 @@ async def test_employee_insight_plugin_records_private_message_session(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_employee_insight_plugin_auto_observes_new_private_message_sender(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    event = _FakeEvent("我不知道这个系统怎么用", sender_id="ou_new_employee")
+
+    await plugin.on_private_message(event)
+
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    profile = await store.get_profile("ou_new_employee")
+    assert profile is not None
+    assert profile.pilot_status == PilotStatus.ACTIVE
+    assert profile.role == "自然私聊观察"
+    assert profile.metadata["observed_from_dm"] is True
+    assert profile.metadata["verification_scope"] is True
+    assert event.result is None
+    audit = await store.list_audit_events("ou_new_employee")
+    assert audit[-1].action == "profile_observed_from_lark_dm"
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_enriches_profile_and_session_from_directory(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    employee_store = _FakeEmployeeStore(
+        {
+            "ou_activity": SimpleNamespace(
+                display_name="肖焕辉",
+                department="活动统筹部",
+                role="活动统筹",
+            )
+        }
+    )
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path, employee_store))
+    await plugin.initialize()
+    event = _FakeEvent("我想整理一下这次活动执行的需求", sender_id="ou_activity")
+
+    await plugin.on_private_message(event)
+
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    profile = await store.get_profile("ou_activity")
+    assert profile is not None
+    assert profile.display_name == "肖焕辉"
+    assert profile.department_id == "活动统筹部"
+    assert profile.role == "活动统筹"
+    assert profile.metadata["directory_source"] == "employees_db"
+    session = await store.get_session(event.extras["employee_insight_session_id"])
+    assert session is not None
+    assert session.department_id == "活动统筹部"
+    assert session.role == "活动统筹"
+    assert session.metadata["directory_display_name"] == "肖焕辉"
+
+
+@pytest.mark.asyncio
 async def test_employee_insight_plugin_handles_pause_as_muted(tmp_path: Path):
     module = _load_plugin_module()
     plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
@@ -127,10 +228,89 @@ async def test_employee_insight_plugin_handles_pause_as_muted(tmp_path: Path):
     assert events[-1].event_type == "opt_out"
 
 
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_registers_verification_profile_from_private_message(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    event = _FakeEvent("加入灰度验证", sender_id="ou_self_test")
+
+    await plugin.on_private_message(event)
+
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    profile = await store.get_profile("ou_self_test")
+    assert profile is not None
+    assert profile.pilot_status == PilotStatus.ACTIVE
+    assert profile.metadata["verification_scope"] is True
+    audit = await store.list_audit_events("ou_self_test")
+    assert audit[-1].action == "verification_profile_registered"
+    assert "灰度验证测试名单" in event.result.chain[0].text
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_accepts_display_named_lark_adapter(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    event = _FakeEvent(
+        "加入灰度验证",
+        sender_id="ou_display_name",
+        platform_name="巅池-Agent小助手",
+        platform_id="巅池-Agent小助手",
+    )
+
+    await plugin.on_private_message(event)
+
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    profile = await store.get_profile("ou_display_name")
+    assert profile is not None
+    assert profile.pilot_status == PilotStatus.ACTIVE
+    assert profile.metadata["self_registered"] is True
+    assert "灰度验证测试名单" in event.result.chain[0].text
+
+
 def test_employee_insight_plugin_ignores_group_events(tmp_path: Path):
     module = _load_plugin_module()
     plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
-    event = _FakeEvent("帮我写通知")
+    event = _FakeEvent("帮我写通知", private_chat=False)
     event.message_obj.type = "GroupMessage"
+    event._group_id = "oc_group"
 
     assert plugin._is_private_lark_event(event) is False
+
+
+def test_employee_insight_plugin_accepts_lark_p2p_chat_id_shape(tmp_path: Path):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    event = _FakeEvent("我不会用这个系统")
+    event.message_obj.chat_id = "oc_p2p_chat_id"
+
+    assert plugin._is_private_lark_event(event) is True
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_registers_daily_outreach_cron(
+    tmp_path: Path,
+) -> None:
+    module = _load_plugin_module()
+    context = _FakeConfiguredContext(
+        tmp_path,
+        {
+            "daily_outreach_enabled": True,
+            "daily_outreach_cron": "0 10 * * *",
+            "daily_outreach_timezone": "Asia/Shanghai",
+        },
+    )
+    plugin = module.EmployeeInsightPlugin(context)
+
+    await plugin.initialize()
+
+    assert context.cron_job_manager.jobs
+    job = context.cron_job_manager.jobs[0]
+    assert job["name"] == "员工需求洞察每日触达"
+    assert job["cron_expression"] == "0 10 * * *"
+    assert job["persistent"] is True

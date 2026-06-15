@@ -8,6 +8,13 @@
   var POS_KEY = "dc-dashboard-quick-entries-position-v2";
   var DEFAULT_ENTRIES = [
     {
+      name: "员工需求洞察",
+      url: "/#/employee-insight",
+      hint: "飞书私聊灰度验证、触达计划和员工需求闭环看板",
+      alive: null,
+      pinned: true,
+    },
+    {
       name: "Hermes Agent 官方 WebUI",
       url: "http://localhost:9119/",
       hint: "Hermes Agent 官方 UI / sessions 列表",
@@ -740,7 +747,24 @@
     var data = payload && payload.data ? payload.data : payload;
     if (data && data.data && Array.isArray(data.data.entries)) data = data.data;
     if (!data || !Array.isArray(data.entries)) throw new Error("entries missing");
-    return data.entries;
+    return mergeDefaultPinnedEntries(data.entries);
+  }
+
+  function mergeDefaultPinnedEntries(entries) {
+    var merged = Array.isArray(entries) ? entries.slice() : [];
+    DEFAULT_ENTRIES.forEach(function (defaultEntry) {
+      if (!defaultEntry || defaultEntry.pinned !== true || !defaultEntry.url) return;
+      var exists = merged.some(function (entry) {
+        return (
+          entry &&
+          (entry.name === defaultEntry.name || entry.url === defaultEntry.url)
+        );
+      });
+      if (!exists) {
+        merged.push(defaultEntry);
+      }
+    });
+    return merged;
   }
 
   function refreshStatus() {

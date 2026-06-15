@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>「活系统」之宠物系统 Codex 开发计划</title>
+  <style>
+    :root {
+      --ink: #18212b;
+      --muted: #5e6a75;
+      --line: #d9e2ea;
+      --band: #f5f7f9;
+      --accent: #0f766e;
+      --warn: #92400e;
+      --code: #111827;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: #fff;
+      line-height: 1.68;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #eef8f6;
+      padding: 48px 28px 28px;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; }
+    main { max-width: 1080px; margin: 0 auto; padding: 28px; }
+    h1 { margin: 0 0 12px; font-size: clamp(30px, 5vw, 50px); line-height: 1.15; letter-spacing: 0; }
+    h2 { margin: 38px 0 14px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 25px; }
+    h3 { margin: 24px 0 10px; font-size: 19px; }
+    p { margin: 10px 0; }
+    .subtitle { max-width: 850px; color: var(--muted); font-size: 18px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    .pill { border: 1px solid var(--line); background: #fff; padding: 6px 10px; border-radius: 999px; font-size: 14px; }
+    .callout { margin: 18px 0; padding: 16px 18px; border-left: 4px solid var(--accent); background: #effaf8; }
+    .warning { border-left-color: var(--warn); background: #fff8ed; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 14px; }
+    th, td { border: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--band); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #eef2f5; padding: 2px 5px; border-radius: 5px; }
+    pre { overflow: auto; padding: 16px; border-radius: 8px; background: var(--code); color: #e5edf5; }
+    pre code { background: transparent; color: inherit; padding: 0; }
+    .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 18px 0; }
+    .step { border: 1px solid var(--line); background: var(--band); border-radius: 8px; padding: 12px; text-align: center; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+    .panel { border: 1px solid var(--line); border-radius: 8px; padding: 15px; }
+    .panel h3 { margin-top: 0; color: var(--accent); }
+    ul, ol { padding-left: 22px; }
+    footer { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    @media (max-width: 760px) {
+      header { padding: 34px 18px 22px; }
+      main { padding: 18px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>「活系统」之宠物系统 Codex 开发计划</h1>
+      <p class="subtitle">底座优先：打通飞书、AstrBot、Router、Harness、Hermes、Obsidian/KB、桌面端，让宠物成为真实工作流的可视化状态层。</p>
+      <div class="meta">
+        <span class="pill">日期：2026-06-15</span>
+        <span class="pill">分支：feature/live-pet-system</span>
+        <span class="pill">策略：先闭环，后表现</span>
+        <span class="pill">开关：可灰度，可回滚</span>
+      </div>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>一、开发原则</h2>
+      <div class="callout">
+        先做“底座闭环”，再做“桌宠好看”。宠物表现必须来自真实业务事件，而不是前端自行猜状态。
+      </div>
+      <ol>
+        <li>不做第二只宠物：飞书、桌面端、任务系统共用同一 <code>pet_id</code>。</li>
+        <li>不做前端自嗨状态：宠物状态由服务端 reducer 统一生成。</li>
+        <li>不跳过业务链路：成长、情绪、动作必须来自真实事件。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>二、闭环链路</h2>
+      <div class="flow">
+        <div class="step">飞书</div>
+        <div class="step">AstrBot</div>
+        <div class="step">Router</div>
+        <div class="step">Harness</div>
+        <div class="step">Hermes</div>
+        <div class="step">Obsidian/KB</div>
+        <div class="step">Pet Live Core</div>
+        <div class="step">桌面端</div>
+      </div>
+      <table>
+        <thead><tr><th>环节</th><th>输出</th><th>宠物事件</th></tr></thead>
+        <tbody>
+          <tr><td>飞书入口</td><td>AstrBot event</td><td><code>feishu_message_received</code></td></tr>
+          <tr><td>Router</td><td>intent、provider、decision</td><td><code>router_decision_made</code></td></tr>
+          <tr><td>Harness</td><td>task_id、状态机</td><td><code>harness_task_created</code> / <code>harness_task_completed</code></td></tr>
+          <tr><td>Hermes</td><td>running/completed/failed callback</td><td><code>hermes_task_running</code> / <code>hermes_task_completed</code></td></tr>
+          <tr><td>Obsidian/KB</td><td>治理记忆、引用</td><td><code>memory_promoted</code> / <code>memory_context_injected</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>三、P0 模块</h2>
+      <pre><code>DC-Agent/
+  dc_engines/dc_engines/pet_live/
+    contracts.py
+    identity.py
+    event_bus.py
+    reducer.py
+    store.py
+    service.py
+    integrations.py
+    obsidian_bridge.py</code></pre>
+      <p><code>Pet Live Core</code> 是唯一状态源，Router/Harness/Hermes/Obsidian 只发布事件，飞书卡片和桌面端只读取状态。</p>
+    </section>
+
+    <section>
+      <h2>四、开发阶段</h2>
+      <table>
+        <thead><tr><th>阶段</th><th>周期</th><th>内容</th><th>验收</th></tr></thead>
+        <tbody>
+          <tr><td>Phase 0</td><td>0.5 天</td><td>分支、基线、现有测试</td><td>宠物和 Obsidian 合约测试通过</td></tr>
+          <tr><td>Phase 1</td><td>1 天</td><td>Pet Live Core</td><td>identity/event/reducer/store 单测通过</td></tr>
+          <tr><td>Phase 2</td><td>1 天</td><td>飞书/AstrBot 接入</td><td><code>/pet</code>、<code>/done</code> 写事件</td></tr>
+          <tr><td>Phase 3</td><td>1 天</td><td>Router event tap</td><td>Router 主流程不被宠物 tap 影响</td></tr>
+          <tr><td>Phase 4</td><td>1 天</td><td>Harness 生命周期</td><td>task 状态转移写事件</td></tr>
+          <tr><td>Phase 5</td><td>1 天</td><td>Hermes Bridge</td><td>running/completed/failed 写事件</td></tr>
+          <tr><td>Phase 6</td><td>1-2 天</td><td>Obsidian/KB 闭环</td><td>结果沉淀并能反哺 Router</td></tr>
+          <tr><td>Phase 7</td><td>1 天</td><td>Pet API</td><td><code>/api/pet/*</code> 可用</td></tr>
+          <tr><td>Phase 8</td><td>1 天</td><td>桌面端状态底座</td><td>轮询、心跳、游标恢复</td></tr>
+          <tr><td>Phase 9</td><td>2-3 天</td><td>宠物场景首版</td><td>真实业务事件驱动画面</td></tr>
+          <tr><td>Phase 10</td><td>1 天</td><td>灰度与回滚</td><td>白名单稳定使用</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>五、最终验收</h2>
+      <div class="grid">
+        <div class="panel">
+          <h3>飞书任务闭环</h3>
+          <p>飞书消息进入 AstrBot，经 Router、Harness、Hermes 完成并回群，宠物从 <code>working</code> 到 <code>success</code>。</p>
+        </div>
+        <div class="panel">
+          <h3>记忆反哺闭环</h3>
+          <p>任务成果进入 Obsidian/KB，下一轮 Router 命中记忆，宠物进入 <code>focused</code>。</p>
+        </div>
+        <div class="panel">
+          <h3>桌面同步闭环</h3>
+          <p>桌面端通过 <code>dc_feishu_session</code> 拉到同一 <code>pet_id</code>，事件增量驱动画面。</p>
+        </div>
+      </div>
+      <div class="callout warning">
+        所有新增能力必须有开关：<code>PET_LIVE_ENABLED</code>、<code>PET_LIVE_TAP_ENABLED</code>、<code>PET_LIVE_API_ENABLED</code>、<code>DIANCHI_PET_SCENE_ENABLED</code>。
+      </div>
+    </section>
+
+    <footer>
+      文档路径：DC-Agent/DOC/01_总体架构/活系统之宠物系统Codex开发计划_2026-06-15.html
+    </footer>
+  </main>
+</body>
+</html>

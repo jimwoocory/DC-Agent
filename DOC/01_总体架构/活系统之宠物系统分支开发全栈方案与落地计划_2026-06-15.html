@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>「活系统」之宠物系统分支开发全栈方案与落地计划</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5c6670;
+      --line: #d9e1e8;
+      --paper: #ffffff;
+      --band: #f4f7f9;
+      --accent: #0f766e;
+      --accent-2: #b45309;
+      --code: #0b1220;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.68;
+    }
+    header {
+      padding: 56px 28px 30px;
+      background: linear-gradient(180deg, #eef7f6 0%, #ffffff 100%);
+      border-bottom: 1px solid var(--line);
+    }
+    main {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .hero {
+      max-width: 1080px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 42px 0 14px;
+      padding-top: 6px;
+      border-top: 1px solid var(--line);
+      font-size: 25px;
+    }
+    h3 {
+      margin: 28px 0 10px;
+      font-size: 19px;
+    }
+    p { margin: 10px 0; }
+    .subtitle {
+      max-width: 850px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: #34404a;
+      font-size: 14px;
+    }
+    .callout {
+      margin: 18px 0;
+      padding: 16px 18px;
+      border-left: 4px solid var(--accent);
+      background: #eefaf8;
+    }
+    .warning {
+      border-left-color: var(--accent-2);
+      background: #fff8ed;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 22px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--band);
+      font-weight: 700;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #eef2f5;
+      color: #111827;
+      padding: 2px 5px;
+      border-radius: 5px;
+    }
+    pre {
+      overflow: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background: var(--code);
+      color: #e5edf5;
+      line-height: 1.55;
+    }
+    pre code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+    }
+    .panel h3 {
+      margin-top: 0;
+      color: var(--accent);
+    }
+    ul, ol { padding-left: 22px; }
+    li { margin: 5px 0; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+      margin: 20px 0;
+    }
+    .step {
+      border: 1px solid var(--line);
+      background: var(--band);
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      font-weight: 650;
+    }
+    .arrow {
+      display: none;
+    }
+    footer {
+      margin-top: 48px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+    @media (max-width: 760px) {
+      header { padding: 36px 18px 22px; }
+      main { padding: 18px; }
+      .flow { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <h1>「活系统」之宠物系统分支开发全栈方案与落地计划</h1>
+      <p class="subtitle">把飞书小助手、DC-Agent 宠物状态核心、dianchi-desktop 本地客户端和 Codex Pets 风格宠物场景打通，让员工看到的是同一只会响应工作状态的宠物。</p>
+      <div class="meta">
+        <span class="pill">日期：2026-06-15</span>
+        <span class="pill">分支：feature/live-pet-system</span>
+        <span class="pill">范围：DC-Agent + dianchi-desktop</span>
+        <span class="pill">目标：同身份、同事件流、同状态机</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>一、核心结论</h2>
+      <div class="callout">
+        可以升级，而且应该按“活系统”做。桌面端宠物不只是一个皮肤，而是飞书小助手的可视化身体；飞书里的 `/pet` 卡片和桌面端看到的必须是同一只宠物。
+      </div>
+      <table>
+        <thead>
+          <tr><th>现有资产</th><th>位置</th><th>活系统角色</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>飞书宠物助手 MVP</td><td><code>DC-Agent/data/plugins/feishu_pet_assistant/</code></td><td>业务入口、任务闭环、宠物卡片</td></tr>
+          <tr><td>宠物 SQLite</td><td><code>DC-Agent/data/feishu_pet.db</code></td><td>宠物状态和任务事件种子</td></tr>
+          <tr><td>本地客户端</td><td><code>/Users/dianchi/dianchi-desktop</code></td><td>桌面壳、登录态、宠物可视化容器</td></tr>
+          <tr><td>Codex Pets 参考</td><td><code>codex-pets.net</code></td><td>宠物包、动画状态、场景交互参考</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>二、目标架构</h2>
+      <div class="flow">
+        <div class="step">飞书用户</div>
+        <div class="step">飞书小助手</div>
+        <div class="step">Pet Live Core</div>
+        <div class="step">Pet API</div>
+        <div class="step">桌面宠物场景</div>
+      </div>
+      <p>关键原则是：同一身份、同一事件流、同一状态机、双端展示、渐进实时。第一阶段使用短轮询即可，稳定后再升级 SSE 或 WebSocket。</p>
+      <pre><code>飞书小助手 / 卡片动作 / 任务事件
+  -> DC-Agent Pet Live Core
+  -> pet_event_outbox + pet state reducer
+  -> /api/pet/me 与 /api/pet/events
+  -> dianchi-desktop PetRuntime
+  -> QWebEngineView 中的 React/Vite 宠物场景</code></pre>
+    </section>
+
+    <section>
+      <h2>三、数据模型</h2>
+      <h3>身份映射：pet_identity_links</h3>
+      <table>
+        <thead><tr><th>字段</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>pet_id</code></td><td>宠物全局 ID</td></tr>
+          <tr><td><code>feishu_open_id</code></td><td>飞书 sender open_id</td></tr>
+          <tr><td><code>employee_id</code></td><td>员工目录 ID，可后补</td></tr>
+          <tr><td><code>desktop_session_id</code></td><td>桌面端 <code>dc_feishu_session</code> 绑定</td></tr>
+        </tbody>
+      </table>
+      <h3>事件流：pet_event_outbox</h3>
+      <table>
+        <thead><tr><th>事件</th><th>来源</th><th>宠物状态</th></tr></thead>
+        <tbody>
+          <tr><td><code>assistant_message_received</code></td><td>飞书聊天</td><td><code>waiting</code></td></tr>
+          <tr><td><code>assistant_thinking_started</code></td><td>Router / Hermes / Codex</td><td><code>working</code></td></tr>
+          <tr><td><code>assistant_response_sent</code></td><td>小助手回复成功</td><td><code>success</code> / <code>happy</code></td></tr>
+          <tr><td><code>assistant_response_failed</code></td><td>执行失败</td><td><code>failed</code></td></tr>
+          <tr><td><code>task_completed</code></td><td>任务完成</td><td><code>success</code>，增加经验和能量</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>四、接口契约</h2>
+      <div class="grid">
+        <div class="panel">
+          <h3>当前宠物</h3>
+          <p><code>GET /api/pet/me</code></p>
+          <p>返回宠物档案、状态、任务统计和 <code>last_event_id</code>。</p>
+        </div>
+        <div class="panel">
+          <h3>事件增量</h3>
+          <p><code>GET /api/pet/events?after_id=...</code></p>
+          <p>桌面端按游标获取新事件。</p>
+        </div>
+        <div class="panel">
+          <h3>桌面心跳</h3>
+          <p><code>POST /api/pet/heartbeat</code></p>
+          <p>记录桌面在线、版本和最后消费游标。</p>
+        </div>
+        <div class="panel">
+          <h3>宠物动作</h3>
+          <p><code>POST /api/pet/actions</code></p>
+          <p>第一版支持 <code>feed</code>，后续支持换装和场景动作。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>五、代码落点</h2>
+      <table>
+        <thead><tr><th>区域</th><th>新增/修改文件</th><th>职责</th></tr></thead>
+        <tbody>
+          <tr><td>DC-Agent core</td><td><code>dc_engines/dc_engines/pet_live/</code></td><td>身份、状态机、事件 outbox、SQLite store</td></tr>
+          <tr><td>飞书插件</td><td><code>data/plugins/feishu_pet_assistant/</code></td><td>把 `/pet`、`/done`、卡片动作接入 live events</td></tr>
+          <tr><td>API</td><td><code>astrbot/dashboard/routes/pet_live.py</code> 或 dianchi 服务等价 route</td><td>提供桌面端访问的 `/api/pet/*`</td></tr>
+          <tr><td>桌面客户端</td><td><code>dianchi-desktop/src/pet_live_client.py</code> 等</td><td>轮询、缓存、心跳、状态桥接</td></tr>
+          <tr><td>宠物场景</td><td><code>dianchi-desktop/pet-scene/</code></td><td>React/Vite spritesheet 动画和场景渲染</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>六、里程碑</h2>
+      <table>
+        <thead><tr><th>阶段</th><th>周期</th><th>交付物</th><th>验收</th></tr></thead>
+        <tbody>
+          <tr><td>M0 基线</td><td>0.5 天</td><td>分支、现有测试、schema 记录</td><td>旧 `/pet` 测试通过</td></tr>
+          <tr><td>M1 Pet Live Core</td><td>1 天</td><td>身份、reducer、store、outbox</td><td>新增 core 单测通过</td></tr>
+          <tr><td>M2 飞书接入</td><td>1 天</td><td>插件事件化、卡片状态化</td><td>飞书任务完成写事件</td></tr>
+          <tr><td>M3 API</td><td>1-2 天</td><td><code>/api/pet/*</code></td><td>桌面 session 能拉宠物</td></tr>
+          <tr><td>M4 桌面客户端</td><td>1 天</td><td>PetLiveClient、PetRuntime</td><td>轮询状态和心跳可用</td></tr>
+          <tr><td>M5 场景首版</td><td>2-3 天</td><td>QWebEngineView + React/Vite 宠物场景</td><td>状态变化触发动画</td></tr>
+          <tr><td>M6 联动</td><td>1 天</td><td>飞书消息/任务驱动桌面宠物</td><td>同一用户同一宠物</td></tr>
+          <tr><td>M7 灰度</td><td>1 天</td><td>开关、名单、观测、验收记录</td><td>1-3 人稳定使用</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>七、P0 验收标准</h2>
+      <ol>
+        <li>飞书 open_id、桌面 session、pet_id 能稳定绑定。</li>
+        <li><code>/pet</code> 卡片和桌面宠物展示同一只宠物。</li>
+        <li>飞书消息或任务事件能写入 <code>pet_event_outbox</code>。</li>
+        <li>桌面端能通过 API 拉取当前宠物和增量事件。</li>
+        <li>宠物状态由服务端 reducer 统一生成。</li>
+        <li>桌面端重启后不丢失登录态和宠物游标。</li>
+        <li>所有新增功能默认可配置关闭。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>八、风险处理</h2>
+      <table>
+        <thead><tr><th>风险</th><th>处理</th></tr></thead>
+        <tbody>
+          <tr><td>身份错绑</td><td>所有 API 基于服务端 session 解析身份，不信任前端传 user_id。</td></tr>
+          <tr><td>桌面端离线</td><td>本地缓存最后状态，恢复后用 <code>after_id</code> 补事件。</td></tr>
+          <tr><td>飞书事件太多</td><td>reducer 节流，低价值消息只更新活跃时间。</td></tr>
+          <tr><td>动画过早复杂</td><td>第一版只支持 spritesheet manifest，不做编辑器。</td></tr>
+          <tr><td>玩具化</td><td>每个动画状态必须绑定真实业务事件。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout warning">
+        推荐顺序：先身份绑定，再事件 outbox，再 reducer，再桌面 API，最后做 Codex Pets 风格渲染。
+      </div>
+    </section>
+
+    <section>
+      <h2>九、最终定义</h2>
+      <pre><code>飞书小助手 = 它的嘴
+DC-Agent pet_live = 它的大脑和记忆
+dianchi-desktop = 它的身体
+Codex Pets 风格场景 = 它被员工看见的生活空间</code></pre>
+      <p>这条分支完成后，宠物系统会从“卡片小游戏”升级为“员工每天能感知到的工作陪伴界面”。</p>
+    </section>
+
+    <footer>
+      文档路径：DC-Agent/DOC/01_总体架构/活系统之宠物系统分支开发全栈方案与落地计划_2026-06-15.html
+    </footer>
+  </main>
+</body>
+</html>

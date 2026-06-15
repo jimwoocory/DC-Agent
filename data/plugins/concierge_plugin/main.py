@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections import Counter
@@ -195,9 +196,14 @@ class ConciergePlugin(Star):
         self.memory_bridge = EmployeeMemoryBridge()
         self.feishu_client: FeishuClient | None = None
         self.identity_overrides: dict[str, dict] = {"by_open_id": {}, "by_name": {}}
+        self.config: dict = {}
+        self.data_dir: Path | None = None
 
     async def initialize(self) -> None:
+        cfg = self.context.get_config() if hasattr(self.context, "get_config") else {}
+        self.config = cfg if isinstance(cfg, dict) else {}
         data_dir = Path(__file__).resolve().parents[3] / "data"
+        self.data_dir = data_dir
         data_dir.mkdir(parents=True, exist_ok=True)
         self.store = EmployeeStore(str(data_dir / "employees.db"))
         await self.store.initialize()
@@ -218,8 +224,16 @@ class ConciergePlugin(Star):
         try:
             _, creds = load_whitelist(wl_path)
             if creds and creds.enable:
-                self.feishu_client = FeishuClient(creds)
-                logger.info("[concierge] FeishuClient 启动 → /employees sync 可用")
+                client = FeishuClient(creds)
+                if client.enabled:
+                    self.feishu_client = client
+                    logger.info("[concierge] FeishuClient 启动 → /employees sync 可用")
+                else:
+                    self.feishu_client = None
+                    logger.warning(
+                        "[concierge] feishu 凭证未真正启用 → /employees sync 不可用"
+                        "（请检查 app_secret 环境变量是否传入 AstrBot 进程）"
+                    )
             else:
                 logger.info(
                     "[concierge] feishu 凭证缺失 → /employees sync 不可用"
@@ -228,6 +242,9 @@ class ConciergePlugin(Star):
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("[concierge] 加载 feishu 凭证异常：%s", exc)
+
+        await self._maybe_register_employee_directory_sync_job()
+        self._maybe_start_employee_directory_sync()
 
         # 注册 Dashboard Web API
         try:
@@ -270,6 +287,145 @@ class ConciergePlugin(Star):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("[concierge] 注册 web API 失败：%s", exc)
+
+    async def _maybe_register_employee_directory_sync_job(self) -> None:
+        if not self._employee_directory_auto_sync_enabled():
+            return
+        if self.feishu_client is None:
+            logger.info("[concierge] FeishuClient 未就绪，跳过员工目录自动同步任务注册")
+            return
+        cron_manager = getattr(self.context, "cron_job_manager", None)
+        if cron_manager is None or not hasattr(cron_manager, "add_basic_job"):
+            logger.info("[concierge] cron manager 不可用，跳过员工目录定时同步任务")
+            return
+        await cron_manager.add_basic_job(
+            name="飞书员工目录自动同步",
+            cron_expression=str(
+                self.config.get("employee_directory_sync_cron") or "15 8 * * *"
+            ),
+            timezone=str(
+                self.config.get("employee_directory_sync_timezone") or "Asia/Shanghai"
+            ),
+            handler=self._run_employee_directory_sync_job,
+            description="以飞书通讯录组织架构为权威源同步 EmployeeStore。",
+            payload={},
+            enabled=True,
+            persistent=True,
+        )
+
+    def _maybe_start_employee_directory_sync(self) -> None:
+        if not self._employee_directory_auto_sync_enabled():
+            return
+        if not bool(self.config.get("employee_directory_startup_sync_enabled", True)):
+            return
+        if self.feishu_client is None:
+            return
+        asyncio.create_task(self._run_employee_directory_sync("startup"))
+
+    def _employee_directory_auto_sync_enabled(self) -> bool:
+        return bool(self.config.get("employee_directory_auto_sync_enabled", True))
+
+    async def _run_employee_directory_sync_job(
+        self, payload: dict | None = None
+    ) -> dict:
+        _ = payload
+        return await self._run_employee_directory_sync("cron")
+
+    async def _run_employee_directory_sync(self, source: str) -> dict:
+        if self.store is None:
+            return {"success": False, "error": "EmployeeStore not ready"}
+        if self.feishu_client is None:
+            return {"success": False, "error": "FeishuClient not ready"}
+        report = await sync_from_feishu(
+            self.store,
+            self.feishu_client,
+            authoritative=bool(
+                self.config.get("employee_directory_sync_authoritative", True)
+            ),
+        )
+        result = {
+            "success": report.success,
+            "source": source,
+            "departments_scanned": report.departments_scanned,
+            "department_names": report.department_names[:50],
+            "users_added": report.users_added,
+            "users_updated": report.users_updated,
+            "users_skipped": report.users_skipped,
+            "error": report.error,
+        }
+        if report.success:
+            result["org_coverage"] = await self._build_employee_org_coverage()
+        if report.success:
+            logger.info(
+                "[concierge] 员工目录自动同步完成 source=%s departments=%s added=%s updated=%s skipped=%s coverage=%s/%s missing=%s",
+                source,
+                report.departments_scanned,
+                report.users_added,
+                report.users_updated,
+                report.users_skipped,
+                result.get("org_coverage", {}).get("matched_people", 0),
+                result.get("org_coverage", {}).get("expected_people", 0),
+                result.get("org_coverage", {}).get("missing_people", [])[:10],
+            )
+        else:
+            logger.warning(
+                "[concierge] 员工目录自动同步失败 source=%s error=%s",
+                source,
+                report.error,
+            )
+        return result
+
+    async def _build_employee_org_coverage(self) -> dict:
+        expected = self._load_expected_org_people()
+        if not expected or self.store is None:
+            return {
+                "expected_people": 0,
+                "matched_people": 0,
+                "missing_people": [],
+                "missing_departments": [],
+            }
+        employees = await self.store.list_employees(limit=10000)
+        synced_names = {
+            str(employee.display_name or "").strip()
+            for employee in employees
+            if str(employee.display_name or "").strip()
+        }
+        missing_people = sorted(name for name in expected if name not in synced_names)
+        missing_departments = sorted(
+            {
+                str(expected[name].get("department") or "").strip()
+                for name in missing_people
+                if str(expected[name].get("department") or "").strip()
+            }
+        )
+        return {
+            "expected_people": len(expected),
+            "matched_people": len(expected) - len(missing_people),
+            "missing_people": missing_people,
+            "missing_departments": missing_departments,
+        }
+
+    def _load_expected_org_people(self) -> dict[str, dict]:
+        data_dir = (
+            getattr(self, "data_dir", None)
+            or Path(__file__).resolve().parents[3] / "data"
+        )
+        path = data_dir / "config" / "company_org_structure.json"
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[concierge] 公司组织结构读取失败：%s", exc)
+            return {}
+        people = raw.get("people") if isinstance(raw, dict) else {}
+        if not isinstance(people, dict):
+            return {}
+        return {
+            str(name).strip(): profile
+            for name, profile in people.items()
+            if str(name).strip() and isinstance(profile, dict)
+        }
 
     # 接待引导职责【只归小助手】。
     # 其他机器人（巅池-技术 / 巅池-推广 等）只用自己的人格回答，不做员工身份采集。
@@ -1541,13 +1697,22 @@ class ConciergePlugin(Star):
                 self._reply(event, f"⚠️ 同步失败：{report.error}")
                 return
             samples = "、".join(report.samples[:5]) if report.samples else "（无）"
+            coverage = await self._build_employee_org_coverage()
+            missing_people = "、".join(coverage["missing_people"][:10]) or "无"
+            missing_departments = (
+                "、".join(coverage["missing_departments"][:10]) or "无"
+            )
             self._reply(
                 event,
                 "✅ 同步完成：\n"
                 f"  • 扫描部门 {report.departments_scanned} 个\n"
+                f"  • 部门：{'、'.join(report.department_names[:8]) or '（无）'}\n"
                 f"  • 新增 {report.users_added}\n"
                 f"  • 更新 {report.users_updated}\n"
                 f"  • 跳过 {report.users_skipped}\n"
+                f"  • 公司组织覆盖 {coverage['matched_people']}/{coverage['expected_people']}\n"
+                f"  • 缺失部门：{missing_departments}\n"
+                f"  • 缺失人员：{missing_people}\n"
                 f"  • 示例：{samples}",
             )
             return

@@ -5,4 +5,11 @@
 export PATH="/opt/homebrew/bin:/Users/dianchi/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 cd /Users/dianchi/DC-Agent
 
+# Load local secrets for launchd-started services. This file is outside the repo.
+if [ -f "$HOME/.dc-agent.env" ]; then
+  set -a
+  . "$HOME/.dc-agent.env"
+  set +a
+fi
+
 exec .venv/bin/python main.py

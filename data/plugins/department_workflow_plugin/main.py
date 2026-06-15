@@ -16,6 +16,7 @@ from dc_engines.department_workflows import (
     strip_internal_memory_context,
     workflow_catalog,
 )
+from dc_engines.employee_directory.requester import requester_meta_from_employee
 from dc_engines.harness import allows_auto_complete_on_response
 from dc_engines.harness.content_sop_runtime import plan_content_sop_dispatch
 
@@ -94,7 +95,7 @@ class DepartmentWorkflowPlugin(Star):
 
         sender_id = _get_sender_id(event)
         requester_meta = await self._load_requester_meta(sender_id)
-        department = str(requester_meta.get("requester_department") or "")
+        department = self._workflow_department_text(requester_meta)
         role = str(requester_meta.get("requester_role") or "")
         relation_type = str(requester_meta.get("requester_relation_type") or "")
         explicit_trigger = any(keyword in text for keyword in _TRIGGER_KEYWORDS)
@@ -327,13 +328,20 @@ class DepartmentWorkflowPlugin(Star):
             return {"requester_open_id": sender_id}
         if emp is None:
             return {"requester_open_id": sender_id}
-        return {
-            "requester_open_id": emp.open_id,
-            "requester_display_name": emp.display_name or "",
-            "requester_department": emp.department or "",
-            "requester_role": emp.role or "",
-            "requester_relation_type": emp.relation_type or "",
-        }
+        return requester_meta_from_employee(emp)
+
+    def _workflow_department_text(self, requester_meta: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key in ("requester_department", "requester_business_department"):
+            value = str(requester_meta.get(key) or "").strip()
+            if value:
+                parts.append(value)
+        for key in ("requester_department_path", "requester_department_aliases"):
+            values = requester_meta.get(key) or []
+            if not isinstance(values, list):
+                continue
+            parts.extend(str(value).strip() for value in values if str(value).strip())
+        return " ".join(dict.fromkeys(parts))
 
     async def _has_active_duplicate(
         self,

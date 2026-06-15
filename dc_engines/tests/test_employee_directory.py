@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import aiosqlite
+from dc_engines.employee_directory.requester import requester_meta_from_employee
 from dc_engines.employee_directory.store import EmployeeStore
 
 
@@ -71,6 +72,33 @@ async def test_update_profile_partial(employee_store: EmployeeStore) -> None:
     emp = await employee_store.get_employee("ou_z")
     assert emp.department == "业务部"
     assert emp.role == "客户经理"
+
+
+async def test_requester_meta_includes_business_department_context(
+    employee_store: EmployeeStore,
+) -> None:
+    await employee_store.get_or_create(
+        "ou_activity", platform_id="lark", display_name="肖焕辉"
+    )
+    await employee_store.update_profile(
+        "ou_activity",
+        department="活动统筹部",
+        role="活动统筹",
+        preferences={
+            "business_parent_department": "执行部门",
+            "department_path": ["总经办", "执行部门", "活动统筹部"],
+            "department_aliases": [],
+        },
+    )
+
+    emp = await employee_store.get_employee("ou_activity")
+    assert emp is not None
+
+    meta = requester_meta_from_employee(emp)
+
+    assert meta["requester_department"] == "活动统筹部"
+    assert meta["requester_business_department"] == "执行部门"
+    assert meta["requester_department_path"] == ["总经办", "执行部门", "活动统筹部"]
 
 
 async def test_update_profile_identity_fields(employee_store: EmployeeStore) -> None:

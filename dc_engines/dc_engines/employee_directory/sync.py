@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from lark_oapi.api.contact.v3 import ListDepartmentRequest, ListUserRequest
 
+from .org_structure import DepartmentOrgIndex, load_department_org_index
 from .store import EmployeeStore
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 class SyncReport:
     success: bool
     departments_scanned: int = 0
+    department_names: list[str] = field(default_factory=list)
     users_added: int = 0
     users_updated: int = 0
     users_skipped: int = 0
@@ -40,10 +42,34 @@ class SyncReport:
     samples: list[str] = field(default_factory=list)  # 前几条 display_name 用于显示
 
 
-async def _list_departments(client, root_department_id: str | None = None) -> list[str]:
-    """列出所有可见部门 ID（递归）。"""
-    dept_ids: list[str] = []
+@dataclass(slots=True)
+class DepartmentRecord:
+    open_department_id: str
+    name: str = ""
+    parent_department_id: str = ""
+
+
+def _department_display_name(department) -> str:
+    name = str(getattr(department, "name", "") or "").strip()
+    if name:
+        return name
+    i18n_name = getattr(department, "i18n_name", None)
+    for attr in ("zh_cn", "zh_cn_name", "name"):
+        value = str(getattr(i18n_name, attr, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+async def _list_department_records(
+    client, root_department_id: str | None = None
+) -> list[DepartmentRecord]:
+    """列出所有可见部门记录（递归）。"""
+    records: list[DepartmentRecord] = []
     page_token: str | None = None
+    effective_root_department_id = (
+        "0" if root_department_id is None else root_department_id
+    )
 
     while True:
         try:
@@ -54,15 +80,15 @@ async def _list_departments(client, root_department_id: str | None = None) -> li
                 .fetch_child(True)
                 .page_size(50)
             )
-            if root_department_id:
-                builder = builder.parent_department_id(root_department_id)
+            if effective_root_department_id:
+                builder = builder.parent_department_id(effective_root_department_id)
             if page_token:
                 builder = builder.page_token(page_token)
             req = builder.build()
             resp = await client._client.contact.v3.department.alist(req)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[employee_sync] list_department 异常: %s", exc)
-            return dept_ids
+            return records
 
         if not resp.success():
             logger.warning(
@@ -70,15 +96,27 @@ async def _list_departments(client, root_department_id: str | None = None) -> li
                 getattr(resp, "code", "?"),
                 getattr(resp, "msg", "?"),
             )
-            return dept_ids
+            return records
 
         items = (resp.data and resp.data.items) or []
         for d in items:
             did = getattr(d, "open_department_id", None) or getattr(
                 d, "department_id", None
             )
-            if did:
-                dept_ids.append(did)
+            if not did:
+                continue
+            parent_id = str(
+                getattr(d, "parent_department_id", "")
+                or getattr(d, "open_parent_department_id", "")
+                or ""
+            )
+            records.append(
+                DepartmentRecord(
+                    open_department_id=str(did),
+                    name=_department_display_name(d),
+                    parent_department_id=parent_id,
+                )
+            )
 
         if not (resp.data and resp.data.has_more):
             break
@@ -86,7 +124,39 @@ async def _list_departments(client, root_department_id: str | None = None) -> li
         if not page_token:
             break
 
-    return dept_ids
+    return records
+
+
+async def _list_departments(client, root_department_id: str | None = None) -> list[str]:
+    """列出所有可见部门 ID（递归）。"""
+    return [
+        record.open_department_id
+        for record in await _list_department_records(
+            client, root_department_id=root_department_id
+        )
+    ]
+
+
+def _sync_preferences(
+    existing_preferences: dict,
+    department_id: str,
+    *,
+    department_name: str = "",
+    org_index: DepartmentOrgIndex | None = None,
+) -> dict:
+    preferences = {
+        **(existing_preferences or {}),
+        "org_source": "feishu_contact",
+        "feishu_open_department_id": department_id,
+    }
+    if department_name:
+        preferences["feishu_department"] = department_name
+    org_info = org_index.lookup(department_name) if org_index and department_name else None
+    if org_info is not None:
+        preferences["business_parent_department"] = org_info.parent
+        preferences["department_path"] = list(org_info.path)
+        preferences["department_aliases"] = list(org_info.aliases)
+    return preferences
 
 
 async def _list_users_in_department(client, department_id: str) -> list[dict]:
@@ -151,26 +221,36 @@ async def sync_from_feishu(
     platform_id: str = "lark",
     root_department_id: str | None = None,
     department_name_map: dict[str, str] | None = None,
+    authoritative: bool = True,
 ) -> SyncReport:
     """同步主入口。
 
-    ``department_name_map``: 可选 open_department_id → 显示名 映射，缺则不填部门名。
+    ``department_name_map``: 可选 open_department_id → 显示名映射。
+    ``authoritative``: 默认以飞书通讯录为组织权威源，覆盖本地旧姓名/部门/岗位。
     """
     if not client or not client.enabled:
         return SyncReport(success=False, error="Feishu credentials 未启用")
 
     try:
-        dept_ids = await _list_departments(
+        dept_records = await _list_department_records(
             client, root_department_id=root_department_id
         )
     except Exception as exc:  # noqa: BLE001
         return SyncReport(success=False, error=f"list_department 失败: {exc}")
 
-    if not dept_ids:
+    if not dept_records:
         return SyncReport(
             success=False,
             error="未拿到任何部门——通常是 app 权限不足，需勾 contact:department.base:read",
         )
+
+    dept_ids = [record.open_department_id for record in dept_records]
+    auto_department_name_map = {
+        record.open_department_id: record.name for record in dept_records if record.name
+    }
+    if department_name_map:
+        auto_department_name_map.update(department_name_map)
+    org_index = load_department_org_index()
 
     seen_open_ids: set[str] = set()
     added = 0
@@ -187,6 +267,7 @@ async def sync_from_feishu(
                 continue
             seen_open_ids.add(oid)
 
+            dept_name = auto_department_name_map.get(did) or did[-8:]
             existing = await store.get_employee(oid)
             if existing is None:
                 # 新增
@@ -196,25 +277,37 @@ async def sync_from_feishu(
                     display_name=u["name"],
                 )
                 # 立即补部门 / 岗位
-                dept_name = (department_name_map or {}).get(did) or did[-8:]
                 await store.update_profile(
                     oid,
                     department=dept_name,
                     role=u.get("job_title", ""),
+                    preferences=_sync_preferences(
+                        emp.preferences,
+                        did,
+                        department_name=dept_name,
+                        org_index=org_index,
+                    ),
                 )
                 added += 1
                 if len(samples) < 5 and u["name"]:
                     samples.append(u["name"])
             else:
-                # 更新（不覆盖已有非空字段，按需补）
+                # 更新。默认以飞书通讯录为组织权威源，纠正本地旧部门名。
                 upd: dict = {}
-                if not existing.display_name and u["name"]:
+                if u["name"] and (authoritative or not existing.display_name):
                     upd["display_name"] = u["name"]
-                if not existing.department:
-                    dept_name = (department_name_map or {}).get(did) or did[-8:]
+                if authoritative or not existing.department:
                     upd["department"] = dept_name
-                if not existing.role and u.get("job_title"):
+                if u.get("job_title") and (authoritative or not existing.role):
                     upd["role"] = u["job_title"]
+                next_preferences = _sync_preferences(
+                    existing.preferences,
+                    did,
+                    department_name=dept_name,
+                    org_index=org_index,
+                )
+                if next_preferences != existing.preferences:
+                    upd["preferences"] = next_preferences
                 if upd:
                     await store.update_profile(oid, **upd)
                     updated += 1
@@ -224,6 +317,7 @@ async def sync_from_feishu(
     return SyncReport(
         success=True,
         departments_scanned=len(dept_ids),
+        department_names=sorted(set(auto_department_name_map.values())),
         users_added=added,
         users_updated=updated,
         users_skipped=skipped,

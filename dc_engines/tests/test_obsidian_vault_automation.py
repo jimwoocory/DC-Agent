@@ -15,12 +15,14 @@ def _make_wrapper(
     vault_root: Path,
     *,
     audit_log_path: Path | None = None,
+    max_plan_bytes: int = 256 * 1024,
 ) -> ObsidianVaultAutomation:
     return ObsidianVaultAutomation(
         VaultAutomationConfig(
             vault_roots=(vault_root,),
             audit_log_path=audit_log_path,
             actor="test-agent",
+            max_plan_bytes=max_plan_bytes,
         )
     )
 
@@ -149,6 +151,71 @@ def test_wrapper_denies_write_delete_and_shell_execution(tmp_path: Path) -> None
     assert denied_operations == ["write", "delete", "shell"]
     dry_run_records = [record for record in wrapper.audit_records if record.dry_run]
     assert [record.operation for record in dry_run_records] == ["plan_write"]
+
+
+def test_wrapper_creates_audited_write_plan_without_modifying_vault(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    note_path = _seed_vault(vault_root)
+    original_content = note_path.read_text(encoding="utf-8")
+    planned_content = original_content.replace(
+        "customer approval",
+        "legal and customer approval",
+    )
+    wrapper = _make_wrapper(vault_root)
+
+    plan = wrapper.plan_write("Notes/Launch.md", planned_content)
+
+    assert plan["dry_run"] is True
+    assert plan["plan_id"].startswith("ova-plan-")
+    assert plan["action"] == "update"
+    assert plan["risk"] == "medium"
+    assert plan["existing_sha256"]
+    assert plan["content_sha256"] != plan["existing_sha256"]
+    assert plan["created_at"] < plan["expires_at"]
+    assert "--- a/Notes/Launch.md" in plan["diff"]
+    assert "+++ b/Notes/Launch.md" in plan["diff"]
+    assert "+Launch work requires legal and customer approval." in plan["diff"]
+    assert note_path.read_text(encoding="utf-8") == original_content
+    audit_record = wrapper.audit_records[-1]
+    assert audit_record.operation == "plan_write"
+    assert audit_record.allowed is True
+    assert audit_record.dry_run is True
+    assert audit_record.payload["plan_id"] == plan["plan_id"]
+    assert audit_record.payload["diff"] == plan["diff"]
+
+
+def test_wrapper_plans_new_file_creation_without_creating_file(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    _seed_vault(vault_root)
+    wrapper = _make_wrapper(vault_root)
+
+    plan = wrapper.plan_write("Notes/New.md", "# New\n")
+
+    assert plan["action"] == "create"
+    assert plan["risk"] == "low"
+    assert plan["existing_sha256"] is None
+    assert "+# New" in plan["diff"]
+    assert not (vault_root / "Notes" / "New.md").exists()
+
+
+def test_wrapper_rejects_write_plan_over_size_limit(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    _seed_vault(vault_root)
+    wrapper = _make_wrapper(vault_root, max_plan_bytes=4)
+
+    with pytest.raises(VaultAccessError, match="exceeds byte limit"):
+        wrapper.plan_write("Notes/New.md", "too large")
+
+    denied = wrapper.audit_records[-1]
+    assert denied.operation == "plan_write"
+    assert denied.allowed is False
+    assert denied.dry_run is True
+    assert denied.payload["max_plan_bytes"] == 4
 
 
 def test_wrapper_writes_append_only_audit_records(tmp_path: Path) -> None:

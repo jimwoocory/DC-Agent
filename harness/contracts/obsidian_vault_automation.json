@@ -51,9 +51,24 @@
       "id": "ova-010",
       "description": "The runtime tool rejects write, delete, shell, obsidian-cli, and defuddle-style operations without invoking any shell adapter.",
       "verification": "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_rejects_non_read_only_operations -q"
+    },
+    {
+      "id": "ova-011",
+      "description": "Write planning returns a dry-run plan with plan_id, action, risk, expiry, content hashes, and unified diff without modifying vault files.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_creates_audited_write_plan_without_modifying_vault -q"
+    },
+    {
+      "id": "ova-012",
+      "description": "Write planning supports new-file creation plans without creating the target file.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_plans_new_file_creation_without_creating_file -q"
+    },
+    {
+      "id": "ova-013",
+      "description": "Write planning enforces configured plan byte limits and audits denied oversized plans as dry-run events.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_rejects_write_plan_over_size_limit -q"
     }
   ],
-  "phase": "phase_2_read_only_runtime_tool",
+  "phase": "phase_3_write_plan_contract",
   "allowed_operations": [
     "list",
     "read",
@@ -75,13 +90,24 @@
     "symlink_escape_blocking": true,
     "arbitrary_shell": "forbidden",
     "default_write_mode": "dry_run_only",
+    "write_plan_execution": "not_enabled",
+    "write_plan_required_fields": [
+      "plan_id",
+      "action",
+      "risk",
+      "created_at",
+      "expires_at",
+      "content_sha256",
+      "diff"
+    ],
     "audit_log": "append_only_jsonl"
   },
   "execution_skill_strategy": {
     "obsidian_cli": "deferred_until_controlled_wrapper_adapter_exists",
     "defuddle": "deferred_until_controlled_wrapper_adapter_exists",
     "native_obsidian_plugin": "out_of_scope_for_phase_1",
-    "future_write_path": "must pass through this wrapper with explicit non-dry-run approval, audit, tests, and contract update"
+    "future_write_path": "must pass through this wrapper with explicit non-dry-run approval, audit, tests, and contract update",
+    "phase_3_write_plan": "dry_run_plan_only_without_execution"
   },
   "runtime_tool": {
     "name": "astrbot_obsidian_vault",
@@ -93,7 +119,9 @@
     ],
     "optional_config": [
       "audit_log_path",
-      "max_read_bytes"
+      "max_read_bytes",
+      "max_plan_bytes",
+      "plan_ttl_seconds"
     ],
     "exposed_operations": [
       "list",
@@ -114,7 +142,7 @@
   "non_goals": [
     "Do not enable raw obsidian-cli access.",
     "Do not enable arbitrary shell execution.",
-    "Do not write, delete, rename, or move vault files in Phase 1.",
+    "Do not execute write, delete, rename, or move operations against vault files in Phase 3.",
     "Do not parse web pages with defuddle until it is exposed through a controlled wrapper adapter.",
     "Do not require a native Obsidian plugin."
   ],

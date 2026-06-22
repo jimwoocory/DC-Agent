@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from difflib import unified_diff
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import yaml
 
@@ -59,6 +61,8 @@ class VaultAutomationConfig:
     audit_log_path: Path | str | None = None
     actor: str = "obsidian_vault_wrapper"
     max_read_bytes: int = 256 * 1024
+    max_plan_bytes: int = 256 * 1024
+    plan_ttl_seconds: int = 3600
 
     def resolved_roots(self) -> tuple[Path, ...]:
         roots = tuple(
@@ -281,10 +285,52 @@ class ObsidianVaultAutomation:
         resolved = self._resolve_candidate_path(
             path, operation="plan_write", actor=actor
         )
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > self._config.max_plan_bytes:
+            self._audit(
+                "plan_write",
+                path,
+                allowed=False,
+                dry_run=True,
+                actor=actor,
+                reason="planned content exceeds byte limit",
+                payload={
+                    "bytes": len(content_bytes),
+                    "max_plan_bytes": self._config.max_plan_bytes,
+                },
+            )
+            raise VaultAccessError("Planned vault content exceeds byte limit.")
+
+        existing_content = ""
+        existing_sha256 = None
+        action = "create"
+        if resolved.exists():
+            self._ensure_readable_text_file(resolved, path, "plan_write", actor)
+            existing_content = resolved.read_text(encoding="utf-8")
+            existing_sha256 = hashlib.sha256(
+                existing_content.encode("utf-8")
+            ).hexdigest()
+            action = "update"
+
+        created_at = datetime.now(UTC)
+        expires_at = created_at + timedelta(seconds=self._config.plan_ttl_seconds)
+        relative_path = self._relative_path(resolved)
         payload = {
-            "path": self._relative_path(resolved),
-            "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-            "bytes": len(content.encode("utf-8")),
+            "plan_id": f"ova-plan-{uuid4().hex}",
+            "path": relative_path,
+            "action": action,
+            "risk": _plan_risk(action, len(content_bytes)),
+            "created_at": created_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "content_sha256": hashlib.sha256(content_bytes).hexdigest(),
+            "existing_sha256": existing_sha256,
+            "bytes": len(content_bytes),
+            "diff": _unified_content_diff(
+                existing_content,
+                content,
+                fromfile=f"a/{relative_path}",
+                tofile=f"b/{relative_path}",
+            ),
         }
         self._audit(
             "plan_write",
@@ -335,9 +381,9 @@ class ObsidianVaultAutomation:
             allowed=False,
             dry_run=False,
             actor=actor,
-            reason="vault wrapper is read-only in Phase 1",
+            reason="vault write execution is not enabled",
         )
-        raise VaultAccessError(f"Vault {operation} is not enabled in Phase 1.")
+        raise VaultAccessError(f"Vault {operation} is not enabled.")
 
     def _resolve_path(
         self,
@@ -490,6 +536,31 @@ def _parse_frontmatter(markdown: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         return {}
     return parsed
+
+
+def _unified_content_diff(
+    before: str,
+    after: str,
+    *,
+    fromfile: str,
+    tofile: str,
+) -> str:
+    return "".join(
+        unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=fromfile,
+            tofile=tofile,
+        )
+    )
+
+
+def _plan_risk(action: str, byte_count: int) -> str:
+    if action == "create" and byte_count <= 64 * 1024:
+        return "low"
+    if byte_count <= 256 * 1024:
+        return "medium"
+    return "high"
 
 
 def _format_timestamp(timestamp: float) -> str:

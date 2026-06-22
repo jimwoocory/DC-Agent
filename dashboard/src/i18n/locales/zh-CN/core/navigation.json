@@ -7,6 +7,7 @@
   "persona": "人格设定",
   "subagent": "子代理编排",
   "memoryGovernance": "记忆治理",
+  "harnessLoop": "Loop 闭环",
   "toolUse": "MCP",
   "extension": "插件",
   "extensionTabs": {

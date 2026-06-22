@@ -228,6 +228,26 @@ async def test_run_pip_in_process_streams_output_lines(monkeypatch):
     ]
 
 
+def test_streaming_log_writer_ignores_reentrant_logger_output():
+    logged_lines = []
+    writer = None
+
+    def record_log(line):
+        logged_lines.append(line)
+        writer.write(f"formatted log line: {line}\n")
+
+    writer = pip_installer_module._StreamingLogWriter(record_log, max_lines=10)
+
+    writer.write("Cannot install demo-package\n")
+    writer.write("    AstrBot (constraint) depends on shared-lib==2.0\n")
+
+    assert logged_lines == [
+        "Cannot install demo-package",
+        "    AstrBot (constraint) depends on shared-lib==2.0",
+    ]
+    assert writer.lines == logged_lines
+
+
 @pytest.mark.asyncio
 async def test_run_pip_in_process_preserves_shared_stream_order(monkeypatch):
     logged_lines = []

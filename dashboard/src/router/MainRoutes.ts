@@ -95,6 +95,11 @@ const MainRoutes = {
       component: () => import('@/views/MemoryGovernancePage.vue')
     },
     {
+      name: 'HarnessLoop',
+      path: '/harness-loop',
+      component: () => import('@/views/HarnessLoopPage.vue')
+    },
+    {
       name: 'CronJobs',
       path: '/cron',
       component: () => import('@/views/CronJobPage.vue')

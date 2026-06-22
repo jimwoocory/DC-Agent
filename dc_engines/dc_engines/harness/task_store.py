@@ -235,6 +235,30 @@ class HarnessTaskStore:
 
         return [self._task_from_row(row) for row in rows]
 
+    async def list_tasks(
+        self,
+        *,
+        limit: int = 50,
+        statuses: tuple[HarnessTaskStatus, ...] | None = None,
+    ) -> list[HarnessTask]:
+        await self.initialize()
+
+        query = "SELECT * FROM harness_tasks"
+        params: list[object] = []
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            query += f" WHERE status IN ({placeholders})"
+            params.extend(statuses)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(query, tuple(params))
+            rows = await cursor.fetchall()
+
+        return [self._task_from_row(row) for row in rows]
+
     async def get_latest_task_for_conversation(
         self,
         conversation_id: str,

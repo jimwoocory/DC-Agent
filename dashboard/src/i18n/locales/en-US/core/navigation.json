@@ -7,6 +7,7 @@
   "persona": "Persona",
   "subagent": "SubAgents",
   "memoryGovernance": "Memory Governance",
+  "harnessLoop": "Loop Timeline",
   "toolUse": "MCP Tools",
   "config": "Config",
   "chat": "Chat",

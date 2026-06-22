@@ -1,0 +1,52 @@
+{
+  "feature": "loop_engineering_mvp",
+  "goal": "Make every Harness task plan-driven, event-backed, replayable, and settlement-gated without replacing the existing task state machine or adding new database services.",
+  "acceptance_criteria": [
+    {
+      "id": "loop-mvp-001",
+      "description": "Harness task creation records a loop_plan_created event, and loop action/observation/decision events use the stable MVP payload shape.",
+      "verification": "uv run pytest dc_engines/tests/test_loop_runtime.py::test_create_task_records_loop_plan dc_engines/tests/test_loop_runtime.py::test_loop_orchestrator_records_action_observation_and_decision -q"
+    },
+    {
+      "id": "loop-mvp-002",
+      "description": "Harness completion is settlement-gated: completed tasks require non-empty evidence and terminal tasks reject additional loop action events.",
+      "verification": "uv run pytest dc_engines/tests/test_harness_loop_settlement.py::test_complete_task_records_evidence_settlement dc_engines/tests/test_harness_loop_settlement.py::test_complete_task_rejects_empty_evidence dc_engines/tests/test_harness_loop_settlement.py::test_terminal_task_rejects_loop_action -q"
+    },
+    {
+      "id": "loop-mvp-003",
+      "description": "Harness sensor settlement records loop observations, blocks insufficient-material tasks with blocking_reason, and routes review-required-by-default tasks to review_required instead of completed.",
+      "verification": "uv run pytest dc_engines/tests/test_harness_loop_settlement.py::test_sensor_blocks_with_loop_settlement dc_engines/tests/test_harness_loop_settlement.py::test_sensor_routes_review_required_task_to_review_gate -q"
+    },
+    {
+      "id": "loop-mvp-004",
+      "description": "Dashboard APIs expose Harness task lists and chronological task timelines from the existing harness_task_events store.",
+      "verification": "uv run pytest tests/test_harness_loop_route.py -q"
+    },
+    {
+      "id": "loop-mvp-005",
+      "description": "The deterministic Loop Engineering MVP evaluator is included in the targeted agent check profile.",
+      "verification": "uv run pytest tests/harness/test_loop_engineering_mvp_contract.py -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  },
+  "loop_event_types": [
+    "loop_plan_created",
+    "loop_action_started",
+    "loop_observation_recorded",
+    "loop_decision_recorded",
+    "loop_settlement_decided",
+    "loop_quality_gate_failed"
+  ],
+  "loop_payload_required_keys": [
+    "loop_version",
+    "step_id",
+    "kind",
+    "summary",
+    "status",
+    "evidence",
+    "metadata"
+  ]
+}

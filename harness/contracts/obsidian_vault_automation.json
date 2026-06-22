@@ -31,9 +31,29 @@
       "id": "ova-006",
       "description": "Every allowed, denied, and dry-run operation records an append-only audit entry with timestamp, actor, operation, path, allowed, dry_run, reason, and payload fields.",
       "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_writes_append_only_audit_records -q"
+    },
+    {
+      "id": "ova-007",
+      "description": "The runtime tool is registered as a gated builtin tool and is exposed only when provider_settings.obsidian_vault_automation.enabled is true.",
+      "verification": "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_is_registered_as_gated_builtin_tool -q"
+    },
+    {
+      "id": "ova-008",
+      "description": "The runtime tool requires configured vault roots and returns a friendly error when no root is configured.",
+      "verification": "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_requires_configured_roots -q"
+    },
+    {
+      "id": "ova-009",
+      "description": "The runtime tool exposes only list, read, search, metadata, and frontmatter operations through the controlled wrapper.",
+      "verification": "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_runs_read_only_operations -q"
+    },
+    {
+      "id": "ova-010",
+      "description": "The runtime tool rejects write, delete, shell, obsidian-cli, and defuddle-style operations without invoking any shell adapter.",
+      "verification": "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_rejects_non_read_only_operations -q"
     }
   ],
-  "phase": "phase_1_read_only",
+  "phase": "phase_2_read_only_runtime_tool",
   "allowed_operations": [
     "list",
     "read",
@@ -62,6 +82,34 @@
     "defuddle": "deferred_until_controlled_wrapper_adapter_exists",
     "native_obsidian_plugin": "out_of_scope_for_phase_1",
     "future_write_path": "must pass through this wrapper with explicit non-dry-run approval, audit, tests, and contract update"
+  },
+  "runtime_tool": {
+    "name": "astrbot_obsidian_vault",
+    "config_key": "provider_settings.obsidian_vault_automation",
+    "default_enabled": false,
+    "required_config": [
+      "enabled",
+      "vault_roots"
+    ],
+    "optional_config": [
+      "audit_log_path",
+      "max_read_bytes"
+    ],
+    "exposed_operations": [
+      "list",
+      "read",
+      "search",
+      "metadata",
+      "frontmatter"
+    ],
+    "not_exposed_operations": [
+      "plan_write",
+      "write",
+      "delete",
+      "shell",
+      "obsidian_cli",
+      "defuddle"
+    ]
   },
   "non_goals": [
     "Do not enable raw obsidian-cli access.",

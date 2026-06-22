@@ -70,6 +70,7 @@ _GLOBAL_MATCH_SKILLS: frozenset[str] = frozenset(
         "obsidian-markdown",
         "obsidian-bases",
         "json-canvas",
+        "mermaid-visualizer",
     }
 )
 
@@ -98,6 +99,16 @@ _GLOBAL_MATCH_ANCHORS: dict[str, tuple[str, ...]] = {
         "json canvas",
         "obsidian canvas",
         ".canvas",
+    ),
+    "mermaid-visualizer": (
+        "mermaid",
+        "flowchart",
+        "sequence diagram",
+        "state diagram",
+        "mindmap",
+        "mind map",
+        "visualize",
+        "diagram",
     ),
 }
 

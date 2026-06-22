@@ -1344,12 +1344,665 @@ def write_graph_config(vault_path: Path) -> None:
     )
 
 
-def write_company_canvas(
-    vault_path: Path,
+def validate_json_canvas(canvas: dict[str, Any]) -> list[str]:
+    """Return structural validation errors for an Obsidian JSON Canvas."""
+    errors: list[str] = []
+    nodes = canvas.get("nodes")
+    edges = canvas.get("edges")
+    if not isinstance(nodes, list):
+        errors.append("canvas.nodes must be a list")
+        nodes = []
+    if not isinstance(edges, list):
+        errors.append("canvas.edges must be a list")
+        edges = []
+
+    node_ids: set[str] = set()
+    all_ids: set[str] = set()
+    allowed_node_types = {"text", "file", "link", "group"}
+    required_node_fields = {"id", "type", "x", "y", "width", "height"}
+    side_values = {"top", "right", "bottom", "left"}
+    end_values = {"none", "arrow"}
+
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            errors.append(f"nodes[{index}] must be an object")
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            errors.append(f"nodes[{index}] must have a non-empty string id")
+            continue
+        if node_id in all_ids:
+            errors.append(f"duplicate canvas id: {node_id}")
+        all_ids.add(node_id)
+        node_ids.add(node_id)
+
+        missing = sorted(field for field in required_node_fields if field not in node)
+        if missing:
+            errors.append(f"node {node_id} missing fields: {', '.join(missing)}")
+        node_type = node.get("type")
+        if node_type not in allowed_node_types:
+            errors.append(f"node {node_id} has invalid type: {node_type}")
+        if node_type == "text" and "text" not in node:
+            errors.append(f"text node {node_id} missing text")
+        if node_type == "file" and "file" not in node:
+            errors.append(f"file node {node_id} missing file")
+        if node_type == "link" and "url" not in node:
+            errors.append(f"link node {node_id} missing url")
+
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            errors.append(f"edges[{index}] must be an object")
+            continue
+        edge_id = edge.get("id")
+        if not isinstance(edge_id, str) or not edge_id:
+            errors.append(f"edges[{index}] must have a non-empty string id")
+            continue
+        if edge_id in all_ids:
+            errors.append(f"duplicate canvas id: {edge_id}")
+        all_ids.add(edge_id)
+
+        from_node = edge.get("fromNode")
+        to_node = edge.get("toNode")
+        if from_node not in node_ids:
+            errors.append(f"edge {edge_id} references missing fromNode: {from_node}")
+        if to_node not in node_ids:
+            errors.append(f"edge {edge_id} references missing toNode: {to_node}")
+        for field in ("fromSide", "toSide"):
+            if field in edge and edge[field] not in side_values:
+                errors.append(f"edge {edge_id} has invalid {field}: {edge[field]}")
+        for field in ("fromEnd", "toEnd"):
+            if field in edge and edge[field] not in end_values:
+                errors.append(f"edge {edge_id} has invalid {field}: {edge[field]}")
+
+    return errors
+
+
+def canvas_text_node(
+    node_id: str,
+    text: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    *,
+    color: str | None = None,
+) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "id": node_id,
+        "type": "text",
+        "text": text,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+    }
+    if color:
+        node["color"] = color
+    return node
+
+
+def canvas_file_node(
+    node_id: str,
+    file: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    *,
+    color: str | None = None,
+) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "id": node_id,
+        "type": "file",
+        "file": file,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+    }
+    if color:
+        node["color"] = color
+    return node
+
+
+def canvas_edge(
+    edge_id: str,
+    from_node: str,
+    from_side: str,
+    to_node: str,
+    to_side: str,
+    *,
+    from_end: str | None = None,
+    to_end: str | None = None,
+    color: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    edge: dict[str, Any] = {
+        "id": edge_id,
+        "fromNode": from_node,
+        "fromSide": from_side,
+        "toNode": to_node,
+        "toSide": to_side,
+    }
+    if from_end:
+        edge["fromEnd"] = from_end
+    if to_end:
+        edge["toEnd"] = to_end
+    if color:
+        edge["color"] = color
+    if label:
+        edge["label"] = label
+    return edge
+
+
+COMPANY_CANVAS_ZONES: dict[str, tuple[int, int]] = {
+    "center": (0, 0),
+    "product": (-620, -120),
+    "business": (620, -120),
+    "people": (280, 360),
+    "review": (-260, 700),
+}
+
+
+def company_canvas_place(zone: str, dx: int = 0, dy: int = 0) -> dict[str, Any]:
+    x, y = COMPANY_CANVAS_ZONES[zone]
+    return {"zone": zone, "x": x + dx, "y": y + dy}
+
+
+COMPANY_CANVAS_ROOT_TEXT = (
+    "# 公司知识地图\n\n"
+    "人工排版的主地图，用来替代混乱的全局关系图谱。\n\n"
+    "从这里看主干，再下钻到 RawRefs。"
+)
+
+COMPANY_CANVAS_RAWREFS_TEXT = (
+    "## RawRefs 下钻层\n\n"
+    "真实原始文档节点在 `00_RawRefs/`。\n\n"
+    "默认不要把它们全放到全局图谱里；需要看某份文档时，打开该 RawRef 看局部图谱。"
+)
+
+COMPANY_CANVAS_NODE_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "kind": "text",
+        "id": "root",
+        "text_key": "root",
+        **company_canvas_place("center"),
+        "width": 420,
+        "height": 220,
+        "color": "1",
+    },
+    {
+        "kind": "text",
+        "id": "metrics",
+        "text_key": "metrics",
+        **company_canvas_place("center", dy=-320),
+        "width": 460,
+        "height": 240,
+        "color": "6",
+    },
+    {
+        "kind": "file",
+        "id": "product-customer",
+        "file": "10_Index/产品客户图谱.md",
+        **company_canvas_place("product"),
+        "width": 340,
+        "height": 170,
+        "color": "2",
+    },
+    {
+        "kind": "file",
+        "id": "product-line",
+        "file": "10_Index/产品线.md",
+        **company_canvas_place("product", dx=-420, dy=-170),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "customers",
+        "file": "10_Index/客户.md",
+        **company_canvas_place("product", dx=-420, dy=10),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "wuling",
+        "file": "10_Index/五菱.md",
+        **company_canvas_place("product", dx=-780, dy=-260),
+        "width": 260,
+        "height": 120,
+    },
+    {
+        "kind": "file",
+        "id": "baojun",
+        "file": "10_Index/宝骏.md",
+        **company_canvas_place("product", dx=-780, dy=-110),
+        "width": 260,
+        "height": 120,
+    },
+    {
+        "kind": "file",
+        "id": "liuzhou",
+        "file": "10_Index/柳汽.md",
+        **company_canvas_place("product", dx=-780, dy=40),
+        "width": 260,
+        "height": 120,
+    },
+    {
+        "kind": "file",
+        "id": "dongfeng",
+        "file": "10_Index/东风柳汽.md",
+        **company_canvas_place("product", dx=-780, dy=190),
+        "width": 260,
+        "height": 120,
+    },
+    {
+        "kind": "file",
+        "id": "business",
+        "file": "10_Index/业务主题图谱.md",
+        **company_canvas_place("business"),
+        "width": 340,
+        "height": 170,
+        "color": "3",
+    },
+    {
+        "kind": "file",
+        "id": "projects",
+        "file": "10_Index/项目.md",
+        **company_canvas_place("business", dx=420, dy=-180),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "market",
+        "file": "10_Index/市场与品牌.md",
+        **company_canvas_place("business", dx=420, dy=-10),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "doctype",
+        "file": "10_Index/文档类型图谱.md",
+        **company_canvas_place("business", dx=420, dy=160),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "strategy",
+        "file": "20_Bridges/传播策略.md",
+        **company_canvas_place("business", dx=780, dy=-140),
+        "width": 260,
+        "height": 110,
+    },
+    {
+        "kind": "file",
+        "id": "review",
+        "file": "20_Bridges/复盘结算.md",
+        **company_canvas_place("business", dx=780),
+        "width": 260,
+        "height": 110,
+    },
+    {
+        "kind": "file",
+        "id": "copy",
+        "file": "20_Bridges/文案素材.md",
+        **company_canvas_place("business", dx=780, dy=140),
+        "width": 260,
+        "height": 110,
+    },
+    {
+        "kind": "file",
+        "id": "people-map",
+        "file": "10_Index/人员部门图谱.md",
+        **company_canvas_place("people"),
+        "width": 340,
+        "height": 170,
+        "color": "5",
+    },
+    {
+        "kind": "file",
+        "id": "middle-office",
+        "file": "20_Bridges/Departments/中台部门.md",
+        **company_canvas_place("people", dx=420, dy=-200),
+        "width": 300,
+        "height": 130,
+        "color": "5",
+    },
+    {
+        "kind": "file",
+        "id": "customer-dept",
+        "file": "20_Bridges/Departments/客户部.md",
+        **company_canvas_place("people", dx=780, dy=-110),
+        "width": 300,
+        "height": 130,
+        "color": "5",
+    },
+    {
+        "kind": "file",
+        "id": "planning",
+        "file": "20_Bridges/Departments/策略部.md",
+        **company_canvas_place("people", dx=420, dy=-30),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "collab",
+        "file": "20_Bridges/Departments/执行部门.md",
+        **company_canvas_place("people", dx=420, dy=140),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "pending",
+        "file": "20_Bridges/待人工确认.md",
+        **company_canvas_place("review"),
+        "width": 360,
+        "height": 150,
+        "color": "6",
+    },
+    {
+        "kind": "file",
+        "id": "review-workbench",
+        "file": "10_Index/复核工作台.md",
+        **company_canvas_place("review", dx=520),
+        "width": 360,
+        "height": 150,
+        "color": "6",
+    },
+    {
+        "kind": "file",
+        "id": "p0",
+        "file": "20_Bridges/Review/P0-优先复核.md",
+        **company_canvas_place("review", dx=960, dy=-20),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "file",
+        "id": "employee-review",
+        "file": "20_Bridges/Review/员工确认记录.md",
+        **company_canvas_place("review", dx=960, dy=140),
+        "width": 300,
+        "height": 130,
+        "color": "6",
+    },
+    {
+        "kind": "file",
+        "id": "rule-confirmed",
+        "file": "20_Bridges/规则确认.md",
+        **company_canvas_place("review", dx=1300, dy=-20),
+        "width": 300,
+        "height": 130,
+    },
+    {
+        "kind": "text",
+        "id": "rawrefs",
+        "text_key": "rawrefs",
+        **company_canvas_place("review", dx=260, dy=220),
+        "width": 420,
+        "height": 190,
+        "color": "6",
+    },
+)
+
+COMPANY_CANVAS_EDGE_SPECS: tuple[dict[str, str], ...] = (
+    {
+        "id": "e-root-metrics",
+        "from_node": "metrics",
+        "from_side": "bottom",
+        "to_node": "root",
+        "to_side": "top",
+    },
+    {
+        "id": "e-root-product",
+        "from_node": "root",
+        "from_side": "left",
+        "to_node": "product-customer",
+        "to_side": "right",
+    },
+    {
+        "id": "e-root-business",
+        "from_node": "root",
+        "from_side": "right",
+        "to_node": "business",
+        "to_side": "left",
+    },
+    {
+        "id": "e-root-people",
+        "from_node": "root",
+        "from_side": "bottom",
+        "to_node": "people-map",
+        "to_side": "top",
+    },
+    {
+        "id": "e-product-line",
+        "from_node": "product-customer",
+        "from_side": "left",
+        "to_node": "product-line",
+        "to_side": "right",
+    },
+    {
+        "id": "e-product-customers",
+        "from_node": "product-customer",
+        "from_side": "left",
+        "to_node": "customers",
+        "to_side": "right",
+    },
+    {
+        "id": "e-line-wuling",
+        "from_node": "product-line",
+        "from_side": "left",
+        "to_node": "wuling",
+        "to_side": "right",
+    },
+    {
+        "id": "e-line-baojun",
+        "from_node": "product-line",
+        "from_side": "left",
+        "to_node": "baojun",
+        "to_side": "right",
+    },
+    {
+        "id": "e-line-liuzhou",
+        "from_node": "product-line",
+        "from_side": "left",
+        "to_node": "liuzhou",
+        "to_side": "right",
+    },
+    {
+        "id": "e-line-dongfeng",
+        "from_node": "customers",
+        "from_side": "left",
+        "to_node": "dongfeng",
+        "to_side": "right",
+    },
+    {
+        "id": "e-business-projects",
+        "from_node": "business",
+        "from_side": "right",
+        "to_node": "projects",
+        "to_side": "left",
+    },
+    {
+        "id": "e-business-market",
+        "from_node": "business",
+        "from_side": "right",
+        "to_node": "market",
+        "to_side": "left",
+    },
+    {
+        "id": "e-business-doctype",
+        "from_node": "business",
+        "from_side": "right",
+        "to_node": "doctype",
+        "to_side": "left",
+    },
+    {
+        "id": "e-doctype-strategy",
+        "from_node": "doctype",
+        "from_side": "right",
+        "to_node": "strategy",
+        "to_side": "left",
+    },
+    {
+        "id": "e-doctype-review",
+        "from_node": "doctype",
+        "from_side": "right",
+        "to_node": "review",
+        "to_side": "left",
+    },
+    {
+        "id": "e-doctype-copy",
+        "from_node": "doctype",
+        "from_side": "right",
+        "to_node": "copy",
+        "to_side": "left",
+    },
+    {
+        "id": "e-people-middle",
+        "from_node": "people-map",
+        "from_side": "right",
+        "to_node": "middle-office",
+        "to_side": "left",
+    },
+    {
+        "id": "e-middle-customer",
+        "from_node": "middle-office",
+        "from_side": "right",
+        "to_node": "customer-dept",
+        "to_side": "left",
+    },
+    {
+        "id": "e-middle-planning",
+        "from_node": "middle-office",
+        "from_side": "bottom",
+        "to_node": "planning",
+        "to_side": "top",
+    },
+    {
+        "id": "e-people-planning",
+        "from_node": "people-map",
+        "from_side": "right",
+        "to_node": "planning",
+        "to_side": "left",
+    },
+    {
+        "id": "e-people-collab",
+        "from_node": "people-map",
+        "from_side": "right",
+        "to_node": "collab",
+        "to_side": "left",
+    },
+    {
+        "id": "e-root-pending",
+        "from_node": "root",
+        "from_side": "bottom",
+        "to_node": "pending",
+        "to_side": "top",
+    },
+    {
+        "id": "e-pending-review",
+        "from_node": "pending",
+        "from_side": "right",
+        "to_node": "review-workbench",
+        "to_side": "left",
+    },
+    {
+        "id": "e-review-p0",
+        "from_node": "review-workbench",
+        "from_side": "right",
+        "to_node": "p0",
+        "to_side": "left",
+    },
+    {
+        "id": "e-review-employee",
+        "from_node": "review-workbench",
+        "from_side": "right",
+        "to_node": "employee-review",
+        "to_side": "left",
+    },
+    {
+        "id": "e-review-rule-confirmed",
+        "from_node": "review-workbench",
+        "from_side": "right",
+        "to_node": "rule-confirmed",
+        "to_side": "left",
+    },
+    {
+        "id": "e-pending-rawrefs",
+        "from_node": "review-workbench",
+        "from_side": "bottom",
+        "to_node": "rawrefs",
+        "to_side": "top",
+    },
+)
+
+
+def company_canvas_metrics_text(
+    rawref_count: int,
+    p0_count: int,
+    top_types: str,
+    generated_at: str,
+) -> str:
+    return (
+        "## 当前全量 RawRef\n\n"
+        f"- RawRefs：{rawref_count}\n"
+        f"- P0 候选：{p0_count}\n"
+        "- 源：NAS knowledge\n"
+        "- 路径：/Users/dianchi/nas_kb\n"
+        f"- 生成：{generated_at}\n"
+        f"- 类型 Top5：{top_types}"
+    )
+
+
+def build_company_canvas_node(
+    spec: dict[str, Any],
+    text_values: dict[str, str],
+) -> dict[str, Any]:
+    if spec["kind"] == "text":
+        return canvas_text_node(
+            spec["id"],
+            text_values[spec["text_key"]],
+            spec["x"],
+            spec["y"],
+            spec["width"],
+            spec["height"],
+            color=spec.get("color"),
+        )
+    if spec["kind"] == "file":
+        return canvas_file_node(
+            spec["id"],
+            spec["file"],
+            spec["x"],
+            spec["y"],
+            spec["width"],
+            spec["height"],
+            color=spec.get("color"),
+        )
+    raise ValueError(f"Unsupported company canvas node kind: {spec['kind']}")
+
+
+def build_company_canvas_edge(spec: dict[str, str]) -> dict[str, Any]:
+    return canvas_edge(
+        spec["id"],
+        spec["from_node"],
+        spec["from_side"],
+        spec["to_node"],
+        spec["to_side"],
+    )
+
+
+def build_company_canvas(
     docs: list[dict[str, Any]],
     by_type: dict[str, list[dict[str, Any]]],
     generated_at: str,
-) -> None:
+) -> dict[str, Any]:
     rawref_count = len(docs)
     p0_count = sum(
         1
@@ -1362,455 +2015,37 @@ def write_company_canvas(
             by_type.items(), key=lambda item: (-len(item[1]), item[0])
         )[:5]
     )
+    text_values = {
+        "root": COMPANY_CANVAS_ROOT_TEXT,
+        "metrics": company_canvas_metrics_text(
+            rawref_count,
+            p0_count,
+            top_types,
+            generated_at,
+        ),
+        "rawrefs": COMPANY_CANVAS_RAWREFS_TEXT,
+    }
     canvas = {
         "nodes": [
-            {
-                "id": "root",
-                "type": "text",
-                "text": "# 公司知识地图\n\n人工排版的主地图，用来替代混乱的全局关系图谱。\n\n从这里看主干，再下钻到 RawRefs。",
-                "x": 0,
-                "y": 0,
-                "width": 420,
-                "height": 220,
-                "color": "1",
-            },
-            {
-                "id": "metrics",
-                "type": "text",
-                "text": f"## 当前全量 RawRef\n\n- RawRefs：{rawref_count}\n- P0 候选：{p0_count}\n- 源：NAS knowledge\n- 路径：/Users/dianchi/nas_kb\n- 生成：{generated_at}\n- 类型 Top5：{top_types}",
-                "x": 0,
-                "y": -320,
-                "width": 460,
-                "height": 240,
-                "color": "6",
-            },
-            {
-                "id": "product-customer",
-                "type": "file",
-                "file": "10_Index/产品客户图谱.md",
-                "x": -620,
-                "y": -120,
-                "width": 340,
-                "height": 170,
-                "color": "2",
-            },
-            {
-                "id": "product-line",
-                "type": "file",
-                "file": "10_Index/产品线.md",
-                "x": -1040,
-                "y": -290,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "customers",
-                "type": "file",
-                "file": "10_Index/客户.md",
-                "x": -1040,
-                "y": -110,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "wuling",
-                "type": "file",
-                "file": "10_Index/五菱.md",
-                "x": -1400,
-                "y": -380,
-                "width": 260,
-                "height": 120,
-            },
-            {
-                "id": "baojun",
-                "type": "file",
-                "file": "10_Index/宝骏.md",
-                "x": -1400,
-                "y": -230,
-                "width": 260,
-                "height": 120,
-            },
-            {
-                "id": "liuzhou",
-                "type": "file",
-                "file": "10_Index/柳汽.md",
-                "x": -1400,
-                "y": -80,
-                "width": 260,
-                "height": 120,
-            },
-            {
-                "id": "dongfeng",
-                "type": "file",
-                "file": "10_Index/东风柳汽.md",
-                "x": -1400,
-                "y": 70,
-                "width": 260,
-                "height": 120,
-            },
-            {
-                "id": "business",
-                "type": "file",
-                "file": "10_Index/业务主题图谱.md",
-                "x": 620,
-                "y": -120,
-                "width": 340,
-                "height": 170,
-                "color": "3",
-            },
-            {
-                "id": "projects",
-                "type": "file",
-                "file": "10_Index/项目.md",
-                "x": 1040,
-                "y": -300,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "market",
-                "type": "file",
-                "file": "10_Index/市场与品牌.md",
-                "x": 1040,
-                "y": -130,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "doctype",
-                "type": "file",
-                "file": "10_Index/文档类型图谱.md",
-                "x": 1040,
-                "y": 40,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "strategy",
-                "type": "file",
-                "file": "20_Bridges/传播策略.md",
-                "x": 1400,
-                "y": -260,
-                "width": 260,
-                "height": 110,
-            },
-            {
-                "id": "review",
-                "type": "file",
-                "file": "20_Bridges/复盘结算.md",
-                "x": 1400,
-                "y": -120,
-                "width": 260,
-                "height": 110,
-            },
-            {
-                "id": "copy",
-                "type": "file",
-                "file": "20_Bridges/文案素材.md",
-                "x": 1400,
-                "y": 20,
-                "width": 260,
-                "height": 110,
-            },
-            {
-                "id": "people-map",
-                "type": "file",
-                "file": "10_Index/人员部门图谱.md",
-                "x": 280,
-                "y": 360,
-                "width": 340,
-                "height": 170,
-                "color": "5",
-            },
-            {
-                "id": "middle-office",
-                "type": "file",
-                "file": "20_Bridges/Departments/中台部门.md",
-                "x": 700,
-                "y": 160,
-                "width": 300,
-                "height": 130,
-                "color": "5",
-            },
-            {
-                "id": "customer-dept",
-                "type": "file",
-                "file": "20_Bridges/Departments/客户部.md",
-                "x": 1060,
-                "y": 250,
-                "width": 300,
-                "height": 130,
-                "color": "5",
-            },
-            {
-                "id": "planning",
-                "type": "file",
-                "file": "20_Bridges/Departments/策略部.md",
-                "x": 700,
-                "y": 330,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "collab",
-                "type": "file",
-                "file": "20_Bridges/Departments/执行部门.md",
-                "x": 700,
-                "y": 500,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "pending",
-                "type": "file",
-                "file": "20_Bridges/待人工确认.md",
-                "x": -260,
-                "y": 700,
-                "width": 360,
-                "height": 150,
-                "color": "6",
-            },
-            {
-                "id": "review-workbench",
-                "type": "file",
-                "file": "10_Index/复核工作台.md",
-                "x": 260,
-                "y": 700,
-                "width": 360,
-                "height": 150,
-                "color": "6",
-            },
-            {
-                "id": "p0",
-                "type": "file",
-                "file": "20_Bridges/Review/P0-优先复核.md",
-                "x": 700,
-                "y": 680,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "employee-review",
-                "type": "file",
-                "file": "20_Bridges/Review/员工确认记录.md",
-                "x": 700,
-                "y": 840,
-                "width": 300,
-                "height": 130,
-                "color": "6",
-            },
-            {
-                "id": "rule-confirmed",
-                "type": "file",
-                "file": "20_Bridges/规则确认.md",
-                "x": 1040,
-                "y": 680,
-                "width": 300,
-                "height": 130,
-            },
-            {
-                "id": "rawrefs",
-                "type": "text",
-                "text": "## RawRefs 下钻层\n\n真实原始文档节点在 `00_RawRefs/`。\n\n默认不要把它们全放到全局图谱里；需要看某份文档时，打开该 RawRef 看局部图谱。",
-                "x": 0,
-                "y": 920,
-                "width": 420,
-                "height": 190,
-                "color": "6",
-            },
+            build_company_canvas_node(spec, text_values)
+            for spec in COMPANY_CANVAS_NODE_SPECS
         ],
         "edges": [
-            {
-                "id": "e-root-metrics",
-                "fromNode": "metrics",
-                "fromSide": "bottom",
-                "toNode": "root",
-                "toSide": "top",
-            },
-            {
-                "id": "e-root-product",
-                "fromNode": "root",
-                "fromSide": "left",
-                "toNode": "product-customer",
-                "toSide": "right",
-            },
-            {
-                "id": "e-root-business",
-                "fromNode": "root",
-                "fromSide": "right",
-                "toNode": "business",
-                "toSide": "left",
-            },
-            {
-                "id": "e-root-people",
-                "fromNode": "root",
-                "fromSide": "bottom",
-                "toNode": "people-map",
-                "toSide": "top",
-            },
-            {
-                "id": "e-product-line",
-                "fromNode": "product-customer",
-                "fromSide": "left",
-                "toNode": "product-line",
-                "toSide": "right",
-            },
-            {
-                "id": "e-product-customers",
-                "fromNode": "product-customer",
-                "fromSide": "left",
-                "toNode": "customers",
-                "toSide": "right",
-            },
-            {
-                "id": "e-line-wuling",
-                "fromNode": "product-line",
-                "fromSide": "left",
-                "toNode": "wuling",
-                "toSide": "right",
-            },
-            {
-                "id": "e-line-baojun",
-                "fromNode": "product-line",
-                "fromSide": "left",
-                "toNode": "baojun",
-                "toSide": "right",
-            },
-            {
-                "id": "e-line-liuzhou",
-                "fromNode": "product-line",
-                "fromSide": "left",
-                "toNode": "liuzhou",
-                "toSide": "right",
-            },
-            {
-                "id": "e-line-dongfeng",
-                "fromNode": "customers",
-                "fromSide": "left",
-                "toNode": "dongfeng",
-                "toSide": "right",
-            },
-            {
-                "id": "e-business-projects",
-                "fromNode": "business",
-                "fromSide": "right",
-                "toNode": "projects",
-                "toSide": "left",
-            },
-            {
-                "id": "e-business-market",
-                "fromNode": "business",
-                "fromSide": "right",
-                "toNode": "market",
-                "toSide": "left",
-            },
-            {
-                "id": "e-business-doctype",
-                "fromNode": "business",
-                "fromSide": "right",
-                "toNode": "doctype",
-                "toSide": "left",
-            },
-            {
-                "id": "e-doctype-strategy",
-                "fromNode": "doctype",
-                "fromSide": "right",
-                "toNode": "strategy",
-                "toSide": "left",
-            },
-            {
-                "id": "e-doctype-review",
-                "fromNode": "doctype",
-                "fromSide": "right",
-                "toNode": "review",
-                "toSide": "left",
-            },
-            {
-                "id": "e-doctype-copy",
-                "fromNode": "doctype",
-                "fromSide": "right",
-                "toNode": "copy",
-                "toSide": "left",
-            },
-            {
-                "id": "e-people-middle",
-                "fromNode": "people-map",
-                "fromSide": "right",
-                "toNode": "middle-office",
-                "toSide": "left",
-            },
-            {
-                "id": "e-middle-customer",
-                "fromNode": "middle-office",
-                "fromSide": "right",
-                "toNode": "customer-dept",
-                "toSide": "left",
-            },
-            {
-                "id": "e-middle-planning",
-                "fromNode": "middle-office",
-                "fromSide": "bottom",
-                "toNode": "planning",
-                "toSide": "top",
-            },
-            {
-                "id": "e-people-planning",
-                "fromNode": "people-map",
-                "fromSide": "right",
-                "toNode": "planning",
-                "toSide": "left",
-            },
-            {
-                "id": "e-people-collab",
-                "fromNode": "people-map",
-                "fromSide": "right",
-                "toNode": "collab",
-                "toSide": "left",
-            },
-            {
-                "id": "e-root-pending",
-                "fromNode": "root",
-                "fromSide": "bottom",
-                "toNode": "pending",
-                "toSide": "top",
-            },
-            {
-                "id": "e-pending-review",
-                "fromNode": "pending",
-                "fromSide": "right",
-                "toNode": "review-workbench",
-                "toSide": "left",
-            },
-            {
-                "id": "e-review-p0",
-                "fromNode": "review-workbench",
-                "fromSide": "right",
-                "toNode": "p0",
-                "toSide": "left",
-            },
-            {
-                "id": "e-review-employee",
-                "fromNode": "review-workbench",
-                "fromSide": "right",
-                "toNode": "employee-review",
-                "toSide": "left",
-            },
-            {
-                "id": "e-review-rule-confirmed",
-                "fromNode": "review-workbench",
-                "fromSide": "right",
-                "toNode": "rule-confirmed",
-                "toSide": "left",
-            },
-            {
-                "id": "e-pending-rawrefs",
-                "fromNode": "review-workbench",
-                "fromSide": "bottom",
-                "toNode": "rawrefs",
-                "toSide": "top",
-            },
+            build_company_canvas_edge(spec) for spec in COMPANY_CANVAS_EDGE_SPECS
         ],
     }
+    return canvas
+
+
+def write_company_canvas(
+    vault_path: Path,
+    docs: list[dict[str, Any]],
+    by_type: dict[str, list[dict[str, Any]]],
+    generated_at: str,
+) -> None:
+    canvas = build_company_canvas(docs, by_type, generated_at)
+    if errors := validate_json_canvas(canvas):
+        raise ValueError("Invalid company canvas: " + "; ".join(errors))
     (vault_path / "10_Index" / "公司知识地图.canvas").write_text(
         json.dumps(canvas, ensure_ascii=False, indent="\t") + "\n",
         encoding="utf-8",

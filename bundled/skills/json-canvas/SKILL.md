@@ -56,6 +56,30 @@ A canvas file (`.canvas`) contains two top-level arrays following the [JSON Canv
 4. Write the updated JSON back to the file
 5. **Validate**: Re-check all ID uniqueness and edge reference integrity after editing
 
+### 5. Convert Content into a Visual Canvas
+
+Use this workflow when the user provides prose, an outline, a report, a SOP, or
+governed Obsidian memory and asks for a canvas, mind map, visual diagram, or
+spatial organization.
+
+1. Identify the content shape: hierarchy, process, comparison, clustered topics,
+   source/evidence map, or non-hierarchical relationship network.
+2. Choose a layout pattern before creating nodes:
+   - **Mind map**: one central root, primary branches around it, details near
+     their parent.
+   - **Freeform zones**: related clusters separated into left/right/top/bottom
+     regions with labeled groups.
+   - **Flow layout**: sequential stages arranged top-to-bottom or left-to-right.
+   - **Evidence map**: source/file nodes on one side, conclusions in the center,
+     outputs or decisions on the other side.
+3. Extract short node labels first. Keep each node scannable; use file nodes or
+   linked notes for long source text.
+4. Place groups before child nodes in the `nodes` array so groups render below
+   their contents.
+5. Add only edges that clarify relationships. Label edges when the relationship
+   type is not obvious.
+6. Validate JSON, IDs, edge references, spacing, and group bounds before output.
+
 ## Nodes
 
 Nodes are objects placed on the canvas. Array order determines z-index: first node = bottom layer, last node = top layer.
@@ -210,6 +234,12 @@ Generate 16-character lowercase hexadecimal strings (64-bit random value):
 - `x` increases right, `y` increases down; position is the top-left corner
 - Space nodes 50-100px apart; leave 20-50px padding inside groups
 - Align to grid (multiples of 10 or 20) for cleaner layouts
+- For generated canvases, prefer larger spacing: at least 320px between columns
+  and 200px between rows before accounting for node dimensions
+- Avoid overlap by checking bounding boxes, not just node centers
+- Put the root or main conclusion near `(0, 0)` unless editing an existing canvas
+- Use `fromSide` and `toSide` to match the layout direction (`right` to `left`
+  for horizontal flows, `bottom` to `top` for vertical flows)
 
 | Node Type | Suggested Width | Suggested Height |
 |-----------|-----------------|------------------|
@@ -218,6 +248,21 @@ Generate 16-character lowercase hexadecimal strings (64-bit random value):
 | Large text | 400-600 | 300-500 |
 | File preview | 300-500 | 200-400 |
 | Link preview | 250-400 | 100-200 |
+
+### Content-Based Text Node Sizing
+
+Use stable dimensions so generated canvases do not collapse into unreadable
+cards:
+
+| Text length | Suggested size | Use for |
+|-------------|----------------|---------|
+| Under 30 chars | 220 x 100 | short labels, states, simple topics |
+| 30-60 chars | 280 x 120 | concise explanations |
+| 60-100 chars | 340 x 150 | summary nodes |
+| Over 100 chars | 360 x 200 | dense notes; consider splitting |
+
+See [Layout Patterns](references/LAYOUTS.md) for mind map, freeform, flow, and
+evidence-map placement rules.
 
 ## Validation Checklist
 
@@ -231,6 +276,8 @@ After creating or editing a canvas file, verify:
 6. `fromEnd`/`toEnd` values are one of: `none`, `arrow`
 7. Color presets are `"1"` through `"6"` or valid hex (e.g., `"#FF0000"`)
 8. JSON is valid and parseable
+9. Nodes do not overlap, including group containers and their children
+10. Group nodes contain labels and bounds large enough for their children
 
 If validation fails, check for duplicate IDs, dangling edge references, or malformed JSON strings (especially unescaped newlines in text content).
 

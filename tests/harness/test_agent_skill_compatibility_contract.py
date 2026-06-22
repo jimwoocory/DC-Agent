@@ -32,7 +32,7 @@ def test_agent_skill_compatibility_contract_points_to_focused_verifiers() -> Non
         "uv run pytest tests/test_skill_loader.py::test_read_skill_card_rejects_references_outside_skill_dir tests/test_skill_loader.py::test_read_skill_card_rejects_parent_traversal_inside_skill_dir -q",
         "uv run pytest tests/harness/test_agent_skill_compatibility_contract.py -q",
         "uv run pytest tests/test_skill_loader.py::test_list_skills_finds_bundled_obsidian_skills tests/test_skill_loader.py::test_real_obsidian_authoring_skills_include_upstream_license tests/test_skill_loader.py::test_execution_oriented_obsidian_skills_do_not_bypass_allowlist -q",
-        "uv run pytest tests/test_skill_loader.py::test_match_obsidian_markdown_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_obsidian_bases_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_json_canvas_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_global_obsidian_skills_ignore_generic_business_text tests/test_skill_loader.py::test_global_obsidian_skills_ignore_execution_style_obsidian_text tests/test_skill_preloader.py::test_inject_obsidian_skill_under_business_intent -q",
+        "uv run pytest tests/test_skill_loader.py::test_match_obsidian_markdown_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_obsidian_bases_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_json_canvas_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_mermaid_visualizer_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_global_obsidian_skills_ignore_generic_business_text tests/test_skill_loader.py::test_global_obsidian_skills_ignore_execution_style_obsidian_text tests/test_skill_preloader.py::test_inject_obsidian_skill_under_business_intent -q",
         "uv run pytest tests/test_sync_bundled_skills.py -q",
     }
 
@@ -56,6 +56,7 @@ def test_agent_skill_compatibility_contract_documents_agent_skills_shape() -> No
         "obsidian-markdown",
         "obsidian-bases",
         "json-canvas",
+        "mermaid-visualizer",
     ]
     assert rules["deferred_execution_skills"] == ["obsidian-cli", "defuddle"]
 

@@ -16,6 +16,7 @@ APPROVED_AUTHORING_SKILLS = frozenset(
         "obsidian-markdown",
         "obsidian-bases",
         "json-canvas",
+        "mermaid-visualizer",
     }
 )
 DEFERRED_EXECUTION_SKILLS = frozenset({"obsidian-cli", "defuddle"})

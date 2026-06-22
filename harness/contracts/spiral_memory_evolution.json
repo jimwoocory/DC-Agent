@@ -27,87 +27,107 @@
             "description": "Content SOP settlement attaches the spiral evolution snapshot to review_required results so employee review, memory governance, and SOP upgrade proposals stay traceable from the harness task.",
             "verification": "uv run pytest dc_engines/tests/test_harness_lifecycle.py::test_content_sop_result_settlement_attaches_spiral_snapshot -q"
         },
-    {
-      "id": "sme-006",
-      "description": "Only explicit approved_for_runtime stable SOP proposals can be applied to the versioned content_sop_rule_overrides runtime file; pending, unreviewed, or generic approved proposals must not write runtime rules.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_requires_runtime_approval dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_rejects_generic_memory_approval -q"
+        {
+            "id": "sme-006",
+            "description": "Only explicit approved_for_runtime stable SOP proposals can be applied to the versioned content_sop_rule_overrides runtime file; pending, unreviewed, or generic approved proposals must not write runtime rules.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_requires_runtime_approval dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_rejects_generic_memory_approval -q"
         },
-    {
-      "id": "sme-007",
-      "description": "Applying an approved SOP proposal is idempotent and writes a versioned audit record without duplicating rules for the same proposal_id.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_writes_versioned_override dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_is_idempotent -q"
-    },
+        {
+            "id": "sme-007",
+            "description": "Applying an approved SOP proposal is idempotent and writes a versioned audit record without duplicating rules for the same proposal_id.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_writes_versioned_override dc_engines/tests/test_content_sop_rule_overrides.py::test_apply_rule_proposal_is_idempotent -q"
+        },
         {
             "id": "sme-008",
             "description": "Content SOP payloads hot-read matching enabled runtime rule overrides and append them to truth_requirements without changing static department workflow defaults.",
             "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_content_sop_payload_hot_reads_matching_rule -q"
         },
-    {
-      "id": "sme-009",
-      "description": "Runtime SOP rule overrides are rollbackable by proposal_id; disabled rules no longer affect future Content SOP payloads.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_rollback_rule_override_disables_runtime_rule -q"
-    },
-    {
-      "id": "sme-010",
-      "description": "Malformed or schema-invalid content_sop_rule_overrides config fails closed instead of silently dropping or overwriting runtime rules.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_load_fails_closed_on_malformed_json dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_load_fails_closed_on_invalid_schema dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_load_fails_closed_on_invalid_rule_entry -q"
-    },
-    {
-      "id": "sme-011",
-      "description": "Runtime override backups and temporary files are kept outside data/config so sensitive SOP rule backups are not accidentally staged as config files.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_save_keeps_rollback_backup -q"
-    },
-    {
-      "id": "sme-012",
-      "description": "Stable Content SOP rule proposals have a persisted review store with pending, approved_for_runtime, applied, rejected, and rolled_back states plus append-only audit events.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_proposals.py::test_approve_apply_and_rollback_rule_proposal -q"
-    },
-    {
-      "id": "sme-013",
-      "description": "The Feishu review plugin rejects untrusted hand-written card actions and non-admin reviewers before approving, applying, or rolling back runtime SOP rules.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_rejects_untrusted_card_action dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_requires_admin_reviewer -q"
-    },
-    {
-      "id": "sme-014",
-      "description": "The Feishu review plugin uses a two-step apply/rollback confirmation flow: approve sends a confirm card, confirm applies the versioned override, and rollback confirm disables the rule.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_approve_then_confirm_apply dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_rollback_confirm -q"
-    },
-    {
-      "id": "sme-015",
-      "description": "Obsidian governance import can draft pending Content SOP rule proposals from repeated approved governed process memories, while keeping runtime application behind the Feishu human review plugin.",
-      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_import_approved_content_sop_memories_drafts_rule_proposal dc_engines/tests/test_spiral_evolution.py::test_draft_rule_proposals_from_approved_governed_memory_store -q"
-    },
-    {
-      "id": "sme-016",
-      "description": "Successful Content SOP settlement exports its spiral memory candidate as a need_review governed memory note in Obsidian Inbox, without making it eligible for default runtime recall before approval.",
-      "verification": "uv run pytest dc_engines/tests/test_harness_lifecycle.py::test_content_sop_result_settlement_exports_memory_candidate_to_obsidian dc_engines/tests/test_obsidian_memory_export_import.py::test_exported_content_sop_need_review_memory_is_not_default_recall -q"
-    },
-    {
-      "id": "sme-017",
-      "description": "Content SOP ops runtime summarizes pending rule proposals, approved-but-unapplied proposals, runtime overrides, governed memory queues, quality scores, and operating SOP recommendations for a full-chain dashboard.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_ops_dashboard_summarizes_full_content_sop_chain -q"
-    },
-    {
-      "id": "sme-018",
-      "description": "Content SOP ops runtime builds proactive Feishu/admin reminder cards for pending approvals, approved-but-unapplied runtime rules, need_review memories, and blocked quality gates.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_ops_reminders_and_card_cover_feishu_admin_actions dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_sends_ops_reminder_card -q"
-    },
-    {
-      "id": "sme-019",
-      "description": "Content SOP ops has a runtime scheduled-run entrypoint that plans governance import/export work and exports append-only audit reports without relying on test-only scripts.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_scheduled_ops_exports_audit_report dc_engines/tests/test_content_sop_ops.py::test_audit_report_export_is_runtime_function_not_test_only_script -q"
-    },
-    {
-      "id": "sme-020",
-      "description": "Content SOP ops exposes dashboard API routes for full-chain status and scheduled audit execution.",
-      "verification": "uv run pytest tests/test_content_sop_ops_route.py::test_content_sop_ops_dashboard_route_reads_runtime_store tests/test_content_sop_ops_route.py::test_content_sop_ops_scheduled_route_exports_report -q"
-    },
-    {
-      "id": "sme-021",
-      "description": "Content SOP production readiness confirmation verifies admin reviewers, Feishu reminders, scheduled import/export, audit reports, quality score policy, governed memory paths, and Obsidian vault availability.",
-      "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_production_config_confirmation_requires_real_ops_switches -q"
-    }
-  ],
+        {
+            "id": "sme-009",
+            "description": "Runtime SOP rule overrides are rollbackable by proposal_id; disabled rules no longer affect future Content SOP payloads.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_rollback_rule_override_disables_runtime_rule -q"
+        },
+        {
+            "id": "sme-010",
+            "description": "Malformed or schema-invalid content_sop_rule_overrides config fails closed instead of silently dropping or overwriting runtime rules.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_load_fails_closed_on_malformed_json dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_load_fails_closed_on_invalid_schema dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_load_fails_closed_on_invalid_rule_entry -q"
+        },
+        {
+            "id": "sme-011",
+            "description": "Runtime override backups and temporary files are kept outside data/config so sensitive SOP rule backups are not accidentally staged as config files.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_overrides.py::test_rule_override_save_keeps_rollback_backup -q"
+        },
+        {
+            "id": "sme-012",
+            "description": "Stable Content SOP rule proposals have a persisted review store with pending, approved_for_runtime, applied, rejected, and rolled_back states plus append-only audit events.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_proposals.py::test_approve_apply_and_rollback_rule_proposal -q"
+        },
+        {
+            "id": "sme-013",
+            "description": "The Feishu review plugin rejects untrusted hand-written card actions and non-admin reviewers before approving, applying, or rolling back runtime SOP rules.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_rejects_untrusted_card_action dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_requires_admin_reviewer -q"
+        },
+        {
+            "id": "sme-014",
+            "description": "The Feishu review plugin uses a two-step apply/rollback confirmation flow: approve sends a confirm card, confirm applies the versioned override, and rollback confirm disables the rule.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_approve_then_confirm_apply dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_rollback_confirm -q"
+        },
+        {
+            "id": "sme-015",
+            "description": "Obsidian governance import can draft pending Content SOP rule proposals from repeated approved governed process memories, while keeping runtime application behind the Feishu human review plugin.",
+            "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_import_approved_content_sop_memories_drafts_rule_proposal dc_engines/tests/test_spiral_evolution.py::test_draft_rule_proposals_from_approved_governed_memory_store -q"
+        },
+        {
+            "id": "sme-016",
+            "description": "Successful Content SOP settlement exports its spiral memory candidate as a need_review governed memory note in Obsidian Inbox, without making it eligible for default runtime recall before approval.",
+            "verification": "uv run pytest dc_engines/tests/test_harness_lifecycle.py::test_content_sop_result_settlement_exports_memory_candidate_to_obsidian dc_engines/tests/test_obsidian_memory_export_import.py::test_exported_content_sop_need_review_memory_is_not_default_recall -q"
+        },
+        {
+            "id": "sme-017",
+            "description": "Content SOP ops runtime summarizes pending rule proposals, approved-but-unapplied proposals, runtime overrides, governed memory queues, quality scores, and operating SOP recommendations for a full-chain dashboard.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_ops_dashboard_summarizes_full_content_sop_chain -q"
+        },
+        {
+            "id": "sme-018",
+            "description": "Content SOP ops runtime builds proactive Feishu/admin reminder cards for pending approvals, approved-but-unapplied runtime rules, need_review memories, and blocked quality gates.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_ops_reminders_and_card_cover_feishu_admin_actions dc_engines/tests/test_content_sop_rule_review_plugin.py::test_content_sop_rule_plugin_sends_ops_reminder_card -q"
+        },
+        {
+            "id": "sme-019",
+            "description": "Content SOP ops has a runtime scheduled-run entrypoint that plans governance import/export work and exports append-only audit reports without relying on test-only scripts.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_scheduled_ops_exports_audit_report dc_engines/tests/test_content_sop_ops.py::test_audit_report_export_is_runtime_function_not_test_only_script -q"
+        },
+        {
+            "id": "sme-020",
+            "description": "Content SOP ops exposes dashboard API routes for full-chain status and scheduled audit execution.",
+            "verification": "uv run pytest tests/test_content_sop_ops_route.py::test_content_sop_ops_dashboard_route_reads_runtime_store tests/test_content_sop_ops_route.py::test_content_sop_ops_scheduled_route_exports_report -q"
+        },
+        {
+            "id": "sme-021",
+            "description": "Content SOP production readiness confirmation verifies admin reviewers, Feishu reminders, scheduled import/export, audit reports, quality score policy, governed memory paths, and Obsidian vault availability.",
+            "verification": "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_production_config_confirmation_requires_real_ops_switches -q"
+        },
+        {
+            "id": "sme-022",
+            "description": "Employee chat can produce a low-friction SOP signal only when the message contains reusable operating intent and workflow scope; one-off wording edits must not become SOP candidates.",
+            "verification": "uv run pytest dc_engines/tests/test_spiral_evolution.py::test_employee_chat_signal_requires_reusable_scope dc_engines/tests/test_spiral_evolution.py::test_one_off_wording_edit_is_not_sop_signal -q"
+        },
+        {
+            "id": "sme-023",
+            "description": "Employee-facing SOP signal confirmation avoids SOP jargon, gives simple choices, and creates only a need_review process memory candidate with Obsidian governance as the promotion gate.",
+            "verification": "uv run pytest dc_engines/tests/test_spiral_evolution.py::test_employee_confirmation_is_low_friction_and_no_sop_jargon dc_engines/tests/test_spiral_evolution.py::test_employee_signal_builds_need_review_process_memory_candidate -q"
+        },
+        {
+            "id": "sme-024",
+            "description": "Rule proposal readiness diagnostics explain eligible support, missing scope, unapproved evidence, and remaining support needed before any runtime SOP proposal is drafted.",
+            "verification": "uv run pytest dc_engines/tests/test_spiral_evolution.py::test_rule_proposal_readiness_diagnoses_support_gap -q"
+        },
+        {
+            "id": "sme-025",
+            "description": "The DC router detects employee SOP signals on managed Feishu messages, sends a trusted low-friction confirmation card, and only after a remember action exports an auto-approved governed memory plus Obsidian governance note without applying runtime rules.",
+            "verification": "uv run pytest tests/dc_router/test_dispatch_pipeline.py::TestStage7SopSignal -q"
+        }
+    ],
     "autonomy_policy": {
         "automatic_allowed": [
             "record_experience",
@@ -125,21 +145,21 @@
         "hard_rule": "Memory can grow automatically; runtime thinking rules require approved memory, Subagent-Driven review, passing tests, and repository hygiene."
     },
     "target_architecture": {
-    "experience_source": "harness_tasks + harness_task_events",
-    "need_review_memory_export_entrypoint": "dc_engines.harness.content_sop_runtime.settle_content_sop_result",
-    "human_governance": "ObsidianVault/40_MemoryGovernance",
+        "experience_source": "harness_tasks + harness_task_events",
+        "need_review_memory_export_entrypoint": "dc_engines.harness.content_sop_runtime.settle_content_sop_result",
+        "human_governance": "ObsidianVault/40_MemoryGovernance",
         "approved_memory_store": "data/governed_memory.db",
-    "proposal_runtime": "dc_engines.spiral_evolution",
-    "approved_memory_to_rule_proposal_entrypoint": "dc_engines.memory_governance.importer.import_governance_notes",
-    "subagent_driven_gate": [
+        "proposal_runtime": "dc_engines.spiral_evolution",
+        "approved_memory_to_rule_proposal_entrypoint": "dc_engines.memory_governance.importer.import_governance_notes",
+        "subagent_driven_gate": [
             "implementer",
             "spec_compliance_reviewer",
             "code_quality_reviewer",
             "verification_runner"
         ],
-    "first_apply_target": "data/config/content_sop_rule_overrides.json hot-read by content SOP payload",
-    "human_review_entrypoint": "data/plugins/content_sop_rule_review_plugin"
-  },
+        "first_apply_target": "data/config/content_sop_rule_overrides.json hot-read by content SOP payload",
+        "human_review_entrypoint": "data/plugins/content_sop_rule_review_plugin"
+    },
     "non_goals": [
         "Do not let AI modify router, harness, department workflow, or prompt rules without review.",
         "Do not promote need_review memory into runtime recall.",

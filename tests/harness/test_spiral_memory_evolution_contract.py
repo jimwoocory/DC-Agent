@@ -40,6 +40,10 @@ def test_spiral_memory_evolution_contract_points_to_required_verifiers() -> None
         "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_scheduled_ops_exports_audit_report dc_engines/tests/test_content_sop_ops.py::test_audit_report_export_is_runtime_function_not_test_only_script -q",
         "uv run pytest tests/test_content_sop_ops_route.py::test_content_sop_ops_dashboard_route_reads_runtime_store tests/test_content_sop_ops_route.py::test_content_sop_ops_scheduled_route_exports_report -q",
         "uv run pytest dc_engines/tests/test_content_sop_ops.py::test_production_config_confirmation_requires_real_ops_switches -q",
+        "uv run pytest dc_engines/tests/test_spiral_evolution.py::test_employee_chat_signal_requires_reusable_scope dc_engines/tests/test_spiral_evolution.py::test_one_off_wording_edit_is_not_sop_signal -q",
+        "uv run pytest dc_engines/tests/test_spiral_evolution.py::test_employee_confirmation_is_low_friction_and_no_sop_jargon dc_engines/tests/test_spiral_evolution.py::test_employee_signal_builds_need_review_process_memory_candidate -q",
+        "uv run pytest dc_engines/tests/test_spiral_evolution.py::test_rule_proposal_readiness_diagnoses_support_gap -q",
+        "uv run pytest tests/dc_router/test_dispatch_pipeline.py::TestStage7SopSignal -q",
     ]
 
 

@@ -29,13 +29,13 @@
     },
     {
       "id": "agent-skill-compat-006",
-      "description": "DC-Agent installs the pure Obsidian authoring Agent Skills obsidian-markdown, obsidian-bases, and json-canvas, while leaving execution-oriented obsidian-cli and defuddle out of the runtime skill set until explicit execution policy exists.",
+      "description": "DC-Agent installs the pure Obsidian and visual authoring Agent Skills obsidian-markdown, obsidian-bases, json-canvas, and mermaid-visualizer, while leaving execution-oriented obsidian-cli and defuddle out of the runtime skill set until explicit execution policy exists.",
       "verification": "uv run pytest tests/test_skill_loader.py::test_list_skills_finds_bundled_obsidian_skills tests/test_skill_loader.py::test_real_obsidian_authoring_skills_include_upstream_license tests/test_skill_loader.py::test_execution_oriented_obsidian_skills_do_not_bypass_allowlist -q"
     },
     {
       "id": "agent-skill-compat-007",
-      "description": "Pure Obsidian authoring skills bypass business intent allowlists only through the bounded global authoring-skill policy when their own skill matcher succeeds.",
-      "verification": "uv run pytest tests/test_skill_loader.py::test_match_obsidian_markdown_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_obsidian_bases_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_json_canvas_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_global_obsidian_skills_ignore_generic_business_text tests/test_skill_loader.py::test_global_obsidian_skills_ignore_execution_style_obsidian_text tests/test_skill_preloader.py::test_inject_obsidian_skill_under_business_intent -q"
+      "description": "Pure Obsidian and visual authoring skills bypass business intent allowlists only through the bounded global authoring-skill policy when their own skill matcher succeeds.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_match_obsidian_markdown_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_obsidian_bases_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_json_canvas_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_mermaid_visualizer_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_global_obsidian_skills_ignore_generic_business_text tests/test_skill_loader.py::test_global_obsidian_skills_ignore_execution_style_obsidian_text tests/test_skill_preloader.py::test_inject_obsidian_skill_under_business_intent -q"
     },
     {
       "id": "agent-skill-compat-008",
@@ -54,7 +54,8 @@
     "installed_obsidian_authoring_skills": [
       "obsidian-markdown",
       "obsidian-bases",
-      "json-canvas"
+      "json-canvas",
+      "mermaid-visualizer"
     ],
     "deferred_execution_skills": [
       "obsidian-cli",

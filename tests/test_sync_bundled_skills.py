@@ -19,6 +19,7 @@ def test_sync_bundled_skills_installs_authoring_skills_only(tmp_path: Path) -> N
     source = tmp_path / "bundled" / "skills"
     target = tmp_path / "data" / "skills"
     _write_skill(source, "obsidian-markdown")
+    _write_skill(source, "mermaid-visualizer")
     _write_skill(source, "obsidian-cli")
     _write_skill(source, "defuddle")
     _write_skill(source, "unknown-bundled-skill")
@@ -29,7 +30,8 @@ def test_sync_bundled_skills_installs_authoring_skills_only(tmp_path: Path) -> N
         allow_custom_target=True,
     )
 
-    assert installed == ["obsidian-markdown"]
+    assert installed == ["mermaid-visualizer", "obsidian-markdown"]
+    assert (target / "mermaid-visualizer" / "SKILL.md").is_file()
     assert (target / "obsidian-markdown" / "SKILL.md").is_file()
     assert not (target / "obsidian-cli").exists()
     assert not (target / "defuddle").exists()

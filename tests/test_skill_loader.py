@@ -185,6 +185,7 @@ def test_list_skills_finds_bundled_obsidian_skills(
     assert "obsidian-markdown" in names
     assert "obsidian-bases" in names
     assert "json-canvas" in names
+    assert "mermaid-visualizer" in names
     assert "obsidian-cli" not in names
     assert "defuddle" not in names
     # 每个 skill 都有 title + description
@@ -408,6 +409,16 @@ def test_match_json_canvas_bypasses_business_intent_allowlist(
     assert any(s.name == "json-canvas" for s in matched)
 
 
+def test_match_mermaid_visualizer_bypasses_business_intent_allowlist(
+    real_skills_root: Path,  # noqa: ARG001
+) -> None:
+    matched = match_skill_for_intent(
+        RouterIntent.DEEP_INSIGHT,
+        "Create a Mermaid sequence diagram for the API authentication flow",
+    )
+    assert any(s.name == "mermaid-visualizer" for s in matched)
+
+
 def test_global_obsidian_skills_ignore_generic_business_text(
     real_skills_root: Path,  # noqa: ARG001
 ) -> None:
@@ -423,6 +434,7 @@ def test_global_obsidian_skills_ignore_generic_business_text(
             "obsidian-markdown",
             "obsidian-bases",
             "json-canvas",
+            "mermaid-visualizer",
         }.isdisjoint({s.name for s in matched})
 
 
@@ -441,6 +453,7 @@ def test_global_obsidian_skills_ignore_execution_style_obsidian_text(
             "obsidian-markdown",
             "obsidian-bases",
             "json-canvas",
+            "mermaid-visualizer",
         }.isdisjoint({s.name for s in matched})
 
 
@@ -604,10 +617,28 @@ def test_real_obsidian_markdown_preloads_direct_references(
     assert "references/CALLOUTS.md" in text
 
 
+def test_real_json_canvas_preloads_layout_reference(
+    real_skills_root: Path,  # noqa: ARG001
+) -> None:
+    """The installed JSON Canvas skill preloads layout authoring guidance."""
+    path = REAL_SKILLS_ROOT / "json-canvas" / "SKILL.md"
+
+    text = read_skill_card(path, max_chars=4096)
+
+    assert "Referenced skill files" in text
+    assert "references/LAYOUTS.md" in text
+    assert "JSON Canvas Layout Patterns" in text
+
+
 def test_real_obsidian_authoring_skills_include_upstream_license(
     real_skills_root: Path,  # noqa: ARG001
 ) -> None:
-    for skill_name in ("obsidian-markdown", "obsidian-bases", "json-canvas"):
+    for skill_name in (
+        "obsidian-markdown",
+        "obsidian-bases",
+        "json-canvas",
+        "mermaid-visualizer",
+    ):
         license_path = REAL_SKILLS_ROOT / skill_name / "LICENSE"
         assert license_path.is_file()
         assert "MIT License" in license_path.read_text(encoding="utf-8")

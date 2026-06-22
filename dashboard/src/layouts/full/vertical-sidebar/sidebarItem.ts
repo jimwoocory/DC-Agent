@@ -131,6 +131,11 @@ const sidebarItem: menu[] = [
         to: '/memory-governance'
       },
       {
+        title: 'core.navigation.harnessLoop',
+        icon: 'mdi-source-branch-sync',
+        to: '/harness-loop'
+      },
+      {
         title: 'core.navigation.contentSopOps',
         icon: 'mdi-clipboard-pulse-outline',
         to: '/content-sop-ops'
@@ -139,6 +144,16 @@ const sidebarItem: menu[] = [
         title: 'core.navigation.dashboard',
         icon: 'mdi-view-dashboard',
         to: '/dashboard/default'
+      },
+      {
+        title: 'core.navigation.liveMonitor',
+        icon: 'mdi-monitor-dashboard',
+        to: '/live-monitor'
+      },
+      {
+        title: 'core.navigation.assistantHealth',
+        icon: 'mdi-monitor-dashboard',
+        to: '/assistant-health'
       },
       {
         title: 'core.navigation.console',

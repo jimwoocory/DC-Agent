@@ -41,6 +41,42 @@ from .routes.t2i import T2iRoute
 _BUNDLED_DIST = Path(__file__).parent / "dist"
 
 
+def _is_valid_dashboard_dist(path: str | Path | None) -> bool:
+    if not path:
+        return False
+    dist = Path(path)
+    return dist.is_dir() and (dist / "index.html").is_file()
+
+
+def _resolve_dashboard_static_path(
+    webui_dir: str | None,
+    bundled_dist: Path = _BUNDLED_DIST,
+) -> Path:
+    if _is_valid_dashboard_dist(webui_dir):
+        return Path(cast(str, webui_dir)).resolve()
+
+    user_dist = Path(get_astrbot_data_path()) / "dist"
+    if _is_valid_dashboard_dist(user_dist):
+        return user_dist.resolve()
+
+    if user_dist.exists():
+        logger.warning(
+            "Ignoring incomplete dashboard dist at %s; falling back to bundled dist.",
+            user_dist,
+        )
+
+    if _is_valid_dashboard_dist(bundled_dist):
+        logger.info("Using bundled dashboard dist: %s", bundled_dist)
+        return bundled_dist.resolve()
+
+    logger.warning(
+        "No valid dashboard dist found; expected index.html under %s or %s.",
+        user_dist,
+        bundled_dist,
+    )
+    return user_dist.resolve()
+
+
 class _AddrWithPort(Protocol):
     port: int
 
@@ -111,23 +147,12 @@ class AstrBotDashboard:
         self.db = db
 
         # Path priority:
-        # 1. Explicit webui_dir argument
-        # 2. data/dist/ (user-installed / manually updated dashboard)
-        # 3. astrbot/dashboard/dist/ (bundled with the wheel)
-        if webui_dir and os.path.exists(webui_dir):
-            self.data_path = os.path.abspath(webui_dir)
-        else:
-            user_dist = os.path.join(get_astrbot_data_path(), "dist")
-            if os.path.exists(user_dist):
-                self.data_path = os.path.abspath(user_dist)
-            elif _BUNDLED_DIST.exists():
-                self.data_path = str(_BUNDLED_DIST)
-                logger.info("Using bundled dashboard dist: %s", self.data_path)
-            else:
-                # Fall back to expected user path (will fail gracefully later)
-                self.data_path = os.path.abspath(user_dist)
+        # 1. Explicit webui_dir argument with index.html
+        # 2. data/dist/ with index.html (user-installed / manually updated dashboard)
+        # 3. astrbot/dashboard/dist/ with index.html (bundled with the wheel)
+        self.data_path = str(_resolve_dashboard_static_path(webui_dir))
 
-        self.app = Quart("dashboard", static_folder=self.data_path, static_url_path="/")
+        self.app = Quart(__name__, static_folder=self.data_path, static_url_path="/")
         APP = self.app  # noqa
         self.app.config["MAX_CONTENT_LENGTH"] = (
             128 * 1024 * 1024
@@ -156,6 +181,7 @@ class AstrBotDashboard:
         self.ar = AuthRoute(self.context, db)
         self.api_key_route = ApiKeyRoute(self.context, db)
         self.chat_route = ChatRoute(self.context, db, core_lifecycle)
+        self.chat_analytics_route = ChatAnalyticsRoute(self.context)
         self.open_api_route = OpenApiRoute(
             self.context,
             db,
@@ -178,8 +204,11 @@ class AstrBotDashboard:
         self.t2i_route = T2iRoute(self.context, core_lifecycle)
         self.kb_route = KnowledgeBaseRoute(self.context, core_lifecycle)
         self.memory_governance_route = MemoryGovernanceRoute(self.context)
+        self.harness_loop_route = HarnessLoopRoute(self.context)
         self.content_sop_ops_route = ContentSopOpsRoute(self.context)
         self.employee_insight_route = EmployeeInsightRoute(self.context)
+        self.pet_live_route = PetLiveRoute(self.context)
+        self.workspace_route = WorkspaceRoute(self.context)
         self.platform_route = PlatformRoute(self.context, core_lifecycle)
         self.backup_route = BackupRoute(self.context, db, core_lifecycle)
         self.live_chat_route = LiveChatRoute(self.context, db, core_lifecycle)
@@ -249,9 +278,15 @@ class AstrBotDashboard:
             "/api/auth/logout",
             "/api/auth/setup-status",
             "/api/auth/setup",
+            "/api/chat/health",
         }
         allowed_endpoint_prefixes = [
             "/api/file",
+            # Pet Live APIs authenticate with dc_feishu_session and the binding
+            # token inside the route, because the desktop client is not a
+            # dashboard user and must not need a dashboard JWT.
+            "/api/pet/",
+            "/api/workspace/",
             "/api/platform/webhook",
             "/api/stat/start-time",
             "/api/backup/download",  # 备份下载使用 URL 参数传递 token

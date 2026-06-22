@@ -15,6 +15,15 @@ from .guardrails import (
     HarnessGuardrailAssessment,
     assess_harness_guardrails,
 )
+from .loop_runtime import (
+    LOOP_EVENT_TYPES,
+    LOOP_VERSION,
+    LoopEventRecorder,
+    LoopOrchestrator,
+    LoopPlan,
+    LoopSettlement,
+    LoopStep,
+)
 from .memory_promotion import HarnessMemoryPromoter
 from .memory_store import HarnessMemoryRecord, HarnessMemoryStore
 from .task_store import HarnessTaskStore
@@ -32,10 +41,17 @@ __all__ = [
     "HARNESS_TERMINAL_STATUSES",
     "HARNESS_GUARDRAIL_VERSION",
     "HARNESS_TRUTH_GUARD",
+    "LOOP_EVENT_TYPES",
+    "LOOP_VERSION",
     "HarnessCognitionProvider",
     "HarnessCognitiveSnapshot",
     "HarnessEngine",
     "HarnessGuardrailAssessment",
+    "LoopEventRecorder",
+    "LoopOrchestrator",
+    "LoopPlan",
+    "LoopSettlement",
+    "LoopStep",
     "HarnessMemoryPromoter",
     "HarnessMemoryRecord",
     "HarnessMemoryStore",

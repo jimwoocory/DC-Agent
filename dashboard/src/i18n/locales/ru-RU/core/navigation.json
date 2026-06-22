@@ -1,12 +1,15 @@
 ﻿{
     "welcome": "Добро пожаловать",
     "dashboard": "Статистика",
+    "liveMonitor": "Мониторинг",
+    "assistantHealth": "Здоровье ассистента",
     "platforms": "Боты",
     "providers": "Провайдеры моделей",
     "commands": "Команды",
     "persona": "Персонажи",
     "subagent": "Субагенты",
     "memoryGovernance": "Управление памятью",
+    "harnessLoop": "Цикл Harness",
     "toolUse": "Инструменты MCP",
     "extension": "Плагины",
     "extensionTabs": {

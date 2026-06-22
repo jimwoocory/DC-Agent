@@ -1168,10 +1168,12 @@ async def test_memory_promotion_skips_empty_result(tmp_path: Path) -> None:
     )
     task = await engine.create_task(_make_request(title="空结果任务"))
 
-    await engine.complete_task(task.task_id, result={"notes": ""})
+    with pytest.raises(RuntimeError, match="evidence"):
+        await engine.complete_task(task.task_id, result={"notes": ""})
 
     record = await memory_store.get_by_task(task.task_id, "task_outcome")
     assert record is None
 
     events = await engine.store.list_events(task.task_id)
+    assert any(event.event_type == "loop_quality_gate_failed" for event in events)
     assert not any(event.event_type == "memory_promoted" for event in events)

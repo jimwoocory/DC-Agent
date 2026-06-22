@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from .contracts import (
     HARNESS_TERMINAL_STATUSES,
@@ -10,9 +11,15 @@ from .contracts import (
     HarnessTaskStatus,
 )
 from .guardrails import assess_harness_guardrails
+from .loop_runtime import LoopOrchestrator
 from .memory_promotion import HarnessMemoryPromoter
 from .source_provenance_guard import assert_completion_source_provenance
 from .task_store import HarnessTaskStore
+
+try:
+    from dc_engines.pet_live.store import PetLiveStore
+except Exception:  # noqa: BLE001
+    PetLiveStore = Any  # type: ignore[assignment,misc]
 
 ALLOWED_HARNESS_STATUS_TRANSITIONS: dict[HarnessTaskStatus, set[HarnessTaskStatus]] = {
     "pending": {
@@ -70,11 +77,13 @@ class HarnessEngine:
         ]
         | None = None,
         memory_promoter: HarnessMemoryPromoter | None = None,
+        pet_live_store: PetLiveStore | None = None,
     ) -> None:
         self.store = store
         self.session_snapshot_getter = session_snapshot_getter
         self.cognitive_snapshot_getter = cognitive_snapshot_getter
         self.memory_promoter = memory_promoter
+        self.pet_live_store = pet_live_store
 
     async def create_task(self, request: HarnessTaskCreateRequest) -> HarnessTask:
         payload = dict(request.payload)
@@ -116,6 +125,8 @@ class HarnessEngine:
             "guardrails_attached",
             guardrails_payload,
         )
+        await LoopOrchestrator(self.store).ensure_plan_created(task)
+        self._publish_pet_event(task, "harness_task_created")
         return task
 
     async def mark_in_progress(
@@ -137,6 +148,16 @@ class HarnessEngine:
         reviewer_note: str | None = None,
         result: dict | None = None,
     ) -> HarnessTask:
+        task = await self.store.get_task(task_id)
+        if task is None:
+            raise LookupError(f"task {task_id!r} not found")
+        await LoopOrchestrator(self.store).settle_for_review_required(
+            task,
+            review_reason=reviewer_note or "manual review required",
+            summary=reviewer_note or "Task requires review before completion.",
+            result=result,
+            metadata={"source": "HarnessEngine.mark_review_required"},
+        )
         return await self._transition_task_status(
             task_id,
             "review_required",
@@ -216,6 +237,42 @@ class HarnessEngine:
     ) -> HarnessTask:
         if status == "completed":
             await self._assert_completion_allowed(task_id, result)
+        elif status == "blocked":
+            existing_task = await self.store.get_task(task_id)
+            if existing_task is None:
+                raise LookupError(f"task {task_id!r} not found")
+            blocking_reason = ""
+            if event_payload:
+                blocking_reason = str(
+                    event_payload.get("blocking_reason")
+                    or event_payload.get("reason")
+                    or ""
+                )
+            await LoopOrchestrator(self.store).settle_for_blocked(
+                existing_task,
+                blocking_reason=blocking_reason,
+                summary=blocking_reason or "Task blocked.",
+                metadata=event_payload or {},
+            )
+        elif status == "review_required":
+            existing_task = await self.store.get_task(task_id)
+            if existing_task is None:
+                raise LookupError(f"task {task_id!r} not found")
+            review_reason = ""
+            if event_payload:
+                review_reason = str(
+                    event_payload.get("review_reason")
+                    or event_payload.get("reviewer_note")
+                    or event_payload.get("reason")
+                    or ""
+                )
+            await LoopOrchestrator(self.store).settle_for_review_required(
+                existing_task,
+                review_reason=review_reason or "review required",
+                summary=review_reason or "Task requires review before completion.",
+                result=result,
+                metadata=event_payload or {},
+            )
         return await self._transition_task_status(
             task_id,
             status,
@@ -352,6 +409,10 @@ class HarnessEngine:
                 {"reason": str(exc)},
             )
             raise
+        await LoopOrchestrator(self.store).settle_for_completion(
+            existing_task,
+            result,
+        )
 
     async def _transition_task_status(
         self,
@@ -365,13 +426,82 @@ class HarnessEngine:
         if existing_task is None:
             raise LookupError(f"task {task_id!r} not found")
         await self._assert_transition_allowed(existing_task, status)
-        return await self.store.update_task_status(
+        updated = await self.store.update_task_status(
             task_id,
             status,
             result=result,
             event_payload=event_payload,
             expected_status=existing_task.status,
         )
+        self._publish_pet_event(
+            updated,
+            self._event_type_for_status(status),
+            payload=event_payload or result or {},
+        )
+        return updated
+
+    def _publish_pet_event(
+        self,
+        task: HarnessTask,
+        event_type: str,
+        *,
+        payload: dict | None = None,
+    ) -> None:
+        if self.pet_live_store is None:
+            return
+        pet_id = str(task.payload.get("pet_id") or "")
+        employee_id = str(task.payload.get("employee_id") or "")
+        user_id = str(
+            employee_id
+            or task.payload.get("user_id")
+            or task.payload.get("employee_id")
+            or task.payload.get("feishu_open_id")
+            or task.session_id
+            or ""
+        )
+        if not pet_id or not user_id:
+            return
+        try:
+            from dc_engines.pet_live.event_bus import publish_pet_event
+            from dc_engines.pet_live.integrations import pet_live_enabled
+
+            if not pet_live_enabled():
+                return
+
+            publish_pet_event(
+                self.pet_live_store,
+                pet_id=pet_id,
+                user_id=user_id,
+                source="harness",
+                event_type=event_type,
+                source_ref={
+                    "employee_id": employee_id,
+                    "platform": task.platform_id,
+                    "conversation_id": task.conversation_id,
+                    "harness_task_id": task.task_id,
+                },
+                payload={
+                    "employee_id": employee_id,
+                    "task_id": task.task_id,
+                    "title": task.title,
+                    "status": task.status,
+                    **(payload or {}),
+                },
+            )
+        except Exception:
+            return
+
+    @staticmethod
+    def _event_type_for_status(status: HarnessTaskStatus) -> str:
+        return {
+            "in_progress": "harness_task_in_progress",
+            "review_required": "harness_task_review_required",
+            "completed": "harness_task_completed",
+            "failed": "harness_task_failed",
+            "blocked": "harness_task_blocked",
+            "cancelled": "harness_task_cancelled",
+            "pending": "harness_task_pending",
+        }.get(status, "harness_task_status_changed")
 
     async def _assert_transition_allowed(
         self,

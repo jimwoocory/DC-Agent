@@ -70,6 +70,7 @@ uv run python -m harness.evaluator.kb_import_contract --contract harness/contrac
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/planning_content_sop.json
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/media_generation_sop.json
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/content_sop_system.json
+uv run python -m harness.evaluator.loop_engineering_mvp
 
 echo "==> Checking fake-data runtime guard"
 uv run python scripts/check_fake_data_guard.py
@@ -82,6 +83,7 @@ uv run pytest \
   tests/harness/test_kb_import_contract.py \
   tests/harness/test_no_fake_data_runtime_contract.py \
   tests/harness/test_harness_lifecycle_state_machine_contract.py \
+  tests/harness/test_loop_engineering_mvp_contract.py \
   tests/harness/test_hermes_deep_runtime_registry_contract.py \
   tests/harness/test_content_sop_contracts.py \
   tests/harness/test_hermes_bridge.py \
@@ -89,6 +91,7 @@ uv run pytest \
   tests/test_deep_runtime_closure.py \
   tests/test_fake_data_guard.py \
   tests/test_feishu_pet_assistant.py \
+  tests/test_harness_loop_route.py \
   tests/harness/truth_intake_runtime_contract_test.py \
   tests/harness/test_test_closure.py \
   tests/test_kb_import.py::test_import_documents \

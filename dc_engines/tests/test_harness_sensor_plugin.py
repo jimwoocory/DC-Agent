@@ -217,7 +217,7 @@ async def test_sensor_excludes_review_required_by_default_auto_complete() -> Non
         engine,
     )
 
-    assert [task.task_id for task in tasks] == ["normal"]
+    assert [task.task_id for task in tasks] == ["review_default", "normal"]
 
 
 def test_sensor_keeps_success_text_with_negated_missing_terms_success() -> None:

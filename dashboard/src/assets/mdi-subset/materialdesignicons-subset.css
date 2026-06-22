@@ -1,4 +1,4 @@
-/* Auto-generated MDI subset – 277 icons */
+/* Auto-generated MDI subset – 295 icons */
 /* Do not edit manually. Run: pnpm run subset-icons */
 
 @font-face {
@@ -20,6 +20,10 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+.mdi-access-point::before {
+  content: "\F0003";
+}
+
 .mdi-account::before {
   content: "\F0004";
 }
@@ -34,6 +38,10 @@
 
 .mdi-account-edit-outline::before {
   content: "\F0FFB";
+}
+
+.mdi-account-group-outline::before {
+  content: "\F0B58";
 }
 
 .mdi-account-heart::before {
@@ -152,12 +160,20 @@
   content: "\F0B66";
 }
 
+.mdi-calendar-check-outline::before {
+  content: "\F0C44";
+}
+
 .mdi-calendar-edit::before {
   content: "\F08A7";
 }
 
 .mdi-calendar-plus::before {
   content: "\F00F3";
+}
+
+.mdi-cat::before {
+  content: "\F011B";
 }
 
 .mdi-chat::before {
@@ -592,6 +608,10 @@
   content: "\F0625";
 }
 
+.mdi-history::before {
+  content: "\F02DA";
+}
+
 .mdi-home::before {
   content: "\F02DC";
 }
@@ -680,6 +700,10 @@
   content: "\F140B";
 }
 
+.mdi-lightning-bolt-outline::before {
+  content: "\F140C";
+}
+
 .mdi-link::before {
   content: "\F0337";
 }
@@ -740,8 +764,16 @@
   content: "\F0365";
 }
 
+.mdi-message-processing-outline::before {
+  content: "\F1170";
+}
+
 .mdi-message-text::before {
   content: "\F0369";
+}
+
+.mdi-message-text-outline::before {
+  content: "\F036A";
 }
 
 .mdi-microphone::before {
@@ -760,6 +792,10 @@
   content: "\F0375";
 }
 
+.mdi-monitor::before {
+  content: "\F0379";
+}
+
 .mdi-monitor-dashboard::before {
   content: "\F0A07";
 }
@@ -770,6 +806,10 @@
 
 .mdi-note-text-outline::before {
   content: "\F11D7";
+}
+
+.mdi-notebook-outline::before {
+  content: "\F0EBF";
 }
 
 .mdi-numeric-1::before {
@@ -868,6 +908,10 @@
   content: "\F0997";
 }
 
+.mdi-pulse::before {
+  content: "\F0430";
+}
+
 .mdi-puzzle::before {
   content: "\F0431";
 }
@@ -922,6 +966,18 @@
 
 .mdi-robot-outline::before {
   content: "\F167A";
+}
+
+.mdi-routes::before {
+  content: "\F046A";
+}
+
+.mdi-ruler-square::before {
+  content: "\F0CC2";
+}
+
+.mdi-run-fast::before {
+  content: "\F046E";
 }
 
 .mdi-send-check-outline::before {
@@ -980,12 +1036,20 @@
   content: "\F062C";
 }
 
+.mdi-source-branch-sync::before {
+  content: "\F14CE";
+}
+
 .mdi-square-edit-outline::before {
   content: "\F090C";
 }
 
 .mdi-star::before {
   content: "\F04CE";
+}
+
+.mdi-star-four-points-outline::before {
+  content: "\F0AE3";
 }
 
 .mdi-star-four-points-small::before {
@@ -1048,6 +1112,10 @@
   content: "\F0BD4";
 }
 
+.mdi-timer-alert-outline::before {
+  content: "\F1ACD";
+}
+
 .mdi-timer-outline::before {
   content: "\F051B";
 }
@@ -1066,6 +1134,10 @@
 
 .mdi-trash-can-outline::before {
   content: "\F0A7A";
+}
+
+.mdi-tray-arrow-down::before {
+  content: "\F0120";
 }
 
 .mdi-unfold-more-horizontal::before {

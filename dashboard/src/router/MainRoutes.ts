@@ -70,6 +70,16 @@ const MainRoutes = {
       component: () => import('@/views/stats/StatsPage.vue')
     },
     {
+      name: 'LiveMonitor',
+      path: '/live-monitor',
+      component: () => import('@/views/AssistantChatAnalyticsPage.vue')
+    },
+    {
+      name: 'AssistantHealth',
+      path: '/assistant-health',
+      component: () => import('@/views/AssistantHealthPage.vue')
+    },
+    {
       name: 'Conversation',
       path: '/conversation',
       component: () => import('@/views/ConversationPage.vue')
@@ -93,6 +103,11 @@ const MainRoutes = {
       name: 'MemoryGovernance',
       path: '/memory-governance',
       component: () => import('@/views/MemoryGovernancePage.vue')
+    },
+    {
+      name: 'HarnessLoop',
+      path: '/harness-loop',
+      component: () => import('@/views/HarnessLoopPage.vue')
     },
     {
       name: 'ContentSopOps',

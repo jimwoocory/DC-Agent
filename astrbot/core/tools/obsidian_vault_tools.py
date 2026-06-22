@@ -93,6 +93,8 @@ def _build_wrapper(
         )
 
     max_read_bytes = int(settings.get("max_read_bytes") or 256 * 1024)
+    max_plan_bytes = int(settings.get("max_plan_bytes") or 256 * 1024)
+    plan_ttl_seconds = int(settings.get("plan_ttl_seconds") or 3600)
     vault_module = _load_vault_module()
     return vault_module.ObsidianVaultAutomation(
         vault_module.VaultAutomationConfig(
@@ -100,6 +102,8 @@ def _build_wrapper(
             audit_log_path=audit_log_path,
             actor=_actor_from_context(context),
             max_read_bytes=max_read_bytes,
+            max_plan_bytes=max_plan_bytes,
+            plan_ttl_seconds=plan_ttl_seconds,
         )
     )
 

@@ -68,6 +68,7 @@ uv run python -m harness.evaluator.kb_import_contract --contract harness/contrac
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/planning_content_sop.json
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/media_generation_sop.json
 uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/content_sop_system.json
+uv run python -m harness.evaluator.kb_import_contract --contract harness/contracts/obsidian_vault_automation.json
 
 echo "==> Validating Feishu card system contract"
 uv run python scripts-tools/card-system-health.py
@@ -76,6 +77,7 @@ echo "==> Running targeted harness tests"
 uv run pytest \
   tests/harness/test_kb_import_contract.py \
   tests/harness/test_content_sop_contracts.py \
+  tests/harness/test_obsidian_vault_automation_contract.py \
   tests/harness/truth_intake_runtime_contract_test.py \
   tests/harness/test_test_closure.py \
   tests/test_kb_import.py::test_import_documents \

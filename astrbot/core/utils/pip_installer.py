@@ -205,6 +205,23 @@ class _StreamingLogWriter(io.TextIOBase):
         self._log_func = log_func
         self._lines = deque(maxlen=max_lines or _MAX_PIP_OUTPUT_LINES)
         self._buffer = ""
+        self._logging = False
+
+    def _log_line(self, line: str) -> None:
+        if self._logging:
+            return
+
+        previous_stdout = sys.stdout
+        previous_stderr = sys.stderr
+        self._logging = True
+        try:
+            self._log_func(line)
+        finally:
+            self._logging = False
+            if previous_stdout is self:
+                sys.stdout = self
+            if previous_stderr is self:
+                sys.stderr = self
 
     def write(self, text: str) -> int:
         if not text:
@@ -214,14 +231,14 @@ class _StreamingLogWriter(io.TextIOBase):
         while "\n" in self._buffer:
             raw_line, self._buffer = self._buffer.split("\n", 1)
             line = raw_line.rstrip("\r\n")
-            self._log_func(line)
+            self._log_line(line)
             self._lines.append(line)
         return len(text)
 
     def flush(self) -> None:
         line = self._buffer.rstrip("\r\n")
         if line:
-            self._log_func(line)
+            self._log_line(line)
             self._lines.append(line)
         self._buffer = ""
 
@@ -382,7 +399,7 @@ def _build_pip_conflict_context(output_lines: list[str]) -> PipConflictContext |
         relevant_index_set: set[int] = set()
         for index in matched_indices:
             start = max(0, index - 1)
-            end = min(len(output_lines), index + 2)
+            end = min(len(output_lines), index + 3)
             relevant_index_set.update(range(start, end))
         relevant_output_lines = [
             line

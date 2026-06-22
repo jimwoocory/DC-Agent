@@ -1,0 +1,77 @@
+{
+  "feature": "obsidian_vault_automation",
+  "goal": "Provide a controlled, audited, read-only automation boundary for configured Obsidian vault roots before any obsidian-cli or defuddle execution is allowed.",
+  "acceptance_criteria": [
+    {
+      "id": "ova-001",
+      "description": "The Obsidian vault automation contract is valid, has unique criteria IDs, and records Phase 1 as read-only with deferred write execution.",
+      "verification": "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py::test_obsidian_vault_automation_contract_is_valid -q"
+    },
+    {
+      "id": "ova-002",
+      "description": "The wrapper only allows configured vault roots and rejects unconfigured absolute paths.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_enforces_vault_root_allowlist -q"
+    },
+    {
+      "id": "ova-003",
+      "description": "The wrapper blocks path traversal and symlink escapes outside the configured vault root.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_blocks_traversal_and_symlink_escape -q"
+    },
+    {
+      "id": "ova-004",
+      "description": "Read-only operations support list, read, search, metadata, and frontmatter without shell execution.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_supports_read_only_vault_operations -q"
+    },
+    {
+      "id": "ova-005",
+      "description": "Write, delete, and shell execution requests are denied; proposed write actions remain dry-run only and create audit records.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_denies_write_delete_and_shell_execution -q"
+    },
+    {
+      "id": "ova-006",
+      "description": "Every allowed, denied, and dry-run operation records an append-only audit entry with timestamp, actor, operation, path, allowed, dry_run, reason, and payload fields.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_writes_append_only_audit_records -q"
+    }
+  ],
+  "phase": "phase_1_read_only",
+  "allowed_operations": [
+    "list",
+    "read",
+    "search",
+    "metadata",
+    "frontmatter",
+    "plan_write"
+  ],
+  "denied_operations": [
+    "write",
+    "delete",
+    "shell",
+    "obsidian_cli",
+    "defuddle"
+  ],
+  "security_boundaries": {
+    "vault_root_allowlist": true,
+    "pathlib_path_resolution": true,
+    "symlink_escape_blocking": true,
+    "arbitrary_shell": "forbidden",
+    "default_write_mode": "dry_run_only",
+    "audit_log": "append_only_jsonl"
+  },
+  "execution_skill_strategy": {
+    "obsidian_cli": "deferred_until_controlled_wrapper_adapter_exists",
+    "defuddle": "deferred_until_controlled_wrapper_adapter_exists",
+    "native_obsidian_plugin": "out_of_scope_for_phase_1",
+    "future_write_path": "must pass through this wrapper with explicit non-dry-run approval, audit, tests, and contract update"
+  },
+  "non_goals": [
+    "Do not enable raw obsidian-cli access.",
+    "Do not enable arbitrary shell execution.",
+    "Do not write, delete, rename, or move vault files in Phase 1.",
+    "Do not parse web pages with defuddle until it is exposed through a controlled wrapper adapter.",
+    "Do not require a native Obsidian plugin."
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

@@ -1,6 +1,8 @@
 import asyncio
+import io
 import json
 import ntpath
+import sys
 import threading
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -226,6 +228,28 @@ async def test_run_pip_in_process_streams_output_lines(monkeypatch):
         "Collecting demo-package",
         "Downloading demo-package.whl",
     ]
+
+
+def test_streaming_log_writer_restores_streams_after_log_capture_swap():
+    replacement_stream = io.StringIO()
+
+    def swap_streams(line):
+        del line
+        sys.stdout = replacement_stream
+        sys.stderr = replacement_stream
+
+    writer = pip_installer_module._StreamingLogWriter(swap_streams, max_lines=10)
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    try:
+        sys.stdout = writer
+        sys.stderr = writer
+        writer.write("Collecting demo-package\nDownloading demo-package.whl\n")
+    finally:
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+
+    assert writer.lines == ["Collecting demo-package", "Downloading demo-package.whl"]
 
 
 @pytest.mark.asyncio

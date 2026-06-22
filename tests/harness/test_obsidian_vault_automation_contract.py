@@ -26,7 +26,7 @@ def test_obsidian_vault_automation_contract_has_unique_criteria_ids() -> None:
     assert len(criterion_ids) == len(set(criterion_ids))
 
 
-def test_obsidian_vault_automation_contract_points_to_phase_one_verifiers() -> None:
+def test_obsidian_vault_automation_contract_points_to_verifiers() -> None:
     contract = _contract()
 
     assert verification_commands(contract) == [
@@ -36,13 +36,17 @@ def test_obsidian_vault_automation_contract_points_to_phase_one_verifiers() -> N
         "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_supports_read_only_vault_operations -q",
         "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_denies_write_delete_and_shell_execution -q",
         "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_writes_append_only_audit_records -q",
+        "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_is_registered_as_gated_builtin_tool -q",
+        "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_requires_configured_roots -q",
+        "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_runs_read_only_operations -q",
+        "uv run pytest tests/unit/test_obsidian_vault_tools.py::test_obsidian_vault_tool_rejects_non_read_only_operations -q",
     ]
 
 
 def test_contract_records_read_only_operations_and_denied_execution() -> None:
     contract = _contract()
 
-    assert contract["phase"] == "phase_1_read_only"
+    assert contract["phase"] == "phase_2_read_only_runtime_tool"
     assert set(contract["allowed_operations"]) == {
         "list",
         "read",
@@ -79,3 +83,23 @@ def test_contract_defers_obsidian_cli_and_defuddle() -> None:
     assert strategy["defuddle"] == "deferred_until_controlled_wrapper_adapter_exists"
     assert "raw obsidian-cli" in non_goals
     assert "defuddle" in non_goals
+
+
+def test_contract_records_runtime_tool_boundary() -> None:
+    contract = _contract()
+    runtime_tool = contract["runtime_tool"]
+
+    assert runtime_tool["name"] == "astrbot_obsidian_vault"
+    assert runtime_tool["config_key"] == "provider_settings.obsidian_vault_automation"
+    assert runtime_tool["default_enabled"] is False
+    assert runtime_tool["required_config"] == ["enabled", "vault_roots"]
+    assert set(runtime_tool["exposed_operations"]) == {
+        "list",
+        "read",
+        "search",
+        "metadata",
+        "frontmatter",
+    }
+    assert {"write", "delete", "shell", "obsidian_cli", "defuddle"} <= set(
+        runtime_tool["not_exposed_operations"]
+    )

@@ -14,6 +14,7 @@ _BUILTIN_TOOL_MODULES = (
     "astrbot.core.tools.cron_tools",
     "astrbot.core.tools.knowledge_base_tools",
     "astrbot.core.tools.message_tools",
+    "astrbot.core.tools.obsidian_vault_tools",
     "astrbot.core.tools.web_search_tools",
 )
 

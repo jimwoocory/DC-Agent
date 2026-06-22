@@ -80,6 +80,7 @@ uv run pytest \
   tests/harness/test_obsidian_vault_automation_contract.py \
   tests/harness/truth_intake_runtime_contract_test.py \
   tests/harness/test_test_closure.py \
+  tests/unit/test_obsidian_vault_tools.py \
   tests/test_kb_import.py::test_import_documents \
   tests/test_kb_import.py::test_import_documents_returns_friendly_failure_message \
   tests/test_kb_import.py::test_import_documents_passes_source_path_to_kb_helper \

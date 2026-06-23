@@ -8,6 +8,7 @@ from .config import ConfigRoute
 from .conversation import ConversationRoute
 from .cron import CronRoute
 from .file import FileRoute
+from .harness_loop import HarnessLoopRoute
 from .knowledge_base import KnowledgeBaseRoute
 from .log import LogRoute
 from .memory_governance import MemoryGovernanceRoute
@@ -34,6 +35,7 @@ __all__ = [
     "ConversationRoute",
     "CronRoute",
     "FileRoute",
+    "HarnessLoopRoute",
     "KnowledgeBaseRoute",
     "LogRoute",
     "MemoryGovernanceRoute",

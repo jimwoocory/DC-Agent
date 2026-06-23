@@ -201,27 +201,40 @@ def _package_specs_override_index(package_specs: list[str]) -> bool:
 
 
 class _StreamingLogWriter(io.TextIOBase):
-    def __init__(self, log_func, *, max_lines: int | None = None) -> None:
+    def __init__(
+        self,
+        log_func,
+        *,
+        max_lines: int | None = None,
+        log_stdout=None,
+        log_stderr=None,
+    ) -> None:
         self._log_func = log_func
         self._lines = deque(maxlen=max_lines or _MAX_PIP_OUTPUT_LINES)
         self._buffer = ""
+        self._logging = False
+        self._log_stdout = log_stdout
+        self._log_stderr = log_stderr
 
     def write(self, text: str) -> int:
         if not text:
             return 0
 
+        if self._logging:
+            return len(text)
+
         self._buffer += text.replace("\r\n", "\n").replace("\r", "\n")
         while "\n" in self._buffer:
             raw_line, self._buffer = self._buffer.split("\n", 1)
             line = raw_line.rstrip("\r\n")
-            self._log_func(line)
+            self._emit_line(line)
             self._lines.append(line)
         return len(text)
 
     def flush(self) -> None:
         line = self._buffer.rstrip("\r\n")
         if line:
-            self._log_func(line)
+            self._emit_line(line)
             self._lines.append(line)
         self._buffer = ""
 
@@ -229,9 +242,30 @@ class _StreamingLogWriter(io.TextIOBase):
     def lines(self) -> list[str]:
         return list(self._lines)
 
+    def _emit_line(self, line: str) -> None:
+        self._logging = True
+        try:
+            if self._log_stdout is None or self._log_stderr is None:
+                self._log_func(line)
+            else:
+                with (
+                    contextlib.redirect_stdout(self._log_stdout),
+                    contextlib.redirect_stderr(self._log_stderr),
+                ):
+                    self._log_func(line)
+        finally:
+            self._logging = False
+
 
 def _run_pip_main_streaming(pip_main, args: list[str]) -> tuple[int, list[str]]:
-    stream = _StreamingLogWriter(logger.info, max_lines=_MAX_PIP_OUTPUT_LINES)
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    stream = _StreamingLogWriter(
+        logger.info,
+        max_lines=_MAX_PIP_OUTPUT_LINES,
+        log_stdout=original_stdout,
+        log_stderr=original_stderr,
+    )
     with (
         contextlib.redirect_stdout(stream),
         contextlib.redirect_stderr(stream),

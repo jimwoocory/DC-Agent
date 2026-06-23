@@ -107,3 +107,30 @@ async def test_sensor_requires_auto_complete_allowed_task() -> None:
     )
 
     assert [task.task_id for task in tasks] == ["allowed", "legacy_allowed"]
+
+
+async def test_sensor_keeps_review_required_by_default_in_settlement_flow() -> None:
+    module = _load_harness_sensor_module()
+    plugin = module.HarnessSensorPlugin(_FakeContext())
+    review_default = SimpleNamespace(
+        task_id="review_default",
+        status="in_progress",
+        payload={
+            "auto_complete_on_response": True,
+            "review_required_by_default": True,
+        },
+    )
+    normal = SimpleNamespace(
+        task_id="normal",
+        status="in_progress",
+        payload={"auto_complete_on_response": True},
+    )
+    store = _FakeStore({"review_default": review_default, "normal": normal})
+    engine = SimpleNamespace(store=store)
+
+    tasks = await plugin._load_target_tasks(
+        _FakeEvent({"workflow_intent_task_id": ["review_default", "normal"]}),
+        engine,
+    )
+
+    assert [task.task_id for task in tasks] == ["review_default", "normal"]

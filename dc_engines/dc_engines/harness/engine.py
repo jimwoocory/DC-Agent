@@ -10,6 +10,7 @@ from .contracts import (
     HarnessTaskStatus,
 )
 from .guardrails import assess_harness_guardrails
+from .loop_runtime import LoopOrchestrator
 from .memory_promotion import HarnessMemoryPromoter
 from .task_store import HarnessTaskStore
 
@@ -79,6 +80,7 @@ class HarnessEngine:
             "guardrails_attached",
             guardrails_payload,
         )
+        await LoopOrchestrator(self.store).ensure_plan_created(task)
         return task
 
     async def mark_in_progress(
@@ -100,6 +102,14 @@ class HarnessEngine:
         reviewer_note: str | None = None,
         result: dict | None = None,
     ) -> HarnessTask:
+        task = await self._require_task(task_id)
+        await LoopOrchestrator(self.store).settle_for_review_required(
+            task,
+            review_reason=reviewer_note or "manual review required",
+            summary=reviewer_note or "Task requires review before completion.",
+            result=result,
+            metadata={"source": "HarnessEngine.mark_review_required"},
+        )
         return await self.store.update_task_status(
             task_id,
             "review_required",
@@ -113,6 +123,9 @@ class HarnessEngine:
         *,
         result: dict | None = None,
     ) -> HarnessTask:
+        task = await self._require_task(task_id)
+        await self._assert_completion_review_gate(task)
+        await LoopOrchestrator(self.store).settle_for_completion(task, result)
         task = await self.store.update_task_status(
             task_id,
             "completed",
@@ -176,6 +189,40 @@ class HarnessEngine:
         result: dict | None = None,
         event_payload: dict | None = None,
     ) -> HarnessTask:
+        task = await self._require_task(task_id)
+        if status == "completed":
+            await self._assert_completion_review_gate(task)
+            await LoopOrchestrator(self.store).settle_for_completion(task, result)
+        elif status == "blocked":
+            blocking_reason = ""
+            if event_payload:
+                blocking_reason = str(
+                    event_payload.get("blocking_reason")
+                    or event_payload.get("reason")
+                    or ""
+                )
+            await LoopOrchestrator(self.store).settle_for_blocked(
+                task,
+                blocking_reason=blocking_reason,
+                summary=blocking_reason or "Task blocked.",
+                metadata=event_payload or {},
+            )
+        elif status == "review_required":
+            review_reason = ""
+            if event_payload:
+                review_reason = str(
+                    event_payload.get("review_reason")
+                    or event_payload.get("reviewer_note")
+                    or event_payload.get("reason")
+                    or ""
+                )
+            await LoopOrchestrator(self.store).settle_for_review_required(
+                task,
+                review_reason=review_reason or "review required",
+                summary=review_reason or "Task requires review before completion.",
+                result=result,
+                metadata=event_payload or {},
+            )
         return await self.store.update_task_status(
             task_id,
             status,
@@ -248,6 +295,12 @@ class HarnessEngine:
         )
         return review
 
+    async def _require_task(self, task_id: str) -> HarnessTask:
+        task = await self.store.get_task(task_id)
+        if task is None:
+            raise LookupError(f"task {task_id!r} not found")
+        return task
+
     async def _get_session_context(self, conversation_id: str) -> dict | None:
         if self.session_snapshot_getter is None:
             return None
@@ -278,6 +331,34 @@ class HarnessEngine:
         if isinstance(snapshot, dict):
             return snapshot
         return {"value": snapshot}
+
+    async def _assert_completion_review_gate(self, task: HarnessTask) -> None:
+        if (
+            task.payload.get("review_required_by_default")
+            and task.status != "review_required"
+        ):
+            reason = (
+                "review_required_by_default task must enter review_required before "
+                "completion"
+            )
+            await self.store.append_event(
+                task.task_id,
+                "review_default_completion_blocked",
+                {"reason": reason, "status": task.status},
+            )
+            raise RuntimeError(reason)
+        if task.status != "review_required":
+            return
+        reviews = await self.store.list_reviews(task.task_id)
+        if any(review.decision == "approved" for review in reviews):
+            return
+        reason = "review_required task cannot complete without an approved review"
+        await self.store.append_event(
+            task.task_id,
+            "review_completion_blocked",
+            {"reason": reason},
+        )
+        raise RuntimeError(reason)
 
     async def _maybe_promote_memory(self, task: HarnessTask) -> None:
         if self.memory_promoter is None:

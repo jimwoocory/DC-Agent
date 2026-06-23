@@ -122,6 +122,11 @@ const sidebarItem: menu[] = [
         to: '/memory-governance'
       },
       {
+        title: 'core.navigation.harnessLoop',
+        icon: 'mdi-source-branch-sync',
+        to: '/harness-loop'
+      },
+      {
         title: 'core.navigation.dashboard',
         icon: 'mdi-view-dashboard',
         to: '/dashboard/default'

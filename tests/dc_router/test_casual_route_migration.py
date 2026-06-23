@@ -15,6 +15,8 @@ P2: 把 aihubmix/qwen3.6-flash 退出闲聊兜底主选 + 失败 N 次切 antigr
 
 from __future__ import annotations
 
+# ruff: noqa: E402, I001
+
 import importlib.util
 import os
 import sys
@@ -31,6 +33,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from data.plugins.dc_router.cli_handlers import ANTIGRAVITY_FALLBACK_PROVIDER_ID
 from dc_router_core.provider_map import (
     AIHUBMIX_QWEN_FLASH,
     ANTIGRAVITY_CLI_FLASH,
@@ -74,24 +77,25 @@ def test_realtime_and_work_preflight_remain_on_antigravity() -> None:
 
 
 def test_casual_fallback_provider_id_is_aihubmix_gemini_flash() -> None:
-    """adapter 端的 ANTIGRAVITY_FALLBACK_PROVIDER_ID 必须是 aihubmix/gemini-3.5-flash。
-
-    阶段 5H: 老文件 ``data/plugins/llm_router/dc_router_adapter.py`` 已并入
-    ``data/plugins/dc_router/routing_adapter.py``.
-    """
-    plugin_dir = _ROOT / "data" / "plugins" / "dc_router"
-    spec = importlib.util.spec_from_file_location(
-        "dc_router_adapter_under_test", plugin_dir / "routing_adapter.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-
-    assert module.ANTIGRAVITY_FALLBACK_PROVIDER_ID == "aihubmix/gemini-3.5-flash", (
+    """CLI handler fallback must be aihubmix/gemini-3.5-flash."""
+    assert ANTIGRAVITY_FALLBACK_PROVIDER_ID == "aihubmix/gemini-3.5-flash", (
         "Antigravity 跳闸时必须降级到 aihubmix/gemini-3.5-flash，"
-        f"实际 {module.ANTIGRAVITY_FALLBACK_PROVIDER_ID}"
+        f"实际 {ANTIGRAVITY_FALLBACK_PROVIDER_ID}"
     )
+
+
+def test_active_dispatch_path_does_not_import_legacy_routing_adapter() -> None:
+    """The production router path must stay independent from routing_adapter.py."""
+    plugin_dir = _ROOT / "data" / "plugins" / "dc_router"
+    active_files = [
+        plugin_dir / "main.py",
+        plugin_dir / "plugin.py",
+        plugin_dir / "dispatch.py",
+        plugin_dir / "routing" / "__init__.py",
+        plugin_dir / "routing" / "apply_decision.py",
+    ]
+    for path in active_files:
+        assert "routing_adapter" not in path.read_text(encoding="utf-8")
 
 
 def test_antigravity_health_threshold_is_at_most_three() -> None:

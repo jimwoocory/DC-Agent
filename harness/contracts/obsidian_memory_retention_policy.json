@@ -1,0 +1,63 @@
+{
+  "feature": "obsidian_memory_retention_policy",
+  "goal": "Define a propose-only retention policy for governed Obsidian memory so stale or expired records can be surfaced for human approval while runtime recall remains safe and there is no automatic deletion of governed memory or raw source material.",
+  "acceptance_criteria": [
+    {
+      "id": "omr-001",
+      "description": "Retention actions are propose-only by default: the system may produce review candidates for stale, expired, duplicate, or low-confidence memories, but any archive, merge, forget, or delete action requires human approval in the governance workflow.",
+      "verification": "uv run pytest tests/harness/test_obsidian_memory_retention_policy_contract.py::test_retention_policy_is_propose_only_by_default -q"
+    },
+    {
+      "id": "omr-002",
+      "description": "The runtime recall path remains approved-only and must not surface need_review, rejected, merged, stale, secret, or sensitive_blocked records unless an explicit admin path asks for them.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_recall_filters_to_approved_by_default -q"
+    },
+    {
+      "id": "omr-003",
+      "description": "Retention policy changes must preserve raw source assets such as data/nas_memory.db, Obsidian RawRefs, harness task memory, and original source files; retention decisions apply to governed recall eligibility, review state, and audit records rather than raw source deletion.",
+      "verification": "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_preserves_existing_memory_assets -q"
+    },
+    {
+      "id": "omr-004",
+      "description": "Every approved retention action must leave an append-only audit record containing actor, action, memory_id, before/after payload, reason, and timestamp.",
+      "verification": "uv run pytest dc_engines/tests/test_memory_governance_store.py::test_decision_and_audit_records_are_append_only -q"
+    }
+  ],
+  "non_goals": [
+    "Do not implement automatic deletion or forgetting as part of the retention policy.",
+    "Do not delete raw source files, data/nas_memory.db rows, Obsidian RawRefs, or harness task memory from retention automation.",
+    "Do not hide approved memory from default recall solely because of age before a human-approved stale, merge, reject, or archive decision exists.",
+    "Do not add a second write path that bypasses Obsidian import decisions or the append-only audit log."
+  ],
+  "policy_states": {
+    "eligible_for_review": [
+      "stale",
+      "expired_candidate",
+      "duplicate_candidate",
+      "low_confidence_candidate"
+    ],
+    "approved_actions": [
+      "keep",
+      "mark_stale",
+      "merge",
+      "reject",
+      "archive_from_default_recall"
+    ],
+    "blocked_without_human_approval": [
+      "forget",
+      "delete_governed_memory",
+      "delete_raw_source"
+    ]
+  },
+  "safety_boundaries": {
+    "default_mode": "propose-only",
+    "approval_gate": "human approval through Obsidian governance import",
+    "raw_source_policy": "preserve raw source material; never delete raw source through retention automation",
+    "runtime_policy": "default recall only uses approved public/internal governed memories"
+  },
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_obsidian_memory_retention_policy_contract.py -q",
+    "recall_safety": "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_recall_filters_to_approved_by_default -q",
+    "audit_safety": "uv run pytest dc_engines/tests/test_memory_governance_store.py::test_decision_and_audit_records_are_append_only -q"
+  }
+}

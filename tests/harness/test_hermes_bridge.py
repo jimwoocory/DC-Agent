@@ -202,6 +202,21 @@ class CapturingDLQLogger:
         self.records.append(payload)
 
 
+class CapturingPersonaFactoryStore:
+    def __init__(self) -> None:
+        self.status_changes: list[dict[str, Any]] = []
+
+    def set_status(self, request_id: str, status: str, *, reviewer: str = ""):
+        self.status_changes.append(
+            {
+                "request_id": request_id,
+                "status": status,
+                "reviewer": reviewer,
+            }
+        )
+        return SimpleNamespace(request_id=request_id, status=status)
+
+
 class CapturingCallbackDispatcher:
     def __init__(self, *, success: bool = True, event_log: list[str] | None = None):
         self.success = success
@@ -1763,6 +1778,45 @@ async def test_callback_provenance_is_merged_into_harness_completion() -> None:
     assert result["source"] == "hermes"
     assert result["source_citations"] == [{"source_path": "projects/customer.md"}]
     assert result["hits"] == [{"id": "doc-1", "url": "https://example.test/doc"}]
+
+
+@pytest.mark.asyncio
+async def test_persona_factory_callback_advances_review_status() -> None:
+    task_id = "pf_review"
+    persona_store = CapturingPersonaFactoryStore()
+    plugin, context, engine, dispatcher, _dlq_logger = _plugin_without_card()
+    context.persona_factory_store = persona_store
+    plugin._umo_cache["s1"] = "umo-1"
+
+    response = await plugin._handle_hermes_response(
+        FakeHermesResponseRequest(
+            {
+                "task_id": task_id,
+                "request_id": task_id,
+                "workflow_kind": "persona_factory",
+                "session_key": "s1",
+                "result": {
+                    "artifact_bundle": {
+                        "request_id": task_id,
+                        "status": "awaiting_review",
+                        "workspace_dir": "/tmp/persona/pf_review",
+                        "files": ["/tmp/persona/pf_review/SKILL.md"],
+                    }
+                },
+            }
+        )
+    )
+
+    assert response.status == 200
+    assert persona_store.status_changes == [
+        {
+            "request_id": task_id,
+            "status": "awaiting_review",
+            "reviewer": "hermes_worker",
+        }
+    ]
+    assert "awaiting_review" in dispatcher.calls[-1]["message"]
+    assert engine.completed[-1]["task_id"] == task_id
 
 
 @pytest.mark.asyncio

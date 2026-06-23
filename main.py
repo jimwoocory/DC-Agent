@@ -10,6 +10,9 @@ import runtime_bootstrap
 
 runtime_bootstrap.initialize_runtime_bootstrap()
 
+import dc_logging  # noqa: E402
+import dc_metrics  # noqa: E402
+import dc_tracing  # noqa: E402
 from astrbot.core import LogBroker, LogManager, db_helper, logger  # noqa: E402
 from astrbot.core.config.default import VERSION  # noqa: E402
 from astrbot.core.initial_loader import InitialLoader  # noqa: E402
@@ -135,6 +138,8 @@ async def main_async(webui_dir_arg: str | None) -> None:
 
 
 if __name__ == "__main__":
+    dc_logging.configure_dc_logging()
+
     parser = argparse.ArgumentParser(description="AstrBot")
     parser.add_argument(
         "--webui-dir",
@@ -150,5 +155,7 @@ if __name__ == "__main__":
     log_broker = LogBroker()
     LogManager.set_queue_handler(logger, log_broker)
 
+    dc_metrics.increment_counter("dc_agent_startup_total")
     # 只使用一次 asyncio.run()
-    asyncio.run(main_async(args.webui_dir))
+    with dc_tracing.trace_span("main_async", component="astrbot"):
+        asyncio.run(main_async(args.webui_dir))

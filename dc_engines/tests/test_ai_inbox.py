@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 from dc_engines.ai_inbox import AIInboxEngine, InboxItemCreateRequest, InboxStore
@@ -83,6 +85,52 @@ class _FakeReviewEvent:
 
     def get_platform_id(self):
         return "巅池-Agent小助手"
+
+
+class _FakeOnMessageEvent:
+    unified_msg_origin = "巅池-Agent小助手:FriendMessage:ou_user"
+    message_str = "请帮我整理一下今天的项目跟进"
+    message_id = "msg_1"
+    is_at_or_wake_command = False
+
+    def __init__(self) -> None:
+        self.extras = {}
+
+    def get_messages(self):
+        return []
+
+    def get_sender_id(self):
+        return "ou_user"
+
+    def get_sender_name(self):
+        return "蔡挺"
+
+    def get_self_id(self):
+        return "ou_bot"
+
+    def get_platform_id(self):
+        return "巅池-Agent小助手"
+
+    def get_platform_name(self):
+        return "lark"
+
+    def get_group_id(self):
+        return ""
+
+    def set_extra(self, key: str, value) -> None:
+        self.extras[key] = value
+
+
+class _SlowInboxEngine:
+    def classify(self, _text: str):
+        return "request"
+
+    def is_actionable(self, _category: str) -> bool:
+        return False
+
+    async def create_item(self, _request):
+        await asyncio.sleep(1)
+        raise AssertionError("create_item should be cancelled by timeout")
 
 
 async def test_inbox_create_link_and_close(tmp_path: Path) -> None:
@@ -303,3 +351,21 @@ async def test_plugin_records_obsidian_review_reply(
     assert updated is not None
     assert updated.payload["obsidian_review_id"] == records[0].review_id
     assert updated.payload["obsidian_review_candidates"] == ["doc_1"]
+
+
+async def test_plugin_on_message_side_effect_timeout_does_not_block_reply_path() -> (
+    None
+):
+    module = _load_ai_inbox_plugin_module()
+    plugin = module.AIInboxPlugin(
+        _FakeContext(),
+        {"side_effect_timeout_seconds": 0.01},
+    )
+    plugin.engine = _SlowInboxEngine()
+    event = _FakeOnMessageEvent()
+
+    started = time.monotonic()
+    await plugin.on_message(event)
+
+    assert time.monotonic() - started < 0.5
+    assert event.extras == {}

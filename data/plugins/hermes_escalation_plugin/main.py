@@ -15,18 +15,15 @@
 依赖：
 - ``dc_engines.harness.satisfaction.SatisfactionDetector`` （已迁移）
 - ``dc_engines.harness.create_workflow_request`` （已迁移）
-- ``self.context.harness_engine`` （hermes_bridge plugin initialize 时装入）
+- ``self.context.harness_engine`` （harness_runtime_plugin initialize 时装入）
 - ``hermes_bridge`` 配置 (task_webhook_url + secret)
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 
-import aiohttp
 from dc_engines.card_runtime import send_card_via_runtime
 from dc_engines.employee_directory import requester_meta_from_event
 from dc_engines.feishu_card_streamer import (
@@ -35,6 +32,7 @@ from dc_engines.feishu_card_streamer import (
 )
 from dc_engines.harness import create_workflow_request
 from dc_engines.harness.satisfaction import SatisfactionDetector
+from dc_engines.hermes_bridge_engine import HermesTaskDispatcher
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
@@ -78,12 +76,6 @@ class HermesEscalationPlugin(Star):
         cfg = self.context.get_config() or {}
         return cfg.get("hermes_bridge", {}) if isinstance(cfg, dict) else {}
 
-    def _sign(self, secret: str, payload_bytes: bytes) -> str:
-        digest = hmac.new(
-            secret.encode("utf-8"), payload_bytes, hashlib.sha256
-        ).hexdigest()
-        return f"sha256={digest}"
-
     def _require_secret(self, bridge: dict) -> str:
         raw_secret = str(bridge.get("secret") or "").strip()
         if raw_secret.startswith("${") and raw_secret.endswith("}"):
@@ -97,62 +89,35 @@ class HermesEscalationPlugin(Star):
     async def _dispatch_to_hermes(
         self, task, intent_workflow_kind: str, event: AstrMessageEvent
     ) -> bool:
+        cognitive_context: dict = {}
+        if hasattr(task, "payload") and isinstance(task.payload, dict):
+            cognitive_context = task.payload.get("cognitive_context") or {}
+
+        shared_dispatch = getattr(self.context, "dispatch_task_to_hermes", None)
+        if callable(shared_dispatch):
+            return bool(
+                await shared_dispatch(
+                    task.task_id,
+                    intent_workflow_kind,
+                    (event.message_str or "").strip(),
+                    event.unified_msg_origin,
+                    cognitive_context,
+                )
+            )
+
         bridge = self._bridge_cfg()
         url = bridge.get(
             "task_webhook_url", "http://localhost:8644/webhooks/astrbot_task"
         )
         secret = self._require_secret(bridge)
-
-        cognitive_context: dict = {}
-        if hasattr(task, "payload") and isinstance(task.payload, dict):
-            cognitive_context = task.payload.get("cognitive_context") or {}
-
-        payload = {
-            "task_id": task.task_id,
-            "workflow_kind": intent_workflow_kind,
-            "brief": (event.message_str or "").strip(),
-            "session_id": event.unified_msg_origin,
-            "unified_msg_origin": event.unified_msg_origin,
-            "platform_id": event.get_platform_id(),
-            "sender_id": event.get_sender_id(),
-            "trigger_message": event.message_str,
-            "cognitive_context": cognitive_context,
-        }
-        body = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "X-Webhook-Event": "harness_task",
-            "X-Task-ID": task.task_id,
-            "X-Hub-Signature-256": self._sign(secret, body),
-        }
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    data=body,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status in (200, 201, 202):
-                        logger.info(
-                            "[hermes_escalation] 派发成功 task=%s url=%s",
-                            task.task_id[:8],
-                            url,
-                        )
-                        return True
-                    text = await resp.text()
-                    logger.warning(
-                        "[hermes_escalation] 派发失败 HTTP %s: %s",
-                        resp.status,
-                        text[:200],
-                    )
-                    return False
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[hermes_escalation] 派发异常 task=%s: %s", task.task_id[:8], exc
-            )
-            return False
+        dispatcher = HermesTaskDispatcher(task_webhook_url=url, secret=secret)
+        return await dispatcher.dispatch(
+            task.task_id,
+            intent_workflow_kind,
+            (event.message_str or "").strip(),
+            event.unified_msg_origin,
+            cognitive_context,
+        )
 
     @filter.event_message_type(
         EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE
@@ -318,13 +283,22 @@ class HermesEscalationPlugin(Star):
             MessageEventResult().message(reply).use_t2i(False).stop_event()
         )
 
-        logger.info(
-            "[hermes_escalation] 升级成功 task=%s session=%s reason=%s confidence=%.2f",
-            task.task_id[:8],
-            event.unified_msg_origin,
-            signal.reason,
-            signal.confidence,
-        )
+        if dispatched:
+            logger.info(
+                "[hermes_escalation] 升级成功 task=%s session=%s reason=%s confidence=%.2f",
+                task.task_id[:8],
+                event.unified_msg_origin,
+                signal.reason,
+                signal.confidence,
+            )
+        else:
+            logger.warning(
+                "[hermes_escalation] 升级失败 task=%s session=%s reason=%s confidence=%.2f",
+                task.task_id[:8],
+                event.unified_msg_origin,
+                signal.reason,
+                signal.confidence,
+            )
 
     # ─── 飞书进度卡片：解决"等待空荡荡"UX 痛点 ───
 

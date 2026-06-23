@@ -9,6 +9,7 @@ __pycache__
 **/.ruff_cache/
 .pytest_cache/
 .ruff_cache/
+.uv-cache/
 .venv*
 .conda/
 uv.lock
@@ -159,6 +160,7 @@ data/feishu_user_token.json
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/*.log
 data/sessions/
 data/memories/
 data/plugin_data/
@@ -227,6 +229,7 @@ data/knowledge_base/
 data/mcp_server.json
 data/plugins.json
 data/router_bench/
+data/persona_factory/
 data/skills/
 data/skills.json
 data/t2i_templates/

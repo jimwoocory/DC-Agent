@@ -1,8 +1,9 @@
-"""Card action handler — antigravity queue card + department memory card.
+"""Card action handler — antigravity queue card + governed-memory cards.
 
 统一处理 ``event.message_str.startswith("__card_action__:")`` 路径：
 1. 先尝试 agy (antigravity) 排队卡（与现有 logic 完全一致）
 2. 再尝试 department_memory_prompt 卡片（confirm / dismiss）
+3. 再尝试 sop_signal_confirmation 卡片（remember / once / dismiss）
 3. 都不是 → 返回 False 让 dispatch 让其他 plugin 接管
 """
 
@@ -19,6 +20,7 @@ CARD_ACTION_PREFIX: Final[str] = "__card_action__:"
 
 # 已知 source 名 (跟 department_memory.build_department_memory_prompt_card 对齐)
 DEPT_MEMORY_SOURCE: Final[str] = "department_memory_prompt"
+SOP_SIGNAL_SOURCE: Final[str] = "sop_signal_confirmation"
 
 
 @dataclass(slots=True)
@@ -54,11 +56,23 @@ def _parse_payload(event: Any) -> dict[str, Any]:
 
 
 def _dept_memory_value(event: Any) -> dict[str, Any]:
+    value = _card_value(event)
+    if value.get("source") != DEPT_MEMORY_SOURCE:
+        return {}
+    return value
+
+
+def _sop_signal_value(event: Any) -> dict[str, Any]:
+    value = _card_value(event)
+    if value.get("source") != SOP_SIGNAL_SOURCE:
+        return {}
+    return value
+
+
+def _card_value(event: Any) -> dict[str, Any]:
     payload = _parse_payload(event)
     value = payload.get("value", {}) if isinstance(payload, dict) else {}
     if not isinstance(value, dict):
-        return {}
-    if value.get("source") != DEPT_MEMORY_SOURCE:
         return {}
     return value
 
@@ -88,7 +102,35 @@ async def try_handle_card_action(
         # 把卡片回调转成「恢复 pending 决策」，交给 dispatch.dept_memory 阶段处理
         return CardActionResult(handled=False, resumed_text=text)
 
-    # 2) Antigravity 排队卡 (agy_quota)
+    # 2) 员工处理习惯确认卡 — 信任校验后在这里完成 need_review 记忆导出
+    sop_value = _sop_signal_value(event)
+    if sop_value and not _is_trusted(event):
+        try:
+            event.should_call_llm(False)
+            event.set_result(
+                MessageEventResult().message("").use_t2i(False).stop_event()
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return CardActionResult(handled=True, stop=True)
+    if sop_value:
+        try:
+            from .sop_signal import try_handle_sop_signal_card_action
+
+            result = try_handle_sop_signal_card_action(event, sop_value)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[dc_router] sop signal card action failed: %s", exc)
+            try:
+                event.should_call_llm(False)
+                event.set_result(
+                    MessageEventResult().message("").use_t2i(False).stop_event()
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return CardActionResult(handled=True, stop=True)
+        return CardActionResult(handled=result.handled, stop=result.stop)
+
+    # 3) Antigravity 排队卡 (agy_quota)
     try:
         from ..cli_handlers import handle_antigravity_queue_card_action
     except Exception as exc:  # noqa: BLE001

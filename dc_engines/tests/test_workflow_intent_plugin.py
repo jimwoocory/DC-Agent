@@ -103,10 +103,23 @@ def _workflow_context(engine: _FakeEngine):
 
 
 @pytest.mark.asyncio
-async def test_workflow_intent_review_required_kind_disables_auto_complete() -> None:
+async def test_workflow_intent_is_observe_only_by_default() -> None:
     module = _load_workflow_intent_module()
     engine = _FakeEngine()
     plugin = module.WorkflowIntentPlugin(_workflow_context(engine), {})
+
+    await plugin.on_message(_WorkflowEvent("下个季度的营销计划要赶紧搞起来"))
+
+    assert engine.requests == []
+
+
+@pytest.mark.asyncio
+async def test_workflow_intent_review_required_kind_disables_auto_complete() -> None:
+    module = _load_workflow_intent_module()
+    engine = _FakeEngine()
+    plugin = module.WorkflowIntentPlugin(
+        _workflow_context(engine), {"implicit_create_tasks": True}
+    )
 
     await plugin.on_message(_WorkflowEvent("下个季度的营销计划要赶紧搞起来"))
 
@@ -121,7 +134,9 @@ async def test_workflow_intent_review_required_kind_disables_auto_complete() -> 
 async def test_workflow_intent_project_followup_auto_completes_when_allowed() -> None:
     module = _load_workflow_intent_module()
     engine = _FakeEngine()
-    plugin = module.WorkflowIntentPlugin(_workflow_context(engine), {})
+    plugin = module.WorkflowIntentPlugin(
+        _workflow_context(engine), {"implicit_create_tasks": True}
+    )
 
     await plugin.on_message(_WorkflowEvent("今天的项目跟进汇报同步一下"))
 

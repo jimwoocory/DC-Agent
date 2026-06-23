@@ -12,9 +12,17 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from dc_engines.persona_factory import (
+    PersonaFactoryStore,
+    build_hermes_task_payload,
+    build_research_plan,
+    create_persona_request,
+)
+
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 PLUGIN_ID = "dc_hub"
 PLUGIN_VERSION = "0.1.0"
@@ -135,6 +143,13 @@ DEFAULT_MODULES: tuple[HubModule, ...] = (
         "小助手学习候选",
         "assistant_core",
         "管理员审批学习候选并热更新小助手规则。",
+    ),
+    HubModule(
+        "persona_factory",
+        "Persona Factory",
+        "assistant_core",
+        "Nuwa 风格人物/主题蒸馏：提交目标、Hermes 调研、人工 review 后再注册。",
+        migration="hub-native",
     ),
     HubModule(
         "task_cli_plugin",
@@ -275,18 +290,31 @@ class DCHubPlugin(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
         cfg = config or {}
+        self.cfg = cfg
         self.project_root = Path(__file__).resolve().parents[3]
         self.state_path = Path(
             cfg.get("state_path")
             or self.project_root / "data" / "config" / "dc_hub_state.json"
         )
         self.allow_state_mutation = bool(cfg.get("allow_state_mutation", True))
+        self.persona_factory_enabled = bool(
+            self._persona_factory_config().get("enabled", True)
+        )
+        self.persona_factory_data_root = (
+            Path(get_astrbot_data_path()) / "persona_factory"
+        )
+        self.persona_factory_store = PersonaFactoryStore(
+            self.persona_factory_data_root / "persona_factory.db"
+        )
         self.modules = list(DEFAULT_MODULES)
         self._state = self._load_state()
 
     async def initialize(self) -> None:
         self.context.dc_hub = self
         self.context.dc_hub_is_enabled = self.is_enabled
+        self.persona_factory_store.initialize()
+        self.context.persona_factory_store = self.persona_factory_store
+        self.context.persona_factory_data_root = self.persona_factory_data_root
         try:
             self.context.register_web_api(
                 "/dc_hub/summary",
@@ -309,6 +337,27 @@ class DCHubPlugin(Star):
             logger.info("[dc_hub] API ready: /api/plug/dc_hub/{summary,module,action}")
         except Exception as exc:  # noqa: BLE001
             logger.warning("[dc_hub] register API failed: %s", exc)
+
+    @filter.command("persona", desc="/persona create|status|approve|reject")
+    async def persona_command(self, event: AstrMessageEvent) -> None:
+        if not self.persona_factory_enabled:
+            self._reply(event, "Persona Factory 当前未启用。")
+            return
+
+        command, arg_text = self._parse_persona_command(event.message_str or "")
+        if command == "create":
+            await self._persona_create(event, arg_text)
+            return
+        if command == "status":
+            self._persona_status(event, arg_text)
+            return
+        if command in {"approve", "reject"}:
+            self._persona_review(event, command, arg_text)
+            return
+        self._reply(
+            event,
+            "用法：/persona create <人物或主题>；/persona status [request_id]；/persona approve|reject <request_id>",
+        )
 
     @filter.command(
         "dc-hub",
@@ -394,6 +443,123 @@ class DCHubPlugin(Star):
             return {"status": "error", "message": result["message"], "data": result}
         return {"status": "ok", "message": result["message"], "data": result}
 
+    async def _persona_create(self, event: AstrMessageEvent, arg_text: str) -> None:
+        target = arg_text.strip()
+        if not target:
+            self._reply(event, "请提供要蒸馏的人物或主题，例如：/persona create 张小龙")
+            return
+        request = create_persona_request(
+            target=target,
+            requester_id=self._sender_id(event),
+        )
+        plan = build_research_plan(request, data_root=self.persona_factory_data_root)
+        request = self.persona_factory_store.submit(request, plan)
+        payload = build_hermes_task_payload(request, plan)
+        self.context.persona_factory_last_hermes_payload = payload
+        dispatched = await self._dispatch_persona_factory_to_hermes(
+            event,
+            request,
+            payload,
+        )
+        self._reply(
+            event,
+            "\n".join(
+                [
+                    f"已创建 Persona Factory 任务：{request.request_id}",
+                    f"目标：{request.target}",
+                    "状态：research_pending",
+                    (
+                        "Hermes/core payload 已派发，等待后台调研与人工 review 后再注册。"
+                        if dispatched
+                        else "Hermes/core payload 已生成，等待后台调研与人工 review 后再注册。"
+                    ),
+                ]
+            ),
+        )
+
+    def _persona_status(self, event: AstrMessageEvent, arg_text: str) -> None:
+        request_id = arg_text.strip()
+        if request_id:
+            request = self.persona_factory_store.get(request_id)
+            if request is None:
+                self._reply(event, f"未找到 Persona Factory 任务：{request_id}")
+                return
+            self._reply(
+                event,
+                f"{request.request_id} · {request.target} · {request.status}",
+            )
+            return
+
+        limit = self._persona_max_recent()
+        recent = self.persona_factory_store.list_recent(limit=limit)
+        if not recent:
+            self._reply(event, "当前没有 Persona Factory 任务。")
+            return
+        lines = ["最近 Persona Factory 任务："]
+        lines.extend(
+            f"- {item.request_id} · {item.target} · {item.status}" for item in recent
+        )
+        self._reply(event, "\n".join(lines))
+
+    def _persona_review(
+        self,
+        event: AstrMessageEvent,
+        action: str,
+        arg_text: str,
+    ) -> None:
+        if not self._is_persona_reviewer(event):
+            self._reply(event, "抱歉，当前只有管理员可以审批 persona 生成结果。")
+            return
+        request_id = arg_text.strip()
+        if not request_id:
+            self._reply(event, "请提供 request_id。")
+            return
+        status = "approved" if action == "approve" else "rejected"
+        try:
+            request = self.persona_factory_store.set_status(
+                request_id,
+                status,
+                reviewer=self._sender_id(event),
+            )
+        except KeyError:
+            self._reply(event, f"未找到 Persona Factory 任务：{request_id}")
+            return
+        self._reply(
+            event,
+            f"已{'批准' if status == 'approved' else '拒绝'}：{request.request_id}",
+        )
+
+    async def _dispatch_persona_factory_to_hermes(
+        self,
+        event: AstrMessageEvent,
+        request,
+        payload: dict[str, Any],
+    ) -> bool:
+        dispatch = getattr(self.context, "dispatch_task_to_hermes", None)
+        if not callable(dispatch):
+            return False
+        try:
+            return bool(
+                await dispatch(
+                    request.request_id,
+                    "persona_factory",
+                    request.target,
+                    getattr(event, "unified_msg_origin", "") or "",
+                    {"persona_factory_request_id": request.request_id},
+                    extra_payload=payload,
+                )
+            )
+        except TypeError:
+            return bool(
+                await dispatch(
+                    request.request_id,
+                    "persona_factory",
+                    request.target,
+                    getattr(event, "unified_msg_origin", "") or "",
+                    {"persona_factory_request_id": request.request_id},
+                )
+            )
+
     def summary(self) -> dict[str, Any]:
         categories = []
         for category, label in CATEGORY_LABELS.items():
@@ -428,8 +594,12 @@ class DCHubPlugin(Star):
         data = asdict(module)
         data["category_label"] = CATEGORY_LABELS.get(module.category, module.category)
         data["family"] = CATEGORY_FAMILIES.get(module.category, "DC-Agent")
-        data["installed"] = self._plugin_path(module.plugin_id).exists()
-        star = self._registered_star(module.plugin_id)
+        data["installed"] = (
+            True
+            if module.migration == "hub-native"
+            else self._plugin_path(module.plugin_id).exists()
+        )
+        star = self._module_star(module)
         data["registered"] = star is not None
         data["activated"] = bool(star.activated) if star is not None else False
         data["runtime_enabled"] = self.is_enabled(module.plugin_id)
@@ -449,6 +619,15 @@ class DCHubPlugin(Star):
         module = self.get_module(plugin_id)
         if module is None:
             return True
+        if module.migration == "hub-native":
+            star = self._registered_star(PLUGIN_ID)
+            return (
+                self.desired_enabled(plugin_id)
+                and self.persona_factory_enabled
+                and bool(star.activated)
+                if star is not None
+                else False
+            )
         star = self._registered_star(plugin_id)
         if star is not None:
             return bool(star.activated)
@@ -693,13 +872,59 @@ class DCHubPlugin(Star):
     def _plugin_manager(self):
         return getattr(self.context, "_star_manager", None)
 
+    def _persona_factory_config(self) -> dict[str, Any]:
+        raw = self.cfg.get("persona_factory", {})
+        return raw if isinstance(raw, dict) else {}
+
+    def _allowed_persona_reviewers(self) -> set[str]:
+        raw = self._persona_factory_config().get("admin_reviewers") or []
+        if not isinstance(raw, list):
+            return set()
+        return {str(item).strip() for item in raw if str(item).strip()}
+
+    def _is_persona_reviewer(self, event: AstrMessageEvent) -> bool:
+        allowed = self._allowed_persona_reviewers()
+        return bool(allowed) and self._sender_id(event) in allowed
+
+    def _persona_max_recent(self) -> int:
+        try:
+            value = int(self._persona_factory_config().get("max_recent", 5))
+        except (TypeError, ValueError):
+            return 5
+        return max(1, min(20, value))
+
+    @staticmethod
+    def _parse_persona_command(text: str) -> tuple[str, str]:
+        stripped = text.strip()
+        if stripped.startswith("/persona"):
+            stripped = stripped[len("/persona") :].strip()
+        elif stripped.startswith("persona"):
+            stripped = stripped[len("persona") :].strip()
+        command, _, arg_text = stripped.partition(" ")
+        return command.strip().lower(), arg_text.strip()
+
+    @staticmethod
+    def _sender_id(event: AstrMessageEvent) -> str:
+        try:
+            return str(event.get_sender_id() or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _registered_star(self, plugin_id: str):
         get_registered_star = getattr(self.context, "get_registered_star", None)
         if callable(get_registered_star):
             return get_registered_star(plugin_id)
         return None
 
+    def _module_star(self, module: HubModule):
+        if module.migration == "hub-native":
+            return self._registered_star(PLUGIN_ID)
+        return self._registered_star(module.plugin_id)
+
     def _lifecycle_state(self, plugin_id: str) -> str:
+        module = self.get_module(plugin_id)
+        if module is not None and module.migration == "hub-native":
+            return "active" if self.is_enabled(plugin_id) else "disabled"
         if not self._plugin_path(plugin_id).exists():
             return "missing"
         star = self._registered_star(plugin_id)
@@ -710,6 +935,8 @@ class DCHubPlugin(Star):
         return "disabled"
 
     def _available_actions(self, module: HubModule) -> list[str]:
+        if module.migration == "hub-native":
+            return []
         state = self._lifecycle_state(module.plugin_id)
         actions: list[str] = []
         if state == "active":

@@ -43,6 +43,7 @@ def test_knowledge_cycle_wires_governance_steps() -> None:
         "obsidian_governance_stale_scan",
         "obsidian_governance_import",
         "obsidian_governance_promote",
+        "obsidian_governance_review_summary",
     ):
         assert f'"{step}"' in cycle_source
 
@@ -73,3 +74,5 @@ def test_cli_exposes_new_subcommands() -> None:
     assert '"stale-scan"' in cli_source
     assert "command_export_tasks" in cli_source
     assert "command_stale_scan" in cli_source
+    assert '"review-summary"' in cli_source
+    assert "command_review_summary" in cli_source

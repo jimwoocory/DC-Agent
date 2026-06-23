@@ -1,7 +1,7 @@
-"""Engineering-grade integration tests for the 12-stage dispatch pipeline.
+"""Engineering-grade integration tests for the 13-stage dispatch pipeline.
 
 The dispatch pipeline is the single entry point used by the Star plugin
-(see ``data/plugins/dc_router/dispatch.py``). It runs 12 stages in a
+(see ``data/plugins/dc_router/dispatch.py``). It runs 13 stages in a
 strict order — and *every* stage's ``stop=True`` short-circuits the
 rest of the pipeline. The order is contractually sensitive and is
 locked down in ``harness/contracts/routing_merge_contract.json`` R2.
@@ -14,12 +14,13 @@ The 12 stages are:
     4.  reasoning_prefix     — user-pinned provider (#高 / #超深 / ...)
     5.  feishu_channel       — strong pin via agent → provider
     6.  truth_intake         — block on missing material
-    7.  department_memory    — suggest/confirm/dismiss
-    8.  memory_injection     — set_extra only
-    9.  assistant_tone       — set_extra only
-    10. media_route          — image / video background job
-    11. dc_router.decide()   — main path
-    12. v1.0 fallback        — dc_router off / dry-run / error
+    7.  sop_signal           — low-friction memory governance confirmation
+    8.  department_memory    — suggest/confirm/dismiss
+    9.  memory_injection     — set_extra only
+    10. assistant_tone       — set_extra only
+    11. media_route          — image / video background job
+    12. dc_router.decide()   — main path
+    13. v1.0 fallback        — dc_router off / dry-run / error
 
 We mock the heavy dependencies (AstrBot provider manager, DC router,
 truth_intake, memory_injection, ...) at the module boundary so the
@@ -34,6 +35,7 @@ The test classes are organised by stage:
 - :class:`TestStage4ReasoningPrefix`         — prefix pinning
 - :class:`TestStage5FeishuChannel`           — channel agent pin
 - :class:`TestStage6TruthIntake`             — truth_intake block
+- :class:`TestStage7SopSignal`               — employee SOP signal confirmation
 - :class:`TestStage7DepartmentMemory`        — dept memory prompt
 - :class:`TestStage8MemoryInjection`         — memory extras
 - :class:`TestStage9AssistantTone`           — tone extras
@@ -116,7 +118,12 @@ sys.modules["dc_router"] = _dc_router_pkg_stub
 # package is on sys.modules with a real ``__path__``.
 _dc_router_config = importlib.import_module("dc_router.config")
 _dc_router_preprocessing = importlib.import_module("dc_router.preprocessing")
+_dc_router_feishu_channel = importlib.import_module(
+    "dc_router.preprocessing.feishu_channel"
+)
+_dc_router_card_action = importlib.import_module("dc_router.preprocessing.card_action")
 _dc_router_routing = importlib.import_module("dc_router.routing")
+_dc_router_sop_signal = importlib.import_module("dc_router.preprocessing.sop_signal")
 _dispatch = importlib.import_module("dc_router.dispatch")
 
 
@@ -202,6 +209,7 @@ class _StageSpy:
     dept_handled: bool = False
     dept_prompt_sent: bool = False
     memory_injected: bool = False
+    sop_signal_prompted: bool = False
     tone_injected: bool = False
     media_handled: bool = False
     dc_router_called: bool = False
@@ -267,6 +275,7 @@ def patched_dispatch(_spy: _StageSpy):
     card_mock = am(return_value=types.SimpleNamespace(handled=False, stop=False))
     feishu_mock = am(return_value=False)
     media_mock = am(return_value=False)
+    sop_mock = MagicMock(return_value=types.SimpleNamespace(stop=False))
     dept_mock = MagicMock(return_value=DepartmentMemoryDecision(effective_text=""))
     tone_mock = MagicMock(return_value=False)
     truth_mock = am(return_value=False)
@@ -291,6 +300,7 @@ def patched_dispatch(_spy: _StageSpy):
         _dispatch, "try_apply_feishu_channel_route", feishu_mock
     )
     patches["media"] = patch.object(_dispatch, "try_handle_media_route", media_mock)
+    patches["sop"] = patch.object(_dispatch, "try_capture_sop_signal", sop_mock)
     patches["dept"] = patch.object(_dispatch, "try_handle_department_memory", dept_mock)
     patches["tone"] = patch.object(_dispatch, "try_inject_assistant_tone", tone_mock)
     patches["truth"] = patch.object(_dispatch, "_maybe_truth_intake", truth_mock)
@@ -322,6 +332,7 @@ def patched_dispatch(_spy: _StageSpy):
         "card": card_mock,
         "feishu": feishu_mock,
         "media": media_mock,
+        "sop": sop_mock,
         "dept": dept_mock,
         "tone": tone_mock,
         "truth": truth_mock,
@@ -660,6 +671,49 @@ class TestStage5FeishuChannel:
         patched_dispatch["feishu"].assert_awaited()
         assert patched_dispatch["feishu"].return_value is False
 
+    @pytest.mark.asyncio
+    async def test_feishu_channel_route_preserves_direct_peer_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        event = _make_event(
+            text="帮我写活动文案",
+            platform_id="巅池-Agent小助手",
+            extras={
+                "feishu_channel_allowed": True,
+                "feishu_channel_agent_id": "planning-agent",
+                "feishu_channel_workspace": "data/feishu_agents/planning-agent",
+                "feishu_channel_peer_kind": "direct",
+                "feishu_channel_peer_id": "ou_colleague",
+            },
+        )
+        ctx = _make_context()
+        cfg = _make_config(
+            feishu_channel_routes={"planning-agent": "aihubmix/gemini-3.5-flash"}
+        )
+        captured: dict[str, Any] = {}
+
+        async def fake_apply_decision(context: Any, routed_event: Any, decision: Any):
+            captured["provider_id"] = decision.provider_id
+            captured["metadata"] = decision.metadata
+            return True
+
+        monkeypatch.setattr(
+            _dc_router_feishu_channel,
+            "apply_decision",
+            fake_apply_decision,
+        )
+
+        handled = await _dc_router_feishu_channel.try_apply_feishu_channel_route(
+            ctx, event, cfg
+        )
+
+        assert handled is True
+        assert captured["provider_id"] == "aihubmix/gemini-3.5-flash"
+        assert captured["metadata"]["peer_kind"] == "direct"
+        assert captured["metadata"]["peer_id"] == "ou_colleague"
+        assert event._extras["dc_router_feishu_peer_kind"] == "direct"
+        assert event._extras["dc_router_feishu_peer_id"] == "ou_colleague"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # 6. Stage 6 — truth_intake
@@ -682,6 +736,7 @@ class TestStage6TruthIntake:
         assert result.handled is True
         assert result.source == "truth_intake"
         # Once truth_intake stops, nothing else should run.
+        patched_dispatch["sop"].assert_not_called()
         patched_dispatch["memory"].assert_not_awaited()
         patched_dispatch["tone"].assert_not_called()
         patched_dispatch["dc"].assert_not_awaited()
@@ -720,7 +775,125 @@ class TestStage6TruthIntake:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 7. Stage 7 — department memory
+# 7. Stage 7 — SOP signal confirmation
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestStage7SopSignal:
+    """Stage 7 asks for low-friction confirmation before memory governance."""
+
+    @pytest.mark.asyncio
+    async def test_sop_signal_prompt_stops_downstream(
+        self, patched_dispatch: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        event = _make_event(
+            text="以后这种客户共创会邀约，先确认对方是谁、活动目的和飞书私域口吻，再出文案。",
+            platform_id="巅池-Agent小助手",
+        )
+        ctx = _make_context()
+        cfg = _make_config()
+        pending = types.SimpleNamespace(signal_id="employee_sop_001")
+        patched_dispatch["sop"].return_value = types.SimpleNamespace(
+            stop=True,
+            pending_state=pending,
+        )
+        send_mock = AsyncMock()
+        monkeypatch.setattr(_dispatch, "_send_sop_signal_prompt", send_mock)
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.handled is True
+        assert result.source == "sop_signal_prompt"
+        assert result.decision_intent == "sop_signal_suggested"
+        send_mock.assert_awaited_once_with(ctx, event, pending)
+        patched_dispatch["dept"].assert_not_called()
+        patched_dispatch["memory"].assert_not_awaited()
+        patched_dispatch["dc"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_sop_signal_no_candidate_continues(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(text="这句帮我改短点", platform_id="巅池-Agent小助手")
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["sop"].return_value = types.SimpleNamespace(stop=False)
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.source == "v1.0_no_match"
+        patched_dispatch["dept"].assert_called()
+
+    @pytest.mark.asyncio
+    async def test_remember_card_action_exports_auto_approved_memory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        governed_db = tmp_path / "governed_memory.db"
+        vault = tmp_path / "ObsidianVault"
+        monkeypatch.setattr(_dc_router_sop_signal, "_DEFAULT_GOVERNED_DB", governed_db)
+        monkeypatch.setattr(_dc_router_sop_signal, "_DEFAULT_OBSIDIAN_VAULT", vault)
+
+        event = _make_event(
+            text="以后这种客户共创会邀约，先确认对方是谁、活动目的和飞书私域口吻，再出文案。",
+            platform_id="巅池-Agent小助手",
+            umo="ai:chat:sop-user",
+            sender_id="ou_sop_user",
+        )
+        event.message_obj.message_id = "om_sop_signal_001"
+        decision = _dc_router_sop_signal.try_capture_sop_signal(
+            event,
+            text=event.message_str,
+        )
+        assert decision.stop is True
+        assert decision.pending_state is not None
+
+        action_event = _make_event(
+            text="__card_action__:{}",
+            platform_id="巅池-Agent小助手",
+            umo="ai:chat:sop-user",
+            sender_id="ou_sop_user",
+        )
+        action_event.is_card_action = True
+        action_event.message_obj.is_card_action = True
+        action_event.message_obj.card_action_payload = {
+            "value": {
+                "source": _dc_router_sop_signal.SOP_SIGNAL_SOURCE,
+                "action": "remember",
+                "signal_id": decision.pending_state.signal_id,
+            }
+        }
+
+        result = await _dc_router_card_action.try_handle_card_action(
+            _make_context(),
+            action_event,
+        )
+
+        assert result.handled is True
+        assert result.stop is True
+        from dc_engines.memory_governance.store import MemoryGovernanceStore
+
+        store = MemoryGovernanceStore(governed_db)
+        memory = store.get_memory(decision.pending_state.signal_id)
+        assert memory is not None
+        assert memory.review_status == "approved"
+        assert memory.memory_kind == "process"
+        assert memory.approved_by == "ou_sop_user"
+        assert "department_id:client_dept" in memory.tags
+        assert memory.obsidian_note_path
+        note_path = Path(memory.obsidian_note_path)
+        assert note_path.exists()
+        assert Path(memory.obsidian_note_path).parent == (
+            vault / "40_MemoryGovernance" / "Inbox"
+        )
+        markdown = note_path.read_text(encoding="utf-8")
+        assert "review_status: approved" in markdown
+        decisions = store.list_decisions(memory.memory_id)
+        assert decisions[0]["decision"] == "approved"
+        assert decisions[0]["reviewer"] == "ou_sop_user"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 8. Stage 8 — department memory
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -766,6 +939,58 @@ class TestStage7DepartmentMemory:
         assert result.handled is True
         assert result.source == "dept_memory_prompt"
         assert result.decision_intent == "dept_memory_suggested"
+
+    @pytest.mark.asyncio
+    async def test_dept_memory_prompt_keeps_text_result_when_card_send_succeeds(
+        self,
+    ) -> None:
+        """Regression: runtime card sends are side effects, not event results.
+
+        The prompt stage must still leave a text result on the event so the
+        AstrBot respond stage never skips the user-visible reply as an empty
+        chain.
+        """
+        from dc_router.preprocessing.department_memory import (
+            DepartmentMemoryPromptState,
+        )
+
+        event = _make_event(
+            text="给我五菱暑假的创意活动大纲",
+            platform_id="巅池-Agent小助手",
+        )
+        event.get_platform_name = MagicMock(return_value="lark")
+        ctx = _make_context()
+        state = DepartmentMemoryPromptState(
+            suggestion_id="dmpp_card_ok",
+            conversation_id="ai:chat:user-1:user-1",
+            original_text="给我五菱暑假的创意活动大纲",
+            query_text="给我五菱暑假的创意活动大纲",
+            department_ids=("dept-planning",),
+            department_names=("中台-策划",),
+            profile_ids=("profile-planning",),
+            created_at=0.0,
+        )
+
+        with (
+            patch(
+                "dc_engines.feishu_card_streamer.ensure_streamers_on_context",
+                return_value={"巅池-Agent小助手": object()},
+            ),
+            patch(
+                "dc_engines.feishu_card_streamer.extract_chat_info_from_event",
+                return_value=("oc_p2p", "chat_id"),
+            ),
+            patch(
+                "dc_engines.card_runtime.send_card_via_runtime",
+                new=AsyncMock(return_value=object()),
+            ),
+        ):
+            await _dispatch._send_dept_memory_prompt(ctx, event, state)
+
+        event.should_call_llm.assert_called_with(False)
+        event.set_result.assert_called_once()
+        result = event.set_result.call_args.args[0]
+        assert "是否调用已通过 Obsidian 审核的部门记忆" in result.chain[0].text
 
     @pytest.mark.asyncio
     async def test_dept_memory_no_stop_falls_through(

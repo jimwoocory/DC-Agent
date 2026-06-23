@@ -1,0 +1,81 @@
+{
+  "contract_id": "pet_live_system",
+  "version": "0.1.0",
+  "purpose": "Closed-loop live pet state contract across Feishu, AstrBot, Router, Harness, Hermes, Obsidian/KB, and desktop surfaces.",
+  "sources": [
+    "feishu",
+    "astrbot",
+    "router",
+    "harness",
+    "hermes",
+    "obsidian",
+    "desktop"
+  ],
+  "required_identity_keys": [
+    "employee_id",
+    "pet_id"
+  ],
+  "optional_identity_keys": [
+    "feishu_open_id",
+    "desktop_session_id"
+  ],
+  "required_events": [
+    "feishu_message_received",
+    "pet_card_viewed",
+    "pet_card_action",
+    "router_decision_made",
+    "memory_context_injected",
+    "harness_task_created",
+    "harness_task_in_progress",
+    "harness_task_completed",
+    "harness_task_review_required",
+    "harness_task_failed",
+    "hermes_task_running",
+    "hermes_task_completed",
+    "hermes_task_failed",
+    "obsidian_note_linked",
+    "memory_promoted",
+    "assistant_distillation_observed",
+    "work_habit_updated",
+    "memory_signal_promoted",
+    "desktop_heartbeat"
+  ],
+  "source_ref_required_keys": {
+    "feishu": [
+      "platform",
+      "conversation_id",
+      "message_id"
+    ],
+    "router": [
+      "platform",
+      "conversation_id",
+      "router_trace_id"
+    ],
+    "harness": [
+      "platform",
+      "conversation_id",
+      "harness_task_id"
+    ],
+    "hermes": [
+      "hermes_job_id"
+    ],
+    "obsidian": [
+      "obsidian_note_path"
+    ],
+    "desktop": [
+      "desktop_session_id"
+    ]
+  },
+  "privacy_rules": {
+    "forbid_full_message_text": true,
+    "forbid_full_kb_body": true,
+    "forbid_direct_personal_contact": true,
+    "store_source_ids_instead_of_content": true
+  },
+  "rollback_flags": [
+    "PET_LIVE_ENABLED",
+    "PET_LIVE_TAP_ENABLED",
+    "PET_LIVE_API_ENABLED",
+    "DIANCHI_PET_SCENE_ENABLED"
+  ]
+}

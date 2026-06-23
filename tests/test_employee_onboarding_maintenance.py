@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -68,14 +70,35 @@ class _EmployeeStore:
     def __init__(self, employee: Any) -> None:
         self.employee = employee
         self.updated_preferences: dict[str, Any] | None = None
+        self.created_open_ids: list[str] = []
 
     async def get_employee(self, open_id: str) -> Any:
         return self.employee
+
+    async def get_or_create(
+        self, open_id: str, *, platform_id: str = ""
+    ) -> tuple[Any, bool]:
+        self.created_open_ids.append(open_id)
+        if self.employee is None:
+            self.employee = SimpleNamespace(display_name="", preferences={})
+            return self.employee, True
+        return self.employee, False
 
     async def update_profile(self, open_id: str, **updates: Any) -> None:
         if "preferences" in updates:
             self.employee.preferences = updates["preferences"]
             self.updated_preferences = updates["preferences"]
+
+
+class _SlowEmployeeStore:
+    async def get_employee(self, open_id: str) -> Any:
+        await asyncio.sleep(1)
+        return None
+
+    async def get_or_create(
+        self, open_id: str, *, platform_id: str = ""
+    ) -> tuple[Any, bool]:
+        raise AssertionError("slow first-message path should be cancelled")
 
 
 @pytest.mark.asyncio
@@ -158,7 +181,9 @@ def test_quiz_result_placeholder_invite_link_is_not_rendered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auto_invite_failure_with_placeholder_link_keeps_onboarding_done() -> None:
+async def test_auto_invite_failure_with_placeholder_link_keeps_onboarding_done() -> (
+    None
+):
     plugin = _make_plugin(
         {
             "enabled": True,
@@ -338,6 +363,50 @@ async def test_auto_invite_invalid_member_still_marks_done() -> None:
     assert err == "invalid_or_already_member"
     assert "下方链接" not in note
     assert "正常使用" in note
+
+
+@pytest.mark.asyncio
+async def test_open_mode_unfinished_onboarding_allows_business_first_message() -> None:
+    store = _EmployeeStore(None)
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "block_business_until_complete": False,
+        },
+        store=store,
+    )
+    plugin._start_onboarding = AsyncMock()
+    event = _make_event("帮我整理明天活动执行物料清单")
+
+    await plugin.on_lark_private(event)
+
+    assert store.created_open_ids == ["ou_test_user"]
+    plugin._start_onboarding.assert_not_called()
+    event.stop_event.assert_not_called()
+    event.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboarding_timeout_fails_open_for_business_first_message() -> None:
+    plugin = _make_plugin(
+        {
+            "enabled": True,
+            "maintenance_mode": False,
+            "block_business_until_complete": False,
+            "side_effect_timeout_seconds": 0.01,
+        },
+        store=_SlowEmployeeStore(),
+    )
+    event = _make_event("帮我整理明天活动执行物料清单")
+    start = time.monotonic()
+
+    await plugin.on_lark_private(event)
+
+    assert time.monotonic() - start < 0.5
+    event.stop_event.assert_not_called()
+    event.send.assert_not_called()
+    event.set_result.assert_not_called()
 
 
 @pytest.mark.asyncio

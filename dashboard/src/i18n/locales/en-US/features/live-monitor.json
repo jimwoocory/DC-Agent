@@ -1,0 +1,148 @@
+{
+  "header": {
+    "title": "Assistant Live Monitor",
+    "subtitle": "Watch the desktop session, event stream, and current assistant state."
+  },
+  "actions": {
+    "refresh": "Refresh"
+  },
+  "filters": {
+    "presets": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "week": "This week",
+      "month": "This month",
+      "custom": "Custom"
+    },
+    "startDate": "Start date",
+    "endDate": "End date",
+    "now": "Now",
+    "summary": "{from} to {to}"
+  },
+  "connection": {
+    "connected": "Live connection healthy",
+    "system": "System monitor",
+    "degraded": "Connection degraded",
+    "disconnected": "Disconnected"
+  },
+  "common": {
+    "unknown": "Unknown",
+    "notUpdated": "Not updated"
+  },
+  "pet": {
+    "unknownName": "Assistant",
+    "unbound": "Desktop session unbound",
+    "level": "Lv.{level}"
+  },
+  "time": {
+    "justNow": "Just now",
+    "minutesAgo": "{minutes} min ago",
+    "hoursAgo": "{hours} hr ago"
+  },
+  "metrics": {
+    "energy": {
+      "label": "Energy",
+      "note": "From the latest pet state snapshot"
+    },
+    "xp": {
+      "label": "XP",
+      "note": "{coins} coins"
+    },
+    "streak": {
+      "label": "Active streak",
+      "value": "{days} days",
+      "note": "Accumulated from assistant interactions"
+    },
+    "lastActive": {
+      "label": "Last active",
+      "note": "Page updated at {time}"
+    }
+  },
+  "events": {
+    "title": "Live Event Stream",
+    "subtitle": "Shows routing, task, and desktop heartbeat events without full message text.",
+    "count": "{count} cached events",
+    "empty": "No live events yet.",
+    "action": "Action: {action}",
+    "refs": {
+      "conversation": "Conversation {id}",
+      "trace": "Trace {id}",
+      "task": "Task {id}",
+      "job": "Job {id}",
+      "desktop": "Desktop {id}"
+    }
+  },
+  "health": {
+    "title": "Connection Health",
+    "subtitle": "Current desktop session and event cursor.",
+    "petId": "Pet ID",
+    "lastEvent": "Latest event",
+    "cachedEvents": "Local cache",
+    "updatedAt": "State updated"
+  },
+  "sources": {
+    "title": "Event Sources",
+    "empty": "No source statistics yet",
+    "names": {
+      "feishu": "Feishu",
+      "astrbot": "AstrBot",
+      "router": "Router",
+      "harness": "Harness",
+      "hermes": "Hermes",
+      "obsidian": "Obsidian",
+      "desktop": "Desktop",
+      "unknown": "Unknown"
+    }
+  },
+  "states": {
+    "idle": "Idle",
+    "waiting": "Waiting",
+    "thinking": "Thinking",
+    "working": "Working",
+    "success": "Done",
+    "failed": "Needs attention",
+    "review": "In review",
+    "happy": "Happy",
+    "focused": "Focused",
+    "sleeping": "Resting",
+    "unknown": "Unknown state"
+  },
+  "emotions": {
+    "calm": "Calm",
+    "happy": "Happy",
+    "focused": "Focused",
+    "tired": "Tired",
+    "curious": "Curious",
+    "unknown": "Unknown emotion"
+  },
+  "scenes": {
+    "desk": "Desk",
+    "meeting": "Meeting",
+    "coding": "Coding",
+    "review": "Review",
+    "unknown": "Unknown scene"
+  },
+  "eventTypes": {
+    "desktop_session_bound": "Desktop session bound",
+    "desktop_heartbeat": "Desktop heartbeat",
+    "feishu_message_received": "Feishu message received",
+    "pet_card_viewed": "Card viewed",
+    "pet_card_action": "Card action",
+    "pet_fed": "Assistant fed",
+    "router_decision_made": "Router decision made",
+    "memory_context_injected": "Memory context injected",
+    "harness_task_created": "Task created",
+    "harness_task_in_progress": "Task in progress",
+    "harness_task_completed": "Task completed",
+    "harness_task_review_required": "Task needs review",
+    "harness_task_failed": "Task failed",
+    "hermes_task_running": "Hermes task running",
+    "hermes_task_completed": "Hermes task completed",
+    "hermes_task_failed": "Hermes task failed",
+    "obsidian_note_linked": "Obsidian note linked",
+    "memory_promoted": "Memory promoted"
+  },
+  "errors": {
+    "loadFailed": "Failed to load live monitor"
+  }
+}

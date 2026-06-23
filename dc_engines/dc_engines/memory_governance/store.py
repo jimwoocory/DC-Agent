@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import UTC, datetime
@@ -82,6 +83,21 @@ class MemoryGovernanceStore:
                 ON memory_audit_log(memory_id, created_at);
                 """
             )
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS governed_memories_fts
+                USING fts5(
+                    memory_id UNINDEXED,
+                    title,
+                    summary,
+                    canonical_text,
+                    owner,
+                    project_id,
+                    tags
+                )
+                """
+            )
+            self._sync_memory_fts(conn)
 
     def upsert_memory(self, memory: GovernedMemory) -> None:
         with self._connect() as conn:
@@ -124,6 +140,7 @@ class MemoryGovernanceStore:
                 """,
                 _memory_to_row(memory),
             )
+            self._upsert_memory_fts(conn, memory)
 
     def get_memory(self, memory_id: str) -> GovernedMemory | None:
         with self._connect() as conn:
@@ -161,6 +178,61 @@ class MemoryGovernanceStore:
                     """,
                     (limit,),
                 ).fetchall()
+        return [_memory_from_row(row) for row in rows]
+
+    def search_memories(
+        self,
+        *,
+        query: str,
+        include_unreviewed: bool = False,
+        include_sensitive: bool = False,
+        limit: int = 100,
+    ) -> list[GovernedMemory]:
+        if limit < 1:
+            return []
+        fts_query = _build_fts_query(query)
+        if not fts_query:
+            return self.list_memories(limit=limit)
+
+        status_clause = ""
+        status_params: tuple[str, ...] = ()
+        if not include_unreviewed:
+            status_clause = "AND gm.review_status = ?"
+            status_params = ("approved",)
+
+        sensitivity_clause = ""
+        sensitivity_params: tuple[str, ...] = ()
+        if not include_sensitive:
+            sensitivity_clause = "AND gm.sensitivity IN (?, ?)"
+            sensitivity_params = ("public", "internal")
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT gm.*
+                FROM governed_memories_fts
+                JOIN governed_memories gm
+                ON gm.memory_id = governed_memories_fts.memory_id
+                WHERE governed_memories_fts MATCH ?
+                {status_clause}
+                {sensitivity_clause}
+                ORDER BY
+                    CASE
+                        WHEN gm.sensitivity IN ('public', 'internal') THEN 0
+                        ELSE 1
+                    END,
+                    CASE WHEN gm.review_status = 'approved' THEN 0 ELSE 1 END,
+                    bm25(governed_memories_fts),
+                    gm.memory_id
+                LIMIT ?
+                """,
+                (
+                    fts_query,
+                    *status_params,
+                    *sensitivity_params,
+                    limit,
+                ),
+            ).fetchall()
         return [_memory_from_row(row) for row in rows]
 
     def record_decision(self, decision: ReviewDecision) -> None:
@@ -242,6 +314,46 @@ class MemoryGovernanceStore:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _upsert_memory_fts(
+        self,
+        conn: sqlite3.Connection,
+        memory: GovernedMemory,
+    ) -> None:
+        conn.execute(
+            "DELETE FROM governed_memories_fts WHERE memory_id = ?",
+            (memory.memory_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO governed_memories_fts (
+                memory_id, title, summary, canonical_text, owner, project_id, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                memory.memory_id,
+                memory.title,
+                memory.summary,
+                memory.canonical_text,
+                memory.owner,
+                memory.project_id,
+                " ".join(memory.tags),
+            ),
+        )
+
+    def _sync_memory_fts(self, conn: sqlite3.Connection) -> None:
+        memory_count = conn.execute(
+            "SELECT COUNT(*) FROM governed_memories"
+        ).fetchone()[0]
+        fts_count = conn.execute(
+            "SELECT COUNT(*) FROM governed_memories_fts"
+        ).fetchone()[0]
+        if memory_count == fts_count:
+            return
+        conn.execute("DELETE FROM governed_memories_fts")
+        rows = conn.execute("SELECT * FROM governed_memories").fetchall()
+        for row in rows:
+            self._upsert_memory_fts(conn, _memory_from_row(row))
 
 
 def _memory_to_row(memory: GovernedMemory) -> dict[str, Any]:
@@ -335,3 +447,8 @@ def _json_loads(value: str, fallback: Any) -> Any:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _build_fts_query(query: str) -> str:
+    tokens = re.findall(r"[\w\u4e00-\u9fff]+", query.lower())
+    return " ".join(f'"{token}"' for token in tokens)

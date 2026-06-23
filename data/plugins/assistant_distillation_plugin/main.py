@@ -83,7 +83,7 @@ class AssistantDistillationPlugin(Star):
             return False
         stream = await send_card_via_runtime(
             streamer,
-            card_type="skill_review",
+            card_type="assistant_distillation_review",
             chat_id=chat_id,
             receive_id_type=receive_id_type,
             card=card,

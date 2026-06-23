@@ -1,0 +1,19 @@
+{
+  "id": "sanmaomao",
+  "displayName": "散猫猫",
+  "description": "本地 DyberPet 风格桌宠资源，作为 Pet Live 桌面陪伴形态使用。",
+  "kind": "legacy-desktop-pet",
+  "spritesheetPath": "spritesheet.png",
+  "atlas": {
+    "cell": {
+      "width": 171,
+      "height": 160
+    },
+    "columns": 1,
+    "rows": 1
+  },
+  "source": {
+    "type": "local-dyberpet",
+    "path": "src/dyberpet/res/pet/散猫猫/smm.png"
+  }
+}

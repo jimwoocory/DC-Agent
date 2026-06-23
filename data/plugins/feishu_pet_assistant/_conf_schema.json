@@ -13,5 +13,10 @@
     "type": "string",
     "description": "H5 宠物房间地址，配置后会在卡片上多一个「打开小橘房间」按钮。留空则不显示该按钮",
     "default": ""
+  },
+  "desktop_entry_url": {
+    "type": "string",
+    "description": "桌面端入口地址，建议指向公司主页 OAuth：/auth/feishu/start?next=desktop。支持 {user_id} 和 {pet_id} 模板变量；也可用 PET_LIVE_DESKTOP_ENTRY_URL 环境变量覆盖。",
+    "default": ""
   }
 }

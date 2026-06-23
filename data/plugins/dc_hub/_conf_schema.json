@@ -1,12 +1,33 @@
 {
-  "state_path": {
-    "type": "string",
-    "description": "DC-HUB 状态文件路径。留空默认 data/config/dc_hub_state.json。V0.1.0 只保存 HUB 侧功能开关，不卸载原插件。",
-    "default": ""
-  },
-  "allow_state_mutation": {
-    "type": "bool",
-    "description": "是否允许 /dc-hub enable|disable 写入 HUB 侧开关状态。",
-    "default": true
+    "state_path": {
+        "type": "string",
+        "description": "DC-HUB 状态文件路径。留空默认 data/config/dc_hub_state.json。V0.1.0 只保存 HUB 侧功能开关，不卸载原插件。",
+        "default": ""
+    },
+    "allow_state_mutation": {
+        "type": "bool",
+        "description": "是否允许 /dc-hub enable|disable 写入 HUB 侧开关状态。",
+        "default": true
+    },
+  "persona_factory": {
+    "type": "object",
+    "description": "DC-HUB 内置 Persona Factory 配置。",
+    "items": {
+      "enabled": {
+        "type": "bool",
+        "description": "是否启用 DC-HUB 内置 Persona Factory 命令。",
+        "default": true
+      },
+      "admin_reviewers": {
+        "type": "list",
+        "description": "允许审批 persona 生成结果的飞书 open_id/user_id 列表。",
+        "default": []
+      },
+      "max_recent": {
+        "type": "int",
+        "description": "persona status 默认展示的最近任务数量。",
+        "default": 5
+      }
+    }
   }
 }

@@ -1,0 +1,59 @@
+{
+  "feature": "organization_permission_model",
+  "goal": "Separate DC-Agent organization facts, external platform facts, and DC runtime permissions so Feishu admins, department managers, bosses, app bots, and global DC admins are not conflated.",
+  "target_architecture": {
+    "organization_root": "广西巅池文化传媒有限公司",
+    "canonical_tree": {
+      "总经办": {
+        "中台部门": [
+          "客户部",
+          "策略部"
+        ],
+        "执行部门": [
+          "影视制作部",
+          "综合部",
+          "财务部",
+          "设计部",
+          "数字化应用部",
+          "活动统筹部"
+        ],
+        "品宣部门": [
+          "运营部",
+          "柳汽"
+        ]
+      }
+    },
+    "identity_layers": [
+      "organization_identity",
+      "external_platform_identity",
+      "dc_runtime_permission"
+    ],
+    "permission_runtime": "dc_engines.org_permissions"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "opm-001",
+      "description": "Department names are normalized to the Feishu organization tree while keeping business scope distinct from raw Feishu leaf departments.",
+      "verification": "uv run pytest dc_engines/tests/test_org_permissions.py::test_canonical_department_tree_and_aliases -q"
+    },
+    {
+      "id": "opm-002",
+      "description": "A Feishu app admin fact is preserved as external platform identity but does not grant DC global admin permission.",
+      "verification": "uv run pytest dc_engines/tests/test_org_permissions.py::test_feishu_admin_fact_does_not_grant_dc_admin -q"
+    },
+    {
+      "id": "opm-003",
+      "description": "Bosses and department managers receive scoped organization permissions for managed departments without becoming DC global admins.",
+      "verification": "uv run pytest dc_engines/tests/test_org_permissions.py::test_manager_and_boss_scoped_permissions -q"
+    },
+    {
+      "id": "opm-004",
+      "description": "Existing admins_id entries still become DC global admins, and app bot identifiers are treated as app principals rather than human staff.",
+      "verification": "uv run pytest dc_engines/tests/test_org_permissions.py::test_admins_id_and_app_principal_separation -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

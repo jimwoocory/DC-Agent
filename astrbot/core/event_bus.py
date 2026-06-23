@@ -14,6 +14,7 @@ import asyncio
 from asyncio import Queue
 
 from astrbot.core import logger
+from astrbot.core.assistant_chat_health import assistant_chat_health_tracker
 from astrbot.core.astrbot_config_mgr import AstrBotConfigManager
 from astrbot.core.pipeline.scheduler import PipelineScheduler
 
@@ -47,7 +48,28 @@ class EventBus:
                     f"PipelineScheduler not found for id: {conf_id}, event ignored."
                 )
                 continue
-            asyncio.create_task(scheduler.execute(event))
+            asyncio.create_task(self._execute_with_health(scheduler, event))
+
+    async def _execute_with_health(
+        self,
+        scheduler: PipelineScheduler,
+        event: AstrMessageEvent,
+    ) -> None:
+        run_id: str | None = None
+        phase = "failed"
+        if event.get_platform_name() != "webchat":
+            run_id = assistant_chat_health_tracker.begin_run(kind="platform")
+        try:
+            await scheduler.execute(event)
+            phase = "completed"
+        except asyncio.CancelledError:
+            phase = "disconnected"
+            raise
+        except Exception:
+            phase = "failed"
+            raise
+        finally:
+            assistant_chat_health_tracker.finish_run(run_id, phase=phase)
 
     def _print_event(self, event: AstrMessageEvent, conf_name: str) -> None:
         """用于记录事件信息

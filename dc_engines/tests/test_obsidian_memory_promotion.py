@@ -75,7 +75,9 @@ def test_promoter_only_promotes_approved_internal_memory(tmp_path: Path) -> None
     overrides = tmp_path / "nas_memory_overrides.json"
     create_nas_db(nas_db)
     store.upsert_memory(memory("mem_approved"))
-    store.upsert_memory(memory("mem_rejected", status="rejected", source_id="nas:doc_2"))
+    store.upsert_memory(
+        memory("mem_rejected", status="rejected", source_id="nas:doc_2")
+    )
     store.upsert_memory(
         memory(
             "mem_sensitive",
@@ -83,7 +85,9 @@ def test_promoter_only_promotes_approved_internal_memory(tmp_path: Path) -> None
             source_id="nas:doc_3",
         )
     )
-    store.upsert_memory(memory("mem_secret", sensitivity="secret", source_id="nas:doc_4"))
+    store.upsert_memory(
+        memory("mem_secret", sensitivity="secret", source_id="nas:doc_4")
+    )
 
     result = promote_governed_memories(
         store=store,
@@ -105,7 +109,10 @@ def test_promoter_only_promotes_approved_internal_memory(tmp_path: Path) -> None
         ).fetchone()
     assert row == ("confirmed", "谭媛尹", "customer-a", 0.92)
     overrides_data = json.loads(overrides.read_text(encoding="utf-8"))
-    assert overrides_data["projects"]["Customer A delivery"]["review_status"] == "confirmed"
+    assert (
+        overrides_data["projects"]["Customer A delivery"]["review_status"]
+        == "confirmed"
+    )
     assert len(store.list_audit("mem_approved")) == 1
     assert store.list_audit("mem_approved")[0]["action"] == "promoted_to_recall"
 
@@ -141,9 +148,15 @@ def test_recall_filters_to_approved_by_default(tmp_path: Path) -> None:
     store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
     store.initialize()
     store.upsert_memory(memory("mem_approved", title="Launch SOP"))
-    store.upsert_memory(memory("mem_need_review", status="need_review", title="Launch draft"))
-    store.upsert_memory(memory("mem_rejected", status="rejected", title="Launch rejected"))
-    store.upsert_memory(memory("mem_secret", sensitivity="secret", title="Launch secret"))
+    store.upsert_memory(
+        memory("mem_need_review", status="need_review", title="Launch draft")
+    )
+    store.upsert_memory(
+        memory("mem_rejected", status="rejected", title="Launch rejected")
+    )
+    store.upsert_memory(
+        memory("mem_secret", sensitivity="secret", title="Launch secret")
+    )
     store.upsert_memory(
         memory(
             "mem_sensitive_blocked",
@@ -161,8 +174,12 @@ def test_recall_admin_path_can_include_non_default_memory(tmp_path: Path) -> Non
     store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
     store.initialize()
     store.upsert_memory(memory("mem_approved", title="Budget SOP"))
-    store.upsert_memory(memory("mem_secret", sensitivity="secret", title="Budget secret"))
-    store.upsert_memory(memory("mem_need_review", status="need_review", title="Budget draft"))
+    store.upsert_memory(
+        memory("mem_secret", sensitivity="secret", title="Budget secret")
+    )
+    store.upsert_memory(
+        memory("mem_need_review", status="need_review", title="Budget draft")
+    )
 
     memories = list_recall_memories(
         store=store,
@@ -176,3 +193,36 @@ def test_recall_admin_path_can_include_non_default_memory(tmp_path: Path) -> Non
         "mem_need_review",
         "mem_secret",
     ]
+
+
+def test_recall_uses_governed_full_text_search_for_multi_token_queries(
+    tmp_path: Path,
+) -> None:
+    store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
+    store.initialize()
+    store.upsert_memory(
+        memory(
+            "mem_launch_budget",
+            title="Launch plan",
+            source_id="nas:launch_budget",
+        )
+    )
+    store.upsert_memory(
+        memory(
+            "mem_unrelated",
+            title="Hiring plan",
+            source_id="nas:hiring_plan",
+        )
+    )
+    store.upsert_memory(
+        memory(
+            "mem_secret_launch_budget",
+            sensitivity="secret",
+            title="Launch plan",
+            source_id="nas:secret_launch_budget",
+        )
+    )
+
+    memories = list_recall_memories(store=store, query="launch approval")
+
+    assert [item.memory_id for item in memories] == ["mem_launch_budget"]

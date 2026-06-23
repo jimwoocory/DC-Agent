@@ -25,16 +25,23 @@ class FakeEvent:
         sender_id: str = "ou_admin",
         message_str: str = "",
         is_card_action: bool = False,
+        requester_dc_permissions: list[dict] | None = None,
     ) -> None:
         self.message_str = message_str
         self.is_card_action = is_card_action
         self.message_obj = SimpleNamespace(is_card_action=is_card_action)
         self._sender_id = sender_id
+        self.requester_dc_permissions = requester_dc_permissions or []
         self.results: list[str] = []
         self.stopped = False
 
     def get_sender_id(self):
         return self._sender_id
+
+    def get_extra(self, key: str, default=None):
+        if key == "requester_dc_permissions":
+            return self.requester_dc_permissions
+        return default
 
     def get_platform_id(self):
         return "巅池-Agent小助手"
@@ -122,6 +129,39 @@ async def test_content_sop_rule_plugin_requires_admin_reviewer(tmp_path: Path):
     await plugin.handle_card_action(event)
 
     assert any("只有内容 SOP 管理员" in item for item in event.results)
+
+
+@pytest.mark.asyncio
+async def test_content_sop_rule_plugin_accepts_explicit_dc_review_permission(
+    tmp_path: Path,
+):
+    from data.plugins.content_sop_rule_review_plugin.main import (
+        ContentSopRuleReviewPlugin,
+    )
+
+    plugin = ContentSopRuleReviewPlugin(
+        FakeContext(
+            {
+                "admin_reviewers": [],
+                "db_path": str(tmp_path / "proposals.db"),
+                "rule_overrides_path": str(tmp_path / "overrides.json"),
+            }
+        )
+    )
+    event = FakeEvent(
+        sender_id="ou_ops",
+        message_str=_card_action("content_sop_rule_reject"),
+        is_card_action=True,
+        requester_dc_permissions=[
+            {
+                "permission": "content_rule_review",
+                "scope": "*",
+                "source": "dc_permission_assignments",
+            }
+        ],
+    )
+
+    assert plugin._is_reviewer(event) is True
 
 
 @pytest.mark.asyncio

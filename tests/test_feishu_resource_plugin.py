@@ -36,6 +36,7 @@ def test_attachment_summary_does_not_trigger_resource_query() -> None:
 
 def test_explicit_resource_query_still_triggers() -> None:
     assert _should_handle_resource_query("查 员工手册") is True
+    assert _should_handle_resource_query("查 Alpha") is True
     assert _should_handle_resource_query("帮我查一下客户资料") is True
 
 
@@ -47,6 +48,15 @@ def test_feishu_analysis_request_reaches_llm_workflow() -> None:
 
 def test_resource_discussion_question_does_not_trigger_query() -> None:
     assert _should_handle_resource_query("为什么资料里看到的和你说的不一样？") is False
+
+
+def test_external_topic_query_reaches_llm_workflow() -> None:
+    text = (
+        "查询今天国内主流平台的 top10 话题，关键词必须击中五菱、柳汽、新能源、"
+        "当下年轻人、年龄25-35之间"
+    )
+
+    assert _should_handle_resource_query(text) is False
 
 
 def test_keyword_extraction_uses_visible_query_text_only() -> None:

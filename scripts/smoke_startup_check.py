@@ -9,11 +9,16 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STARTUP_TIMEOUT_SECONDS = 60
 REQUEST_TIMEOUT_SECONDS = 2
+
+
+def dashboard_static_assets_ready(webui_dir: Path) -> bool:
+    return webui_dir.is_dir() and (webui_dir / "index.html").is_file()
 
 
 def _tail(path: Path, lines: int = 80) -> str:
@@ -30,11 +35,21 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _is_ready(host: str, port: int) -> bool:
+def _is_ready(host: str, port: int, webui_dir: Path) -> bool:
+    if not dashboard_static_assets_ready(webui_dir):
+        return False
     try:
         with socket.create_connection((host, port), timeout=REQUEST_TIMEOUT_SECONDS):
-            return True
+            pass
     except OSError:
+        return False
+    try:
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/",
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        ) as response:
+            return response.status == 200
+    except Exception:
         return False
 
 
@@ -87,7 +102,7 @@ def main() -> int:
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
     try:
         while time.monotonic() < deadline:
-            if _is_ready("127.0.0.1", port):
+            if _is_ready("127.0.0.1", port, webui_dir):
                 print("Smoke test passed")
                 return 0
 

@@ -5,7 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-MemorySourceSystem = Literal["nas", "astrbot_kb", "conversation", "manual", "harness"]
+MemorySourceSystem = Literal[
+    "nas",
+    "astrbot_kb",
+    "conversation",
+    "manual",
+    "harness",
+    "pet_live",
+]
 MemoryKind = Literal[
     "document",
     "fact",
@@ -31,6 +38,7 @@ VALID_SOURCE_SYSTEMS = {
     "conversation",
     "manual",
     "harness",
+    "pet_live",
 }
 VALID_MEMORY_KINDS = {
     "document",

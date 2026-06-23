@@ -1,0 +1,35 @@
+{
+  "feature": "watchdog_engineering",
+  "goal": "Move DC-Agent watchdog rules out of ad hoc shell blocks into a testable engine while preserving the existing cron entrypoint.",
+  "acceptance_criteria": [
+    {
+      "id": "wd-engine-001",
+      "description": "The active probe registry is defined in a Python watchdog engine and dc-watchdog.sh consumes it instead of hard-coding the service list.",
+      "verification": "uv run pytest tests/test_watchdog_engineering.py -q"
+    },
+    {
+      "id": "wd-engine-002",
+      "description": "Agent maintenance suppression ignores long-lived Codex desktop app-server processes but still recognizes recent or workspace-scoped Codex/Claude CLI processes.",
+      "verification": "uv run pytest tests/test_watchdog_engineering.py tests/test_watchdog_diagnose.py -q"
+    },
+    {
+      "id": "wd-engine-003",
+      "description": "watchdogctl reports probe enabled/disabled state from the same engine registry as dc-watchdog.sh.",
+      "verification": "uv run pytest tests/test_watchdog_engineering.py tests/test_watchdog_disabled_probe_state.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "entrypoint": "scripts-watchdog/dc-watchdog.sh",
+    "engine": "scripts-watchdog/watchdog_engine.py",
+    "state_file": "data/watchdog/state.json",
+    "alerts_log": "data/watchdog/alerts.jsonl",
+    "alert_feedback": "scripts-watchdog/diagnose.sh -> dc_engines.alert_channel"
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "manual": [
+      "bash -n scripts-watchdog/dc-watchdog.sh",
+      "uv run pytest tests/test_watchdog_engineering.py tests/test_watchdog_diagnose.py tests/test_watchdog_disabled_probe_state.py -q"
+    ]
+  }
+}

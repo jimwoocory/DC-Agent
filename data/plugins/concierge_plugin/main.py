@@ -37,6 +37,14 @@ from dc_engines.employee_directory import (
 )
 from dc_engines.feishu_reader import FeishuClient
 from dc_engines.feishu_reader.whitelist import load_whitelist
+from dc_engines.org_permissions import (
+    DC_ADMIN,
+    PermissionAssignment,
+    PermissionAssignmentStore,
+    build_principal_context_from_employee,
+    can_view_employee_profile,
+    normalize_department_name,
+)
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
@@ -198,6 +206,7 @@ class ConciergePlugin(Star):
         self.identity_overrides: dict[str, dict] = {"by_open_id": {}, "by_name": {}}
         self.config: dict = {}
         self.data_dir: Path | None = None
+        self.permission_store: PermissionAssignmentStore | None = None
 
     async def initialize(self) -> None:
         cfg = self.context.get_config() if hasattr(self.context, "get_config") else {}
@@ -207,6 +216,9 @@ class ConciergePlugin(Star):
         data_dir.mkdir(parents=True, exist_ok=True)
         self.store = EmployeeStore(str(data_dir / "employees.db"))
         await self.store.initialize()
+        self.permission_store = PermissionAssignmentStore(data_dir / "permissions.db")
+        await self.permission_store.initialize()
+        await self.permission_store.sync_admins_id(self._configured_admins_id())
         self.identity_overrides = self._load_identity_overrides(
             data_dir / "config" / "employee_identity_overrides.json"
         )
@@ -216,8 +228,13 @@ class ConciergePlugin(Star):
 
         # 暴露到 context（其他 plugin 也可读）
         self.context.employee_store = self.store
+        self.context.dc_permission_store = self.permission_store
 
         logger.info("[concierge] EmployeeStore 启动：%s", data_dir / "employees.db")
+        logger.info(
+            "[concierge] DC permission store 启动：%s",
+            data_dir / "permissions.db",
+        )
 
         # 尝试加载 Feishu 凭证给 /employees sync 用
         wl_path = data_dir / "feishu_whitelist.yaml"
@@ -934,11 +951,22 @@ class ConciergePlugin(Star):
         try:
             from astrbot.core.tools.knowledge_base_tools import retrieve_knowledge_base
 
-            context_text = await retrieve_knowledge_base(
+            retrieve_call = retrieve_knowledge_base(
                 query=query,
                 umo=event.unified_msg_origin,
                 context=self.context,
             )
+            timeout = float(self.config.get("employee_kb_context_timeout_seconds", 1.0))
+            if timeout > 0:
+                context_text = await asyncio.wait_for(retrieve_call, timeout=timeout)
+            else:
+                context_text = await retrieve_call
+        except TimeoutError:
+            logger.warning(
+                "[concierge] 员工记忆桥接 KB 检索超时，已跳过 umo=%s",
+                event.unified_msg_origin,
+            )
+            return ""
         except Exception as exc:  # noqa: BLE001
             logger.debug("[concierge] 员工记忆桥接 KB 检索失败：%s", exc)
             return ""
@@ -1632,11 +1660,118 @@ class ConciergePlugin(Star):
     def _reply(self, event: AstrMessageEvent, text: str) -> None:
         event.set_result(MessageEventResult().message(text).use_t2i(False).stop_event())
 
+    def _configured_admins_id(self) -> tuple[str, ...]:
+        raw_admins = self.config.get("admins_id", [])
+        if not isinstance(raw_admins, list | tuple):
+            return ()
+        return tuple(str(item).strip() for item in raw_admins if str(item).strip())
+
+    def _permission_rows_to_assignments(
+        self,
+        rows: list[dict] | tuple[dict, ...],
+    ) -> list[PermissionAssignment]:
+        assignments: list[PermissionAssignment] = []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            permission = str(item.get("permission") or "").strip()
+            if not permission:
+                continue
+            assignments.append(
+                PermissionAssignment(
+                    subject_id=str(item.get("subject_id") or ""),
+                    subject_type="app" if item.get("subject_type") == "app" else "user",
+                    permission=permission,
+                    scope=normalize_department_name(str(item.get("scope") or "*")),
+                    source=str(item.get("source") or "request_context"),
+                    enabled=bool(item.get("enabled", True)),
+                    updated_at=str(item.get("updated_at") or ""),
+                )
+            )
+        return assignments
+
+    def _requester_permission_assignments(
+        self, kwargs: dict
+    ) -> list[PermissionAssignment] | None:
+        raw_permissions = kwargs.get("requester_dc_permissions")
+        if raw_permissions is None:
+            raw_permissions = kwargs.get("dc_permissions")
+        if raw_permissions is None:
+            return None
+        if isinstance(raw_permissions, str):
+            try:
+                raw_permissions = json.loads(raw_permissions)
+            except json.JSONDecodeError:
+                return []
+        if not isinstance(raw_permissions, list | tuple):
+            return []
+        return self._permission_rows_to_assignments(raw_permissions)
+
+    def _employee_visible_to_requester(
+        self,
+        employee: Employee,
+        requester_permissions: list[PermissionAssignment] | None,
+    ) -> bool:
+        if requester_permissions is None:
+            return True
+        return can_view_employee_profile(requester_permissions, employee.department)
+
+    async def _employee_permission_context(self, employee: Employee) -> dict:
+        permission_assignments: list[PermissionAssignment] = []
+        if self.permission_store is not None:
+            try:
+                permission_assignments = await self.permission_store.list_assignments(
+                    employee.open_id
+                )
+            except Exception:  # noqa: BLE001
+                permission_assignments = []
+        principal = build_principal_context_from_employee(
+            employee,
+            admins_id=self._configured_admins_id(),
+            permission_assignments=permission_assignments,
+        )
+        return {
+            "principal_type": principal.principal_type,
+            "canonical_department": principal.department,
+            "organization_path": list(principal.organization_path),
+            "managed_departments": list(principal.managed_departments),
+            "dc_permissions": [
+                {
+                    "permission": assignment.permission,
+                    "scope": assignment.scope,
+                    "source": assignment.source,
+                    "subject_type": assignment.subject_type,
+                }
+                for assignment in principal.permissions
+            ],
+            "external_facts": principal.external_facts,
+        }
+
     def _is_admin_event(self, event: AstrMessageEvent) -> bool:
         try:
-            return bool(event.is_admin())
+            if bool(event.is_admin()):
+                return True
         except Exception:  # noqa: BLE001
-            return getattr(event, "role", "") == "admin"
+            if getattr(event, "role", "") == "admin":
+                return True
+        return self._event_has_dc_permission(event, DC_ADMIN)
+
+    def _event_has_dc_permission(
+        self, event: AstrMessageEvent, permission: str
+    ) -> bool:
+        permission_rows = []
+        try:
+            permission_rows = event.get_extra("requester_dc_permissions", default=[])
+        except Exception:  # noqa: BLE001
+            permission_rows = getattr(event, "requester_dc_permissions", [])
+        if not isinstance(permission_rows, list):
+            return False
+        for item in permission_rows:
+            if not isinstance(item, dict):
+                continue
+            if item.get("permission") == permission:
+                return True
+        return False
 
     def _is_private_event(self, event: AstrMessageEvent) -> bool:
         try:
@@ -2160,9 +2295,13 @@ class ConciergePlugin(Star):
                 "data": None,
             }
         try:
+            requester_permissions = self._requester_permission_assignments(kwargs)
             emps = await self.store.list_employees(limit=200)
-            payload = [
-                {
+            payload = []
+            for e in emps:
+                if not self._employee_visible_to_requester(e, requester_permissions):
+                    continue
+                item = {
                     "open_id": e.open_id,
                     "display_name": e.display_name,
                     "department": e.department,
@@ -2180,12 +2319,16 @@ class ConciergePlugin(Star):
                     "last_seen_at": e.last_seen_at,
                     "is_anonymous": e.is_anonymous,
                 }
-                for e in emps
-            ]
+                item["permission_context"] = await self._employee_permission_context(e)
+                payload.append(item)
             return {
                 "status": "ok",
                 "message": None,
-                "data": {"employees": payload, "total": len(payload)},
+                "data": {
+                    "employees": payload,
+                    "total": len(payload),
+                    "scope_filter_applied": requester_permissions is not None,
+                },
             }
         except Exception as exc:  # noqa: BLE001
             logger.warning("[concierge] _api_list_employees 异常：%s", exc)
@@ -2283,10 +2426,18 @@ class ConciergePlugin(Star):
         if not open_id:
             return {"status": "error", "message": "missing open_id", "data": None}
         try:
+            requester_permissions = self._requester_permission_assignments(kwargs)
             emp = await self.store.get_employee(open_id)
             if emp is None:
                 return {"status": "error", "message": "not found", "data": None}
+            if not self._employee_visible_to_requester(emp, requester_permissions):
+                return {
+                    "status": "error",
+                    "message": "permission denied",
+                    "data": None,
+                }
             mems = await self.store.list_memories(open_id, limit=100, min_relevance=0.0)
+            permission_context = await self._employee_permission_context(emp)
             return {
                 "status": "ok",
                 "message": None,
@@ -2309,6 +2460,7 @@ class ConciergePlugin(Star):
                         "interaction_count": emp.interaction_count,
                         "first_seen_at": emp.first_seen_at,
                         "last_seen_at": emp.last_seen_at,
+                        "permission_context": permission_context,
                     },
                     "memories": [
                         {

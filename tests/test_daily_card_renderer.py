@@ -50,6 +50,16 @@ def _make_lark_event(result: MessageEventResult, *, stream_id: str | None = None
     return event
 
 
+def _make_webchat_event(result: MessageEventResult):
+    event = _make_lark_event(result)
+    event.get_platform_id.return_value = "webchat"
+    event.get_platform_name.return_value = "webchat"
+    event.message_obj.raw_message = SimpleNamespace(chat_id="")
+    event.get_group_id.return_value = ""
+    event.get_sender_id.return_value = "ou_smoke_user_1"
+    return event
+
+
 def _make_context(streamer):
     ctx = MagicMock()
     ctx.feishu_streamers = {"巅池-Agent小助手": streamer}
@@ -110,6 +120,47 @@ async def test_short_card_render_consumes_llm_result(monkeypatch) -> None:
 
     assert result.chain == []
     assert result.result_content_type == ResultContentType.GENERAL_RESULT
+
+
+@pytest.mark.asyncio
+async def test_webchat_result_does_not_send_feishu_card(monkeypatch) -> None:
+    renderer = _load_daily_card_renderer()
+    streamer = _make_streamer()
+    plugin = object.__new__(renderer.DailyCardRendererPlugin)
+    plugin.context = _make_context(streamer)
+    plugin._finalized_stream_ids = {}
+    send_card = AsyncMock(return_value=SimpleNamespace(message_id="om_should_not_send"))
+    monkeypatch.setattr(renderer, "send_card_via_runtime", send_card)
+
+    result = (
+        MessageEventResult()
+        .message("收到，我会按一句话回复。")
+        .set_result_content_type(ResultContentType.LLM_RESULT)
+    )
+    event = _make_webchat_event(result)
+
+    await plugin.finalize_or_render_card(event)
+
+    send_card.assert_not_awaited()
+    assert result.chain
+    assert result.result_content_type == ResultContentType.LLM_RESULT
+
+
+@pytest.mark.asyncio
+async def test_webchat_waiting_card_does_not_send_feishu_card(monkeypatch) -> None:
+    renderer = _load_daily_card_renderer()
+    streamer = _make_streamer()
+    plugin = object.__new__(renderer.DailyCardRendererPlugin)
+    plugin.context = _make_context(streamer)
+    send_card = AsyncMock(return_value=SimpleNamespace(message_id="om_should_not_send"))
+    monkeypatch.setattr(renderer, "send_card_via_runtime", send_card)
+
+    result = MessageEventResult().message("稍等，我处理一下。")
+    event = _make_webchat_event(result)
+
+    await plugin._start_thinking_card_if_needed(event)
+
+    send_card.assert_not_awaited()
 
 
 def test_consumed_card_result_will_not_trigger_empty_model_fallback() -> None:

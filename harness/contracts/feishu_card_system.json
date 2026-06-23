@@ -40,12 +40,17 @@
     {
       "id": "card-system-008",
       "description": "Runtime plugins and grey tools send cards through the shared card runtime gateway instead of ad-hoc script-only Feishu calls.",
-      "verification": "scripts-tools/card-system-health.py"
+      "verification": "scripts-tools/card-system-health.py --strict-gate"
+    },
+    {
+      "id": "card-system-009",
+      "description": "The card template asset matrix is generated from the reusable runtime registry and gates runtime gateway card_type call sites, dynamic forwarders, sample payloads, and grey evidence without relying on a one-off script.",
+      "verification": "scripts-tools/card-system-health.py --strict-gate && scripts-tools/card-system-health.py --matrix && scripts-tools/card-system-health.py --manifest --json"
     }
   ],
   "verification": {
     "targeted": "scripts/agent-check.sh --profile targeted",
-    "card_health": "scripts-tools/card-system-health.py",
+    "card_health": "scripts-tools/card-system-health.py --strict-gate",
     "handoff": "scripts-tools/card-system-health.py --next-step",
     "real_grey": "scripts-tools/card-grey-push.py --receive-id-type union_id --receive-id <receiver> --card-type casual_reply --card-type thinking_waiting && scripts-tools/card-system-health.py --events --limit 20"
   }

@@ -3144,7 +3144,7 @@ def build_daily_response_card(
     """日常对话渲染卡片 —— 给 LLM 输出的 markdown 套一层飞书卡片。
 
     用智能字号分段：# / ## / ### 渲染成 22/18/16px 加粗大字，
-    正文 14px，`> 引用` 12px 小灰字。
+    正文 14px，`> 引用` 使用 normal 正文字号。
     """
     elements: list[dict[str, Any]] = _md_blocks_from_text(content_md)
     if footer_hint:
@@ -3159,7 +3159,10 @@ def build_daily_response_card(
 
     card: dict[str, Any] = {
         "schema": "2.0",
-        "config": {"update_multi": True, "wide_screen_mode": True},
+        "config": {
+            "update_multi": True,
+            "wide_screen_mode": True,
+        },
         "body": {"elements": elements},
     }
     if title:

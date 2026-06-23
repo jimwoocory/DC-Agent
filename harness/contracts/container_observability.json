@@ -1,0 +1,42 @@
+{
+  "feature": "container_observability",
+  "goal": "Keep the primary uv-run DC-Agent runtime and lightweight observability helpers executable, while keeping the optional Docker compatibility path from failing when CI or operators use it.",
+  "acceptance_criteria": [
+    {
+      "id": "container-observability-001",
+      "description": "The optional Docker image declares a healthcheck against the unauthenticated /api/chat/health endpoint using tools available in the runtime image.",
+      "verification": "uv run pytest tests/test_container_observability.py -q"
+    },
+    {
+      "id": "container-observability-002",
+      "description": "The optional Docker build context includes the built dashboard dist artifact while continuing to exclude local runtime data.",
+      "verification": "uv run pytest tests/test_container_observability.py -q"
+    },
+    {
+      "id": "container-observability-003",
+      "description": "DC-Agent observability helpers import and run without optional tracing or metrics packages, and main.py initializes them explicitly on the primary uv-run path instead of relying on runtime monkeypatching.",
+      "verification": "uv run pytest tests/test_container_observability.py tests/harness/test_container_observability_contract.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "health_endpoint": "/api/chat/health",
+    "primary_runtime": "uv run main.py",
+    "docker_role": "optional CI/operator compatibility path, not the normal local runtime",
+    "healthcheck": "Dockerfile HEALTHCHECK",
+    "dashboard_artifact": "data/dist",
+    "runtime_data_policy": "exclude data/* except data/dist from Docker build context",
+    "observability_modules": [
+      "dc_logging.py",
+      "dc_metrics.py",
+      "dc_tracing.py"
+    ]
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "manual": [
+      "uv run pytest tests/test_container_observability.py tests/harness/test_container_observability_contract.py -q",
+      "uv run ruff check dc_logging.py dc_metrics.py dc_tracing.py tests/test_container_observability.py tests/harness/test_container_observability_contract.py",
+      "uv run ruff format --check dc_logging.py dc_metrics.py dc_tracing.py tests/test_container_observability.py tests/harness/test_container_observability_contract.py"
+    ]
+  }
+}

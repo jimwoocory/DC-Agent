@@ -34,6 +34,8 @@ DEFAULT_ENTRIES: list[dict] = [
         "health_path": "/",
         "hint": "Hermes Agent 官方 UI / sessions 列表",
         "icon": "🤖",
+        "category": "agent",
+        "priority": 30,
     },
     {
         "name": "Hermes Agent 第三方 WebUI",
@@ -43,6 +45,8 @@ DEFAULT_ENTRIES: list[dict] = [
         "health_path": "/",
         "hint": "EKKOLearnAI/hermes-web-ui 第三方界面",
         "icon": "💬",
+        "category": "agent",
+        "priority": 70,
     },
     {
         "name": "OpenClaw",
@@ -53,6 +57,8 @@ DEFAULT_ENTRIES: list[dict] = [
         "hint": "按需启动 / 看门狗 :9120/kick",
         "icon": "🖥️",
         "on_demand_kick": "http://localhost:9120/kick",
+        "category": "agent",
+        "priority": 40,
     },
     {
         "name": "Hermes Gateway",
@@ -61,6 +67,8 @@ DEFAULT_ENTRIES: list[dict] = [
         "probe_port": 8644,
         "hint": "Hermes webhook 网关（后端，无 UI）",
         "icon": "🔌",
+        "category": "agent",
+        "priority": 110,
     },
     {
         "name": "AstrBot Response 通道",
@@ -69,10 +77,34 @@ DEFAULT_ENTRIES: list[dict] = [
         "probe_port": 8645,
         "hint": "Hermes → AstrBot 回调端口",
         "icon": "🔁",
+        "category": "agent",
+        "priority": 120,
     },
 ]
 
 PINNED_DASHBOARD_ENTRIES: list[dict] = [
+    {
+        "name": "小助手健康",
+        "url": "/#/assistant-health",
+        "probe_host": None,
+        "probe_port": None,
+        "hint": "聊天线程、队列监听和会话存储健康面板",
+        "icon": "🫀",
+        "pinned": True,
+        "category": "assistant",
+        "priority": 10,
+    },
+    {
+        "name": "小助手实时看板",
+        "url": "/#/live-monitor",
+        "probe_host": None,
+        "probe_port": None,
+        "hint": "小助手桌面会话、事件流和状态监控看板",
+        "icon": "📡",
+        "pinned": True,
+        "category": "assistant",
+        "priority": 20,
+    },
     {
         "name": "员工需求洞察",
         "url": "/#/employee-insight",
@@ -81,6 +113,8 @@ PINNED_DASHBOARD_ENTRIES: list[dict] = [
         "hint": "飞书私聊灰度验证、触达计划和员工需求闭环看板",
         "icon": "🧭",
         "pinned": True,
+        "category": "assistant",
+        "priority": 60,
     },
     {
         "name": "记忆治理",
@@ -90,6 +124,8 @@ PINNED_DASHBOARD_ENTRIES: list[dict] = [
         "hint": "NAS / Obsidian 记忆治理看板",
         "icon": "🧠",
         "pinned": True,
+        "category": "governance",
+        "priority": 80,
     },
     {
         "name": "内容 SOP 运营",
@@ -99,6 +135,8 @@ PINNED_DASHBOARD_ENTRIES: list[dict] = [
         "hint": "内容 SOP 规则、记忆和审计运营看板",
         "icon": "📋",
         "pinned": True,
+        "category": "governance",
+        "priority": 90,
     },
 ]
 

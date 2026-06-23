@@ -103,9 +103,7 @@ STEP_CONFIG: dict[str, dict[str, Any]] = {
     },
     "obsidian_governance_export_tasks": {
         "interval_sec": int(
-            os.getenv(
-                "KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS_INTERVAL_SEC", "3600"
-            )
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS_INTERVAL_SEC", "3600")
         ),
         "timeout_sec": int(
             os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_EXPORT_TASKS_TIMEOUT_SEC", "300")
@@ -119,9 +117,7 @@ STEP_CONFIG: dict[str, dict[str, Any]] = {
     },
     "obsidian_governance_stale_scan": {
         "interval_sec": int(
-            os.getenv(
-                "KNOWLEDGE_OBSIDIAN_GOVERNANCE_STALE_SCAN_INTERVAL_SEC", "21600"
-            )
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_STALE_SCAN_INTERVAL_SEC", "21600")
         ),
         "timeout_sec": int(
             os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_STALE_SCAN_TIMEOUT_SEC", "300")
@@ -152,6 +148,22 @@ STEP_CONFIG: dict[str, dict[str, Any]] = {
         == "1",
         "dry_run": os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_PROMOTE_DRY_RUN", "1")
         == "1",
+    },
+    "obsidian_governance_review_summary": {
+        "interval_sec": int(
+            os.getenv(
+                "KNOWLEDGE_OBSIDIAN_GOVERNANCE_REVIEW_SUMMARY_INTERVAL_SEC", "86400"
+            )
+        ),
+        "timeout_sec": int(
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_REVIEW_SUMMARY_TIMEOUT_SEC", "120")
+        ),
+        "max_runtime_sec": 300,
+        "enabled": os.getenv("KNOWLEDGE_ENABLE_OBSIDIAN_GOVERNANCE_REVIEW_SUMMARY", "0")
+        == "1",
+        "limit": int(
+            os.getenv("KNOWLEDGE_OBSIDIAN_GOVERNANCE_REVIEW_SUMMARY_LIMIT", "10")
+        ),
     },
     "feishu_nas_workflow": {
         "interval_sec": int(
@@ -537,6 +549,16 @@ def command_for_step(step: str) -> list[str] | None:
         if STEP_CONFIG["obsidian_governance_promote"]["dry_run"]:
             cmd.append("--dry-run")
         return cmd
+    if step == "obsidian_governance_review_summary":
+        if not STEP_CONFIG["obsidian_governance_review_summary"]["enabled"]:
+            return None
+        return [
+            str(PYTHON),
+            str(DC_ROOT / "scripts-tools" / "obsidian_memory_governance.py"),
+            "review-summary",
+            "--limit",
+            str(STEP_CONFIG["obsidian_governance_review_summary"]["limit"]),
+        ]
     if step == "feishu_nas_workflow":
         if not STEP_CONFIG["feishu_nas_workflow"]["enabled"]:
             return None
@@ -718,6 +740,7 @@ def tick() -> int:
         "obsidian_governance_stale_scan",
         "obsidian_governance_import",
         "obsidian_governance_promote",
+        "obsidian_governance_review_summary",
     ):
         if STEP_CONFIG[step]["enabled"]:
             if is_due(step) and start_step(step):

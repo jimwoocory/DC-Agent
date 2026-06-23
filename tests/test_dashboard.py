@@ -40,7 +40,7 @@ from astrbot.dashboard.routes.auth import DASHBOARD_JWT_COOKIE_NAME
 from astrbot.dashboard.routes.memory_governance import MemoryGovernanceRoute
 from astrbot.dashboard.routes.plugin import PluginRoute
 from astrbot.dashboard.routes.route import RouteContext
-from astrbot.dashboard.server import AstrBotDashboard
+from astrbot.dashboard.server import AstrBotDashboard, _resolve_dashboard_static_path
 from tests.fixtures.helpers import (
     MockPluginBuilder,
     create_mock_updater_install,
@@ -206,6 +206,38 @@ def app(core_lifecycle_td: AstrBotCoreLifecycle):
     # The db instance is already part of the core_lifecycle_td
     server = AstrBotDashboard(core_lifecycle_td, core_lifecycle_td.db, shutdown_event)
     return server.app
+
+
+def test_dashboard_ignores_incomplete_user_dist(tmp_path, monkeypatch):
+    """A stale/partial data/dist must not shadow the bundled dashboard."""
+    data_dir = tmp_path / "data"
+    user_dist = data_dir / "dist"
+    bundled_dist = tmp_path / "bundled-dist"
+    user_dist.mkdir(parents=True)
+    bundled_dist.mkdir()
+    (bundled_dist / "index.html").write_text("bundled", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "astrbot.dashboard.server.get_astrbot_data_path", lambda: str(data_dir)
+    )
+
+    assert _resolve_dashboard_static_path(None, bundled_dist) == bundled_dist.resolve()
+
+
+def test_dashboard_uses_user_dist_only_when_index_exists(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    user_dist = data_dir / "dist"
+    bundled_dist = tmp_path / "bundled-dist"
+    user_dist.mkdir(parents=True)
+    bundled_dist.mkdir()
+    (user_dist / "index.html").write_text("user", encoding="utf-8")
+    (bundled_dist / "index.html").write_text("bundled", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "astrbot.dashboard.server.get_astrbot_data_path", lambda: str(data_dir)
+    )
+
+    assert _resolve_dashboard_static_path(None, bundled_dist) == user_dist.resolve()
 
 
 def _resolve_dashboard_password(core_lifecycle_td: AstrBotCoreLifecycle) -> str:
@@ -817,7 +849,11 @@ def test_dc_hub_managed_plugins_are_marked_for_outer_list_hiding():
     hidden = route._dc_hub_hidden_plugin_names()
 
     assert "chat_creator_plugin" in hidden
+    assert "content_sop_rule_review_plugin" in hidden
     assert "dc_router" in hidden
+    assert "employee_insight_plugin" in hidden
+    assert "harness_runtime_plugin" in hidden
+    assert "skill_preloader" in hidden
     assert "dc_hub" not in hidden
 
 
@@ -1234,6 +1270,17 @@ async def test_get_stat(app: Quart, authenticated_header: dict):
     assert response.status_code == 200
     data = await response.get_json()
     assert data["status"] == "ok" and "platform" in data["data"]
+
+
+@pytest.mark.asyncio
+async def test_pet_live_routes_bypass_dashboard_jwt(app: Quart):
+    test_client = app.test_client()
+
+    response = await test_client.get("/api/pet/me")
+    data = await response.get_json()
+
+    assert response.status_code != 401
+    assert data["message"] != "未授权"
 
 
 @pytest.mark.asyncio

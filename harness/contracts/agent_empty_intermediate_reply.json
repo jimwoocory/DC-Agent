@@ -1,0 +1,29 @@
+{
+  "feature": "agent_empty_intermediate_reply",
+  "goal": "Do not send fallback text for empty intermediate LLM turns while the internal tool-loop agent is still running, and never silently swallow a final empty LLM result.",
+  "acceptance_criteria": [
+    {
+      "id": "agent-empty-intermediate-001",
+      "description": "A tool-loop LLM result with no components is treated as an empty intermediate turn and is skipped before the respond stage.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_astr_agent_run_util.py -v"
+    },
+    {
+      "id": "agent-empty-intermediate-002",
+      "description": "A tool-loop LLM result containing only blank Plain text is treated as an empty intermediate turn and is skipped before the respond stage.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_astr_agent_run_util.py -v"
+    },
+    {
+      "id": "agent-empty-intermediate-003",
+      "description": "A tool-loop LLM result containing non-blank Plain text remains sendable.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_astr_agent_run_util.py -v"
+    },
+    {
+      "id": "agent-empty-intermediate-004",
+      "description": "A final empty LLM result is yielded to RespondStage so the user gets an explicit fallback instead of no reply.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_astr_agent_run_util.py -v"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

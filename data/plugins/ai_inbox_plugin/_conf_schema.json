@@ -1,0 +1,7 @@
+{
+  "side_effect_timeout_seconds": {
+    "type": "float",
+    "description": "AI Inbox 写库/建 Case 的最大等待秒数；超时只跳过旁路记录，不影响正常聊天回复",
+    "default": 1.5
+  }
+}

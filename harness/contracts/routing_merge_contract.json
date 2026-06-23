@@ -106,7 +106,7 @@
     {
       "id": "R9",
       "title": "Memory 注入不污染 message_str",
-      "text": "memory_injection / dept_memory / assistant_tone 全部用 event.set_extra(...) 传 context，禁止改写 event.message_str / event.message_obj.message_str。原始文本只走 routing_adapter / apply_decision 做最终 prompt 拼接。",
+      "text": "memory_injection / dept_memory / assistant_tone 全部用 event.set_extra(...) 传 context，禁止改写 event.message_str / event.message_obj.message_str。原始文本只走 routing/apply_decision.py / cli_handlers.py 做最终 prompt 拼接。",
       "enforcement": [
         "memory_injection.inject_memory_context_into_event 写 dc_agent_memory_context / dc_agent_memory_hits extras",
         "dept_memory.audit_state 状态走 audit log (data/department_memory_prompt_audit.jsonl) 而非 event 字段"
@@ -210,7 +210,7 @@
       "data/plugins/llm_router/ (整个目录)",
       "data/plugins/llm_router/test_dc_router_path.py",
       "data/plugins/llm_router/test_routing_path.py",
-      "data/plugins/dc_router/routing_adapter.py (CLI 拆分后被 cli_handlers 替代, 仅保留 antigravity 排队卡兼容入口)",
+      "data/plugins/dc_router/routing_adapter.py (CLI 拆分后被 cli_handlers 替代, 仅保留无执行逻辑的兼容 shim)",
       "data/plugins/dc_router/dc_router_adapter.py (旧 dispatch shim)",
       "data/plugins/dc_router/main.py 中的 LLMRouterPlugin 兼容 shim"
     ],

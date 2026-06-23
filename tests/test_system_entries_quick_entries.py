@@ -28,9 +28,16 @@ def test_system_entries_merges_pinned_dashboard_entries() -> None:
 
     names = [entry["name"] for entry in merged]
     assert "OpenClaw" in names
+    assert "小助手健康" in names
     assert "记忆治理" in names
     assert "内容 SOP 运营" in names
     assert "员工需求洞察" in names
+    assert "小助手实时看板" in names
+    by_name = {entry["name"]: entry for entry in merged}
+    assert by_name["小助手健康"]["category"] == "assistant"
+    assert by_name["小助手健康"]["priority"] == 10
+    default_by_name = {entry["name"]: entry for entry in module.DEFAULT_ENTRIES}
+    assert default_by_name["OpenClaw"]["category"] == "agent"
 
 
 def test_system_entries_pinned_entries_are_unknown_not_ready() -> None:
@@ -45,9 +52,11 @@ def test_system_entries_pinned_entries_are_unknown_not_ready() -> None:
     entries = payload["data"]["entries"]
 
     assert {entry["name"] for entry in entries} == {
+        "小助手健康",
         "记忆治理",
         "内容 SOP 运营",
         "员工需求洞察",
+        "小助手实时看板",
     }
     assert all(entry["alive"] is None for entry in entries)
     assert all(entry["availability"] == "unknown" for entry in entries)
@@ -119,15 +128,20 @@ def test_quick_entries_top_bar_allows_pinned_dashboard_entries() -> None:
         "data/plugins/system_entries/dc-dashboard-quick-entries.js"
     ).read_text(encoding="utf-8")
 
+    assert 'name: "小助手健康"' in source
     assert 'name: "记忆治理"' in source
     assert 'name: "内容 SOP 运营"' in source
     assert 'name: "员工需求洞察"' in source
-    assert source.index('name: "员工需求洞察"') < source.index(
-        'name: "Hermes Agent 官方 WebUI"'
-    )
+    assert 'name: "小助手实时看板"' in source
+    assert source.index('name: "小助手健康"') < source.index('name: "小助手实时看板"')
+    assert 'url: "/#/assistant-health"' in source
+    assert 'url: "/#/live-monitor"' in source
     assert 'url: "/#/memory-governance"' in source
     assert 'url: "/#/content-sop-ops"' in source
     assert 'url: "/#/employee-insight"' in source
+    assert 'category: "assistant"' in source
+    assert 'category: "agent"' in source
+    assert 'category: "governance"' in source
     assert "entry.pinned === true" in source
     assert "mergeDefaultPinnedEntries(data.entries)" in source
     assert "DEFAULT_ENTRIES.forEach" in source
@@ -136,6 +150,28 @@ def test_quick_entries_top_bar_allows_pinned_dashboard_entries() -> None:
     assert 'availability === "wrong_service"' in source
     assert 'availability === "tcp_listening"' in source
     assert 'if (alive === true) return "checking"' in source
+
+
+def test_quick_entries_uses_categorized_dynamic_navigation() -> None:
+    source = Path(
+        "data/plugins/system_entries/dc-dashboard-quick-entries.js"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        'var CATEGORY_ORDER = ["assistant", "agent", "governance", "automation", "other"]'
+        in source
+    )
+    assert "function primaryEntries(entries)" in source
+    assert "return entries.slice(0, 3)" in source
+    assert "primaryEntries(entries).forEach" in source
+    assert 'directoryButton.textContent = "全部 " + entries.length' in source
+    assert "function renderEntryDirectory(panel, entries)" in source
+    assert 'search.placeholder = "搜索入口、分类或说明"' in source
+    assert "function renderCategoryTabs(parent, entries)" in source
+    assert 'grid.className = "dcqe-panel-grid"' in source
+    assert 'card.className = "dcqe-entry-card"' in source
+    assert "function summarizeEntries(entries)" in source
+    assert 'state.panelView === "watchdog"' in source
 
 
 def test_quick_entries_watchdog_status_colors_do_not_mark_disabled_success() -> None:
@@ -164,6 +200,8 @@ def test_dashboard_static_route_serves_pinned_entry_paths() -> None:
     assert '"/memory-governance"' in source
     assert '"/content-sop-ops"' in source
     assert '"/employee-insight"' in source
+    assert '"/assistant-health"' in source
+    assert '"/live-monitor"' in source
 
 
 def _start_closing_tcp_server():

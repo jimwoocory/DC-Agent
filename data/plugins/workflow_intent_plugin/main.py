@@ -49,6 +49,7 @@ class WorkflowIntentPlugin(Star):
         self.delegate_to_department_workflow = bool(
             cfg.get("delegate_to_department_workflow", False)
         )
+        self.implicit_create_tasks = bool(cfg.get("implicit_create_tasks", False))
 
     @filter.event_message_type(
         EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE
@@ -82,6 +83,23 @@ class WorkflowIntentPlugin(Star):
             if matched_kind:
                 break
         if not matched_kind:
+            return
+
+        if not self.implicit_create_tasks:
+            event.set_extra(
+                "workflow_intent_candidate",
+                {
+                    "workflow_kind": matched_kind,
+                    "keyword": matched_kw,
+                    "mode": "observe_only",
+                },
+            )
+            logger.info(
+                "[workflow_intent][observe] implicit match skipped umo=%s kind=%s kw=%s",
+                event.unified_msg_origin,
+                matched_kind,
+                matched_kw,
+            )
             return
 
         # 防重复：同会话短时间内已建过同 kind 的 task 就跳过

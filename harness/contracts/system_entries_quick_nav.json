@@ -1,0 +1,32 @@
+{
+  "feature": "system_entries_quick_nav",
+  "goal": "Keep the AstrBot system entries overlay usable as the number of operational links grows by showing a compact top rail and a categorized dynamic entry directory.",
+  "acceptance_criteria": [
+    {
+      "id": "system-entries-nav-001",
+      "description": "The fixed dashboard overlay renders only a limited high-priority shortcut rail plus compact buttons for the full entry directory and Watch-Dog controls.",
+      "verification": "uv run pytest tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "system-entries-nav-002",
+      "description": "The full entry directory supports category metadata, grouped cards, search text, and live status summaries without hardcoding every visible link into the top rail.",
+      "verification": "uv run pytest tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "system-entries-nav-003",
+      "description": "Pinned dashboard entries and backend system entries carry category and priority metadata so sorting and grouping remain stable when status payloads are refreshed.",
+      "verification": "uv run pytest tests/test_system_entries_quick_entries.py -q"
+    }
+  ],
+  "ui_policy": {
+    "max_primary_entries": 3,
+    "categories": [
+      "assistant",
+      "agent",
+      "governance",
+      "automation",
+      "other"
+    ],
+    "watchdog_controls": "available through the same overlay as a separate panel view"
+  }
+}

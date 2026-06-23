@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
 
+from dc_engines.dreamina_cli import (
+    dreamina_command_not_found_message,
+    resolve_dreamina_executable,
+)
+
 from astrbot.api import logger
 from astrbot.api.event import MessageChain, MessageEventResult
 from astrbot.api.message_components import Image as ImageComp
@@ -39,6 +44,7 @@ class MediaRoute:
 
 _IMAGE_TRIGGER_RE: Final[re.Pattern] = re.compile(
     r"(生成|画|绘制|制作|做|设计|创作).{0,8}(图片|图像|插画|海报|封面|头像|壁纸|视觉|素材|照片)"
+    r"|(需要|想要|要|帮我|给我).{0,20}(一张|一幅|一个|张|幅|个)?.{0,12}(图片|图像|插画|海报|封面|头像|壁纸|视觉|素材|照片)"
     r"|(#生图|#画图|#图片|/生图|/画图|/生成图片)",
     re.IGNORECASE,
 )
@@ -77,9 +83,7 @@ def _extract_generation_prompt(text: str, *, intent: str) -> str:
     stripped = re.sub(r"^(生成|画|绘制|制作|做|设计|创作|来|给我)", "", stripped)
     stripped = re.sub(r"^(一张|一幅|一个|一段|个|张|幅|段)", "", stripped)
     if intent == "image":
-        stripped = re.sub(
-            r"(图片|图像|插画|海报|封面|头像|壁纸|视觉|素材|照片)$", "", stripped
-        )
+        stripped = re.sub(r"(图片|图像|素材|照片)$", "", stripped)
     elif intent == "video":
         stripped = re.sub(r"(视频|动画|短片|影片|动效)$", "", stripped)
     elif intent == "image2video":
@@ -274,10 +278,14 @@ async def _send_chain(umo: str, chain: MessageChain) -> None:
 async def _run_dreamina_command(
     command: list[str], *, timeout: int, retries: int = 3
 ) -> tuple[bool, str]:
+    dreamina_bin = resolve_dreamina_executable()
+    if dreamina_bin is None:
+        return False, dreamina_command_not_found_message()
+
     for attempt in range(1, retries + 1):
         try:
             proc = await asyncio.create_subprocess_exec(
-                "dreamina",
+                dreamina_bin,
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -287,7 +295,7 @@ async def _run_dreamina_command(
                 proc.communicate(), timeout=timeout
             )
         except FileNotFoundError:
-            return False, "未找到 dreamina CLI，请先安装并登录"
+            return False, dreamina_command_not_found_message()
         except asyncio.TimeoutError:
             try:
                 proc.kill()

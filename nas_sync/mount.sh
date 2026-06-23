@@ -30,6 +30,7 @@ NAS_HOST=$(yaml_get "nas.host")
 NAS_SHARE=$(yaml_get "nas.share")
 NAS_USER=$(yaml_get "nas.username")
 NAS_PASSWORD_KEYCHAIN_KEY=$(yaml_get "nas.password_keychain_key")
+NAS_PASSWORD_BACKUP="${NAS_PASSWORD_BACKUP:-$HOME/.config/nas_sync/nas_password.bak}"
 NAS_MOUNT=$(yaml_get "nas.mount_point")
 NFS_EXPORT=$(yaml_get "nas.nfs_export")
 WEBDAV_PORT=$(yaml_get "nas.webdav_port")
@@ -50,11 +51,25 @@ err()     { echo -e "${RED}[NAS]${NC} $*" >&2; }
 
 read_keychain_password() {
     local service="$1"
+    local password
     if [[ -z "$service" ]]; then
         err "config.yaml 缺少 nas.password_keychain_key"
         exit 1
     fi
-    security find-generic-password -s "$service" -w
+    if password="$(security find-generic-password -s "$service" -w 2>/dev/null)" && [[ -n "$password" ]]; then
+        printf '%s\n' "$password"
+        return 0
+    fi
+    if [[ -r "$NAS_PASSWORD_BACKUP" ]]; then
+        password="$(<"$NAS_PASSWORD_BACKUP")"
+        if [[ -n "$password" ]]; then
+            echo "[NAS] Keychain 不可读，使用本机备份密码兜底: $NAS_PASSWORD_BACKUP" >&2
+            printf '%s\n' "$password"
+            return 0
+        fi
+    fi
+    err "Keychain 中未找到 $service 对应的密码，且备份文件不可用: $NAS_PASSWORD_BACKUP"
+    exit 1
 }
 
 # ----------------------------------------------------------------

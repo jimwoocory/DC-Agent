@@ -1,0 +1,32 @@
+{
+  "enabled": {
+    "description": "Enable Feishu /god mode.",
+    "type": "bool",
+    "default": true
+  },
+  "owners": {
+    "description": "Sender/open IDs allowed to initiate and approve God Mode actions.",
+    "type": "list",
+    "default": []
+  },
+  "require_approval": {
+    "description": "Require approval for every side-effect action.",
+    "type": "bool",
+    "default": true
+  },
+  "allowed_capabilities": {
+    "description": "Capabilities exposed through /god.",
+    "type": "list",
+    "default": ["route", "memory", "harness", "hermes", "feishu_card", "status"]
+  },
+  "deny_capabilities": {
+    "description": "Capabilities blocked even when requested by an owner.",
+    "type": "list",
+    "default": ["shell", "filesystem_write"]
+  },
+  "audit_db_path": {
+    "description": "Append-only audit SQLite path for God Mode events.",
+    "type": "string",
+    "default": "data/god_mode_audit.db"
+  }
+}

@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>「活系统」之宠物系统推进记录</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f7f8fa;
+      color: #172033;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+      line-height: 1.7;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+      background: #ffffff;
+      min-height: 100vh;
+    }
+    h1, h2, h3 {
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+    }
+    h2 {
+      margin-top: 36px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 22px;
+    }
+    h3 {
+      margin-top: 24px;
+      font-size: 18px;
+    }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 14px 16px;
+      background: #0f172a;
+      color: #e5e7eb;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+    .meta {
+      color: #64748b;
+      margin-bottom: 28px;
+    }
+    .flow {
+      padding: 16px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      color: #334155;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>「活系统」之宠物系统推进记录</h1>
+  <p class="meta">日期：2026-06-15</p>
+
+  <h2>本轮目标</h2>
+  <p>继续推进宠物系统 P0 底座，让飞书聊天小助手、Router、Harness、Hermes、Obsidian/KB、dianchi 桌面端看到同一只宠物，并补齐灰度、资源、绑定链路。</p>
+
+  <h2>已完成</h2>
+  <h3>1. 后端资源分发</h3>
+  <ul>
+    <li>已在 DC-Agent 增加 <code>data/pet_assets/orange-cat-v1/</code>。</li>
+    <li>已复制桌面端同款 <code>pet.json</code> 与 <code>spritesheet.webp</code>。</li>
+    <li><code>/api/pet/assets/orange-cat-v1</code> 可返回 manifest。</li>
+    <li><code>/api/pet/assets/orange-cat-v1/spritesheet.webp</code> 可返回真实资源字节。</li>
+  </ul>
+
+  <h3>2. 全局灰度总阀</h3>
+  <ul>
+    <li>新增 <code>dc_engines.pet_live.integrations.pet_live_enabled()</code>。</li>
+    <li><code>PET_LIVE_ENABLED=false</code> 时，飞书、Router、桌面 API、Harness、Hermes 均停止发布宠物事件。</li>
+    <li>保留 <code>PET_LIVE_API_ENABLED</code>、<code>PET_LIVE_TAP_ENABLED</code>、<code>DIANCHI_PET_SCENE_ENABLED</code>。</li>
+  </ul>
+
+  <h3>3. 桌面会话绑定</h3>
+  <ul>
+    <li>新增 <code>/api/pet/bind-desktop</code>。</li>
+    <li>必须存在 <code>dc_feishu_session</code> cookie。</li>
+    <li>必须携带 <code>PET_LIVE_BINDING_TOKEN</code> 对应的绑定 token。</li>
+    <li>请求体由可信服务端提供 <code>feishu_open_id</code>，桌面端不直接声明身份。</li>
+    <li>成功后写入 <code>desktop_session_bound</code> 事件，并让后续桌面 API 使用同一 <code>pet_id</code>。</li>
+  </ul>
+
+  <h3>4. 回归测试</h3>
+  <pre><code>uv run pytest tests/test_pet_live_integrations.py tests/test_feishu_pet_assistant.py tests/test_pet_live_identity.py tests/test_pet_live_event_bus.py tests/test_pet_live_reducer.py tests/test_pet_live_store.py tests/test_pet_live_route.py tests/dc_router/test_pet_live_tap.py tests/dc_router/test_dispatch_pipeline.py tests/harness/test_pet_live_hermes_bridge.py tests/harness/test_hermes_bridge.py tests/harness/test_pet_live_system_contract.py tests/harness/test_pet_live_obsidian_loop.py tests/harness/test_obsidian_memory_governance_contract.py -q</code></pre>
+  <p>结果：<code>155 passed, 3 warnings</code></p>
+  <pre><code>uv run pytest dc_engines/tests/test_pet_live_harness_events.py dc_engines/tests/test_harness_lifecycle.py dc_engines/tests/test_obsidian_memory_codec.py dc_engines/tests/test_obsidian_memory_export_import.py dc_engines/tests/test_obsidian_memory_promotion.py -q</code></pre>
+  <p>结果：<code>73 passed, 2 warnings</code></p>
+
+  <h3>5. 桌面资源缓存</h3>
+  <ul>
+    <li>dianchi-desktop 已新增 <code>pet_asset_cache_dir()</code>，服务端下发资源会缓存到用户数据目录。</li>
+    <li><code>load_pet_asset()</code> 已升级为“缓存优先、安装包兜底”。</li>
+    <li><code>ApiClient</code> 已支持宠物资源二进制下载。</li>
+    <li><code>PetRuntime</code> 会在收到服务端宠物状态后自动拉取 manifest 和对应 spritesheet。</li>
+    <li><code>LivePetSceneWidget</code> 在状态刷新时重新加载 asset package，资源下载完成后会自动切到缓存素材。</li>
+  </ul>
+  <pre><code>python3 -m py_compile src/api_client.py src/config.py src/pet_assets.py src/pet_live_client.py src/pet_runtime.py src/pet_scene_view.py</code></pre>
+  <p>缓存优先校验结果：<code>unit-cat-v1 缓存猫 64 72 b'webp-bytes'</code></p>
+
+  <h3>6. 飞书卡片读取 Live State</h3>
+  <ul>
+    <li><code>/pet</code> 状态卡已接入 Pet Live Core 的 <code>state_after</code>。</li>
+    <li>飞书状态卡现在优先展示 <code>state</code>、<code>level</code>、<code>xp</code>、<code>energy</code>、<code>coins</code>。</li>
+    <li>文本兜底也会使用同一份 live state。</li>
+    <li><code>/done 1</code> 和卡片完成按钮的完成反馈卡已接入 live state，飞书里看到的能量/XP 与桌面端一致。</li>
+    <li>旧 <code>PetStore</code> 字段仍保留为兜底，不影响既有卡片流程。</li>
+  </ul>
+  <pre><code>uv run pytest tests/test_feishu_pet_assistant.py -q</code></pre>
+  <p>结果：<code>11 passed, 3 warnings</code></p>
+  <pre><code>uv run pytest tests/test_pet_live_integrations.py tests/test_feishu_pet_assistant.py tests/test_pet_live_identity.py tests/test_pet_live_event_bus.py tests/test_pet_live_reducer.py tests/test_pet_live_store.py tests/test_pet_live_route.py tests/dc_router/test_pet_live_tap.py tests/dc_router/test_dispatch_pipeline.py tests/harness/test_pet_live_hermes_bridge.py tests/harness/test_hermes_bridge.py tests/harness/test_pet_live_system_contract.py tests/harness/test_pet_live_obsidian_loop.py tests/harness/test_obsidian_memory_governance_contract.py -q</code></pre>
+  <p>结果：<code>156 passed, 3 warnings</code></p>
+
+  <h3>7. 飞书桌面端正式入口（2026-06-16）</h3>
+  <ul>
+    <li>飞书宠物卡片已新增“打开桌面端”URL 按钮。</li>
+    <li>插件支持 <code>desktop_entry_url</code> 配置项，也支持环境变量 <code>PET_LIVE_DESKTOP_ENTRY_URL</code>。</li>
+    <li><code>desktop_entry_url</code> 支持 <code>{user_id}</code>、<code>${user_id}</code>、<code>{pet_id}</code>、<code>${pet_id}</code> 模板变量。</li>
+    <li><code>/pet</code> 状态卡会展示 <code>桌面端：已绑定</code> 或 <code>桌面端：待绑定</code>。</li>
+    <li><code>看看任务</code>、空任务卡、完成反馈卡也会携带桌面端入口。</li>
+    <li>绑定状态只由 Pet Live identity 的 <code>desktop_session_id</code> 推导，飞书卡片不信任前端自报。</li>
+  </ul>
+  <pre><code>uv run pytest tests/test_feishu_pet_assistant.py -q</code></pre>
+  <p>结果：<code>13 passed, 3 warnings</code></p>
+  <pre><code>uv run pytest tests/test_pet_live_integrations.py tests/test_feishu_pet_assistant.py tests/test_pet_live_identity.py tests/test_pet_live_event_bus.py tests/test_pet_live_reducer.py tests/test_pet_live_store.py tests/test_pet_live_route.py tests/dc_router/test_pet_live_tap.py tests/dc_router/test_dispatch_pipeline.py tests/harness/test_pet_live_hermes_bridge.py tests/harness/test_hermes_bridge.py tests/harness/test_pet_live_system_contract.py tests/harness/test_pet_live_obsidian_loop.py tests/harness/test_obsidian_memory_governance_contract.py -q</code></pre>
+  <p>结果：<code>160 passed, 3 warnings</code></p>
+
+  <h3>8. 公司主页 OAuth 打开桌面端链路（2026-06-16）</h3>
+  <ul>
+    <li><code>/Users/dianchi/DC-Agent-WebUI/independent-website/feishu_auth_server.py</code> 已支持 <code>/auth/feishu/start?next=desktop</code>。</li>
+    <li>飞书 OAuth callback 在 <code>next=desktop</code> 模式下会生成并设置 <code>dc_feishu_session</code>。</li>
+    <li>服务端会使用 <code>PET_LIVE_BINDING_TOKEN</code> 调用 DC-Agent <code>/api/pet/bind-desktop</code>。</li>
+    <li>绑定后返回自动打开 <code>dianchi://open?session=...</code> 的 HTML 页面，并保留手动打开按钮。</li>
+    <li><code>DC-Agent-WebUI/README.md</code> 和 <code>independent-website/feishu-auth.env.example</code> 已补充部署说明。</li>
+    <li>已新增 WebUI 标准库测试 <code>tests/test_feishu_auth_server.py</code>，覆盖 deeplink 编码和绑定请求格式。</li>
+  </ul>
+  <pre><code>python3 -m py_compile independent-website/feishu_auth_server.py tests/test_feishu_auth_server.py</code></pre>
+  <pre><code>python3 -m unittest discover -s tests -q</code></pre>
+  <p>结果：<code>Ran 3 tests in 0.000s / OK</code></p>
+
+  <h3>9. 飞书插件配置接入桌面入口（2026-06-16）</h3>
+  <ul>
+    <li><code>data/plugins/feishu_pet_assistant/_conf_schema.json</code> 已新增 <code>desktop_entry_url</code>。</li>
+    <li><code>data/config/feishu_pet_assistant_config.json</code> 本地默认已指向 <code>http://127.0.0.1:8032/auth/feishu/start?next=desktop</code>。</li>
+    <li>飞书卡片现在在本地配置下会直接出现“打开桌面端”按钮，并进入公司主页 OAuth 桌面链路。</li>
+  </ul>
+  <pre><code>python3 -m json.tool data/plugins/feishu_pet_assistant/_conf_schema.json
+python3 -m json.tool data/config/feishu_pet_assistant_config.json
+uv run pytest tests/test_feishu_pet_assistant.py -q
+python3 -m unittest discover -s /Users/dianchi/DC-Agent-WebUI/tests -q</code></pre>
+  <p>结果：<code>13 passed, 3 warnings</code>；<code>Ran 3 tests in 0.001s / OK</code></p>
+
+  <h3>10. 身份绑定链路冒烟与阻塞项（2026-06-16）</h3>
+  <p>本轮优先验证“飞书 OAuth / 公司主页 8032 → DC-Agent <code>/api/pet/bind-desktop</code> → 桌面端同一个 <code>pet_id</code>”的生产身份链路，不推进视觉场景重做。</p>
+  <pre><code>uv run pytest tests/test_dashboard.py::test_pet_live_routes_bypass_dashboard_jwt tests/test_pet_live_route.py -q</code></pre>
+  <p>结果：<code>14 passed, 6 warnings</code></p>
+  <ul>
+    <li><code>astrbot/dashboard/server.py</code> 的 <code>/api/pet/</code> Dashboard JWT bypass 已由测试确认。</li>
+    <li>本机 6185 运行实例已重新加载修复，<code>GET http://127.0.0.1:6185/api/pet/assets/orange-cat-v1</code> 返回 <code>HTTP 200</code>、<code>status=ok</code>，不再被 Dashboard JWT 拦截。</li>
+    <li><code>/api/pet/bind-desktop</code> 在运行实例上的鉴权顺序已确认：无 <code>dc_feishu_session</code> cookie 会拒绝；有 cookie 但无 token 会拒绝；有 cookie 且错误 token 会拒绝。</li>
+    <li>“正确 token 可绑定”的路径由 <code>tests/test_pet_live_route.py</code> 覆盖；当前本机运行实例未配置 <code>PET_LIVE_BINDING_TOKEN</code>，因此不能做真实正确 token 冒烟。</li>
+    <li>公司主页服务 <code>http://127.0.0.1:8032/</code> 已可访问，返回官网首页。</li>
+    <li>公司主页桌面入口 <code>http://127.0.0.1:8032/auth/feishu/start?next=desktop</code> 当前返回 <code>HTTP 503</code>，页面提示缺少 <code>FEISHU_APP_ID</code> 和 <code>FEISHU_APP_SECRET</code>。</li>
+  </ul>
+  <p>当前阻塞不是代码链路，而是运行环境：</p>
+  <ol>
+    <li>DC-Agent 进程需要配置 <code>PET_LIVE_BINDING_TOKEN</code>。</li>
+    <li>DC-Agent-WebUI / 公司主页进程需要配置同一个 <code>PET_LIVE_BINDING_TOKEN</code>。</li>
+    <li>DC-Agent-WebUI / 公司主页进程需要配置 <code>FEISHU_APP_ID</code>、<code>FEISHU_APP_SECRET</code>。</li>
+    <li>正式环境需要把飞书卡片的 <code>desktop_entry_url</code> 从 <code>127.0.0.1:8032</code> 换成可被员工访问的 HTTPS 域名。</li>
+  </ol>
+  <pre><code>飞书 /pet 卡片
+→ 打开桌面端
+→ 8032 /auth/feishu/start?next=desktop
+→ 飞书 OAuth callback
+→ 8032 使用绑定 token 调 6185 /api/pet/bind-desktop
+→ 6185 返回同一个 pet_id
+→ 8032 打开 dianchi://open?session=...
+→ 桌面端读取 /api/pet/me 并展示同一只宠物</code></pre>
+
+  <h3>11. 身份链路诊断脚本落地（2026-06-18）</h3>
+  <p>新增可重复运行的本机诊断脚本：</p>
+  <pre><code>scripts-tools/pet_live_identity_smoke.py</code></pre>
+  <p>设计约束：</p>
+  <ul>
+    <li>默认不做正确 token 绑定写入，避免误改生产身份数据。</li>
+    <li>默认只做资源接口检查、负向绑定鉴权检查、8032 桌面入口检查。</li>
+    <li>需要真实写入绑定时，必须显式传入 <code>--mutating-bind</code>，并确保当前进程环境已有 <code>PET_LIVE_BINDING_TOKEN</code>。</li>
+    <li>输出只报告变量是否存在，不打印任何密钥值。</li>
+  </ul>
+  <pre><code>python3 -m py_compile scripts-tools/pet_live_identity_smoke.py
+scripts-tools/pet_live_identity_smoke.py</code></pre>
+  <p>当前诊断结果：</p>
+  <pre><code>[BLOCKED] env:FEISHU_APP_ID: missing
+[BLOCKED] env:FEISHU_APP_SECRET: missing
+[BLOCKED] env:PET_LIVE_BINDING_TOKEN: missing
+[OK] dc-agent:pet-assets: http=200 status=ok message=-
+[OK] bind:missing-cookie: http=200 status=error message=dc_feishu_session cookie is required
+[OK] bind:wrong-token: http=200 status=error message=pet live binding is not authorized
+[BLOCKED] bind:correct-token: skipped: pass --mutating-bind after env is configured
+[BLOCKED] webui:desktop-entry: http=503 missing FEISHU_APP_ID/FEISHU_APP_SECRET</code></pre>
+  <p>结论：DC-Agent 6185 的宠物资源接口和负向绑定安全逻辑稳定；DC-Agent-WebUI 8032 已可启动，桌面 OAuth 入口可达；真实飞书 OAuth 和正确 token 绑定仍被运行环境阻塞，需要补齐 <code>FEISHU_APP_ID</code>、<code>FEISHU_APP_SECRET</code>、<code>PET_LIVE_BINDING_TOKEN</code>。</p>
+  <pre><code>scripts-tools/pet_live_identity_smoke.py --mutating-bind</code></pre>
+
+  <h3>12. codex-pets 源码引入与自研版本归档（2026-06-18）</h3>
+  <p>根据当前主线调整，宠物表现层不再继续按自研 <code>orange-cat-v1</code> 扩展，而是先把官方参考项目源码复制到本地，后续围绕 codex-pets 做适配。</p>
+  <p>已完成：</p>
+  <ul>
+    <li>自研宠物系统归档：<code>/Users/dianchi/DC-Agent/archives/自研宠物系统_2026-06-18/</code></li>
+    <li>归档内容包含 Pet Live Core 副本、后端资源包副本、桌面端 <code>pet_*.py</code> 副本、桌面端资源包副本。</li>
+    <li>已新增 <code>归档说明.md</code>，标明自研表现层暂停扩展。</li>
+    <li>codex-pets 源码来源：<code>https://github.com/portons/codex-pet-share</code></li>
+    <li>本地路径：<code>/Users/dianchi/DC-Agent/vendor/codex-pets/codex-pet-share</code></li>
+    <li>当前提交：<code>5615902ec508bbd0feb8c6baeab21c951c940824</code></li>
+    <li>已新增 <code>/Users/dianchi/DC-Agent/vendor/codex-pets/来源说明.md</code>。</li>
+  </ul>
+  <p>当前边界：</p>
+  <ul>
+    <li>已经完成的是“源码引入”和“归档标记”。</li>
+    <li>尚未完成 codex-pets 与 DC-Agent / dianchi-desktop 的运行时适配。</li>
+    <li>Pet Live Core 仍然保留为身份、事件、reducer、任务、记忆底座。</li>
+    <li>下一步要做的是 codex-pets 结构分析和适配层设计，而不是继续打磨 <code>orange-cat-v1</code>。</li>
+  </ul>
+  <ol>
+    <li>阅读 <code>vendor/codex-pets/codex-pet-share/src/pets/</code>、<code>src/app/</code>、<code>src/realtime/</code>、<code>src/native/</code>。</li>
+    <li>定义 <code>PetLiveState -> CodexPetsSceneState</code> 映射。</li>
+    <li>在桌面端新增 codex-pets 容器/构建产物加载方案。</li>
+    <li>保持飞书、桌面端、任务系统仍指向同一个 <code>pet_id</code>。</li>
+  </ol>
+
+  <h3>13. codex-pets 状态适配骨架接入（2026-06-18）</h3>
+  <p>已开始把 codex-pets 从“源码复制”推进到“运行时适配”。</p>
+  <p>新增：</p>
+  <ul>
+    <li><code>dc_engines/dc_engines/pet_live/codex_pets_adapter.py</code></li>
+    <li><code>tests/test_codex_pets_adapter.py</code></li>
+  </ul>
+  <p>接入：</p>
+  <ul>
+    <li><code>astrbot/dashboard/routes/pet_live.py</code> 的 <code>/api/pet/me</code> 和 <code>/api/pet/bind-desktop</code> 返回中新增 <code>codex_pets</code> 字段。</li>
+    <li>旧字段 <code>pet</code>、<code>identity</code>、<code>last_event_id</code> 保持不变，兼容现有桌面端和飞书卡片。</li>
+  </ul>
+  <table>
+    <thead><tr><th>Pet Live 业务状态</th><th>codex-pets 动作状态</th></tr></thead>
+    <tbody>
+      <tr><td><code>idle</code></td><td><code>idle</code></td></tr>
+      <tr><td><code>waiting</code></td><td><code>waiting</code></td></tr>
+      <tr><td><code>thinking</code></td><td><code>review</code></td></tr>
+      <tr><td><code>working</code></td><td><code>running</code></td></tr>
+      <tr><td><code>success</code></td><td><code>waving</code></td></tr>
+      <tr><td><code>failed</code></td><td><code>failed</code></td></tr>
+      <tr><td><code>review</code></td><td><code>review</code></td></tr>
+      <tr><td><code>happy</code></td><td><code>waving</code></td></tr>
+      <tr><td><code>focused</code></td><td><code>idle</code></td></tr>
+      <tr><td><code>sleeping</code></td><td><code>waiting</code></td></tr>
+    </tbody>
+  </table>
+  <p>设计原则：Pet Live 继续保留业务状态；codex-pets 只作为表现层状态消费方；API 同时返回 <code>live_state</code> 和 <code>codex_state</code>；vendor 源码不混入 DC-Agent 业务逻辑。</p>
+  <pre><code>uv run pytest tests/test_codex_pets_adapter.py tests/test_pet_live_route.py -q</code></pre>
+  <p>结果：<code>15 passed, 2 warnings</code></p>
+  <ol>
+    <li>在 <code>dianchi-desktop</code> 增加 codex-pets payload 解析。</li>
+    <li>设计桌面端 codex-pets 构建产物加载路径。</li>
+    <li>再决定是嵌入 playground 子集，还是先嵌入只读 pet viewer。</li>
+  </ol>
+
+  <h3>14. 桌面端 codex-pets payload 接收（2026-06-18）</h3>
+  <p>已完成桌面端第一步适配，目标是先接收 codex-pets 表现层状态，不立即切换 UI。</p>
+  <p>改动：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/pet_state.py</code> 新增 <code>CodexPetsSceneState</code> 和桌面端同款 <code>Pet Live -> codex-pets</code> 状态映射。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/pet_runtime.py</code> 新增 <code>self.codex_pets</code>。</li>
+    <li><code>/api/pet/me</code> 返回 <code>codex_pets</code> 时优先使用服务端 payload。</li>
+    <li>事件流只有旧 <code>state_after</code> 时，用本地映射兜底生成 codex-pets 状态。</li>
+  </ul>
+  <pre><code>python3 -m py_compile src/pet_state.py src/pet_runtime.py src/pet_live_client.py src/api_client.py</code></pre>
+  <p>结果：通过，无语法错误。</p>
+  <p>当前边界：桌面端已经能保存 codex-pets 表现状态；UI 仍然使用当前自研 <code>pet_scene_view.py</code>；下一步是决定 codex-pets 在桌面端以“构建产物嵌入”还是“源码子应用嵌入”的方式接入。</p>
+
+  <h3>15. 桌面端 codex-pets viewer 容器接入（2026-06-18）</h3>
+  <p>已完成桌面端 codex-pets 只读 viewer 骨架。</p>
+  <p>改动：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/codex_pets_view.py</code> 新增 <code>CodexPetsSceneWidget</code>，使用 <code>QWebEngineView</code> 承载 HTML/Canvas viewer。</li>
+    <li>viewer 消费 <code>CodexPetsSceneState</code>，显示 <code>live_state</code>、<code>codex_state</code>、能量、XP。</li>
+    <li>viewer 检查 spritesheet 是否符合 codex-pets 期望尺寸：<code>1536x1872</code>、<code>9 行 x 8 列</code>。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/pet_scene_view.py</code> 的 <code>build_live_pet_page()</code> 默认使用 <code>CodexPetsSceneWidget</code>。</li>
+    <li>可通过 <code>DIANCHI_CODEX_PETS_VIEWER_ENABLED=0</code> 回退旧原生 viewer。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/web_view.py</code> 新增 <code>set_live_pet_codex_state()</code>。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/main_window.py</code> 在 <code>PetRuntime</code> 状态变化时把 <code>runtime.codex_pets</code> 下发给宠物页。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/config.py</code> 新增 <code>DIANCHI_CODEX_PETS_VIEWER_ENABLED</code>。</li>
+  </ul>
+  <p>当前边界：</p>
+  <ul>
+    <li>已经接入的是“只读 viewer 容器”，不是完整 codex-pets playground。</li>
+    <li>当前 <code>orange-cat-v1</code> 资源仍不是标准 codex-pets 包。</li>
+    <li>当前 manifest 是自研 <code>states</code> 格式；codex-pets 期望 <code>displayName</code>、<code>description</code>、<code>kind</code>、<code>spritesheetPath</code>。</li>
+    <li>viewer 会明确提示资源待转换，不会把不兼容资源误标为完成迁移。</li>
+  </ul>
+  <pre><code>python3 -m py_compile src/codex_pets_view.py src/pet_scene_view.py src/web_view.py src/main_window.py src/pet_state.py src/pet_runtime.py src/pet_live_client.py src/api_client.py src/config.py</code></pre>
+  <p>结果：通过，无语法错误。</p>
+  <ol>
+    <li>生成或导入一个符合 codex-pets 标准的宠物包。</li>
+    <li>在 DC-Agent 资源 API 中标记 codex-pets 兼容资源。</li>
+    <li>再把 viewer 从只读 Canvas 骨架升级到 codex-pet-share 的 playground/Three.js 子集。</li>
+  </ol>
+
+  <h3>16. orange-cat-v1 转换为 codex-pets 兼容资源包（2026-06-18）</h3>
+  <p>已把当前 <code>orange-cat-v1</code> 从自研 10 行 atlas 转换为 codex-pets 兼容 9 行 atlas。</p>
+  <p>新增：</p>
+  <ul>
+    <li><code>/Users/dianchi/DC-Agent/scripts-tools/build_codex_pet_package.py</code></li>
+  </ul>
+  <p>转换来源：</p>
+  <pre><code>/Users/dianchi/DC-Agent/archives/自研宠物系统_2026-06-18/dianchi-desktop/pets/orange-cat-v1/spritesheet.webp</code></pre>
+  <p>写入目标：</p>
+  <ul>
+    <li><code>/Users/dianchi/DC-Agent/data/pet_assets/orange-cat-v1/</code></li>
+    <li><code>/Users/dianchi/dianchi-desktop/assets/pets/orange-cat-v1/</code></li>
+  </ul>
+  <p>转换结果：</p>
+  <ul>
+    <li><code>spritesheet.webp</code>：<code>1536x1872</code></li>
+    <li><code>pet.json</code>：hybrid manifest，包含 codex-pets 字段和旧 loader 兼容字段。</li>
+    <li>标记字段：<code>codexPets.compatible=true</code></li>
+  </ul>
+  <table>
+    <thead><tr><th>codex-pets row</th><th>codex-pets 状态</th><th>自研来源 row</th><th>自研来源状态</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td><code>idle</code></td><td>0</td><td><code>idle</code></td></tr>
+      <tr><td>1</td><td><code>running-right</code></td><td>3</td><td><code>working</code></td></tr>
+      <tr><td>2</td><td><code>running-left</code></td><td>3</td><td><code>working</code></td></tr>
+      <tr><td>3</td><td><code>waving</code></td><td>7</td><td><code>happy</code></td></tr>
+      <tr><td>4</td><td><code>jumping</code></td><td>4</td><td><code>success</code></td></tr>
+      <tr><td>5</td><td><code>failed</code></td><td>5</td><td><code>failed</code></td></tr>
+      <tr><td>6</td><td><code>waiting</code></td><td>1</td><td><code>waiting</code></td></tr>
+      <tr><td>7</td><td><code>running</code></td><td>3</td><td><code>working</code></td></tr>
+      <tr><td>8</td><td><code>review</code></td><td>6</td><td><code>review</code></td></tr>
+    </tbody>
+  </table>
+  <pre><code>python3 -m py_compile scripts-tools/build_codex_pet_package.py
+scripts-tools/build_codex_pet_package.py
+python3 -m json.tool /Users/dianchi/DC-Agent/data/pet_assets/orange-cat-v1/pet.json
+curl --noproxy '*' -i http://127.0.0.1:6185/api/pet/assets/orange-cat-v1</code></pre>
+  <p>结果：DC-Agent 和桌面端两份 spritesheet 尺寸均为 <code>1536x1872</code>；资源 API 返回 <code>HTTP 200</code>；manifest 已包含 <code>displayName</code>、<code>spritesheetPath</code>、<code>codexPets.compatible=true</code>。</p>
+  <p>当前边界：这是资源格式转换，不是美术重做。<code>running-left</code>、<code>running-right</code>、<code>running</code> 目前都复用自研 <code>working</code> 行；<code>jumping</code> 暂用自研 <code>success</code> 行。</p>
+
+  <h3>17. 桌面端 codex-pets viewer 真实 GUI 冒烟（2026-06-18）</h3>
+  <p>已确认 codex-pets viewer 进入桌面端组件层，并能渲染转换后的 <code>orange-cat-v1</code> spritesheet。</p>
+  <p>本次补强：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/pet_assets.py</code> 支持官方 codex-pets manifest 字段：<code>displayName</code>、<code>spritesheetPath</code>、<code>atlas.cell</code>，并继续兼容旧字段。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/pet_runtime.py</code> 下载资源时兼容 <code>spritesheet</code> 与 <code>spritesheetPath</code>。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/codex_pets_view.py</code> 将 spritesheet 作为 data URL 注入 <code>QWebEngineView</code>，并等页面加载完成后再推送状态。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/scripts/verify_codex_pets_viewer.py</code> 新增真实 GUI 冒烟脚本。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/tests/test_pet_assets.py</code> 新增标准库 <code>unittest</code>，验证纯 codex-pets manifest 可以被桌面端资源 loader 读取。</li>
+  </ul>
+  <pre><code>/Users/dianchi/dianchi-desktop/.venv/bin/python -m unittest tests.test_pet_assets -v
+/Users/dianchi/dianchi-desktop/.venv/bin/python -m py_compile src/pet_assets.py src/pet_runtime.py src/codex_pets_view.py src/pet_scene_view.py src/web_view.py src/main_window.py src/pet_state.py tests/test_pet_assets.py
+uv run pytest tests/test_codex_pets_adapter.py tests/test_pet_live_route.py -q
+QT_QPA_PLATFORM= /Users/dianchi/dianchi-desktop/.venv/bin/python scripts/verify_codex_pets_viewer.py</code></pre>
+  <p>结果：桌面端资源 loader 测试通过；桌面端相关 Python 文件编译通过；DC-Agent codex-pets adapter 与 Pet Live route 测试通过：<code>15 passed, 2 warnings</code>；真实 GUI 冒烟通过。</p>
+  <p>截图：</p>
+  <pre><code>/Users/dianchi/dianchi-desktop/docs/codex_pets_viewer_smoke_2026-06-18.png</code></pre>
+  <p>结论：当前版本已经不是原来的纯自研 viewer；桌面端默认入口已切到 codex-pets viewer 容器。当前还不是完整官方 <code>codex-pet-share</code> playground，只是桌面端绑定场景需要的只读宠物 viewer。身份层仍以 DC-Agent 服务端 reducer 为准，没有引入第二套前端自嗨状态。</p>
+  <p>阻塞项：真实飞书 OAuth 端到端仍需要本机配置 <code>FEISHU_APP_ID</code>、<code>FEISHU_APP_SECRET</code>、<code>PET_LIVE_BINDING_TOKEN</code> 后再验证。</p>
+
+  <h3>18. 桌面端 session 身份链路本地冒烟（2026-06-18）</h3>
+  <p>本轮继续按“身份闭环优先”推进，目标是验证真实 OAuth 之后的桌面端链路：<code>dc_feishu_session</code> cookie 必须能解析到同一个 <code>pet_id</code>，并返回同一份 <code>codex_pets</code> 表现层状态。</p>
+  <p>桌面端补强：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/desktop_session.py</code> 新增无 Qt 依赖的 <code>dianchi://open?session=...</code> 解析、session 读取、session 持久化、cookie header 生成。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/app.py</code> 初始 deep link 参数改用同一套 helper。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/main_window.py</code> 的 <code>handle_desktop_link()</code> 改用同一套 helper。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/api_client.py</code> 的 session 加载、保存、cookie header 改由 <code>desktop_session.py</code> 统一负责。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/config.py</code> 新增 <code>DIANCHI_USER_DATA_DIR</code> 覆盖项，测试时可使用临时目录。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/tests/test_desktop_session.py</code> 新增标准库 <code>unittest</code>，验证 deep link session 解析、持久化、重启后复用、cookie header。</li>
+  </ul>
+  <p>服务端补强：</p>
+  <ul>
+    <li><code>/Users/dianchi/DC-Agent/astrbot/dashboard/routes/pet_live.py</code> 修复 <code>/api/pet/me</code> 对“无 cookie”和“有 cookie 但未绑定”的区分。</li>
+    <li>无 cookie：仍返回 dashboard unbound 视图；有 cookie 但未绑定：返回 <code>desktop session is not bound to a pet</code>。</li>
+    <li><code>/Users/dianchi/DC-Agent/tests/test_pet_live_route.py</code> 新增 <code>test_pet_live_route_rejects_unbound_desktop_session</code>。</li>
+    <li><code>/Users/dianchi/DC-Agent/scripts-tools/pet_live_identity_smoke.py</code> 新增 <code>--local-store-session</code>，可写入明确标记的本地 smoke 身份，再通过运行中的 <code>6185 /api/pet/me</code> 验证同一个 <code>pet_id</code>。</li>
+  </ul>
+  <pre><code>/Users/dianchi/dianchi-desktop/.venv/bin/python -m unittest tests.test_desktop_session tests.test_pet_assets -v
+/Users/dianchi/dianchi-desktop/.venv/bin/python -m py_compile src/config.py src/api_client.py src/app.py src/main_window.py src/desktop_session.py tests/test_desktop_session.py tests/test_pet_assets.py
+uv run pytest tests/test_pet_live_route.py tests/test_codex_pets_adapter.py -q
+scripts-tools/pet_live_identity_smoke.py --local-store-session</code></pre>
+  <p>结果：桌面端 session/resource 测试通过；桌面端相关文件编译通过；DC-Agent Pet Live route 与 codex-pets adapter 测试通过：<code>16 passed, 2 warnings</code>；本地身份链路冒烟通过：<code>desktop-session:/api/pet/me: http=200 status=ok pet_id_match=true codex_state=idle</code>。</p>
+  <p>仍阻塞：<code>FEISHU_APP_ID</code>、<code>FEISHU_APP_SECRET</code>、<code>PET_LIVE_BINDING_TOKEN</code> 缺失；8032 WebUI 当前未运行，所以 <code>http://127.0.0.1:8032/auth/feishu/start?next=desktop</code> 仍不可达。</p>
+
+  <h3>19. 真实 OAuth 后桌面端仍显示旧宠物系统的修复（2026-06-18）</h3>
+  <p>真实 OAuth 已完成，8032 能成功生成 <code>dc_feishu_session</code> 并调用 DC-Agent <code>/api/pet/bind-desktop</code>。随后发现桌面端仍表现为旧宠物系统/未登录状态。</p>
+  <p>原因：</p>
+  <ul>
+    <li>桌面端启动脚本没有设置 <code>DIANCHI_SERVER_URL</code>，从浏览器协议唤起时不会自动指向本地 <code>http://127.0.0.1:6185</code>。</li>
+    <li><code>MainWindow._apply_activation_state()</code> 把 Pet Live 运行时绑定在“工作台已登录且已激活”之后。</li>
+    <li>真实 OAuth session 已经写入 <code>desktop_session.txt</code>，但 <code>/api/me</code> 在本地 6185 返回 401，导致桌面端停掉 Pet Live，并可能继续展示旧 DyberPet 入口。</li>
+    <li>旧日志中出现 <code>start running pet ChrisKitty</code>，说明旧 DyberPet 浮窗曾被自动启动。</li>
+  </ul>
+  <p>修复：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/启动.app/Contents/MacOS/启动</code> 新增默认 <code>DIANCHI_SERVER_URL=http://127.0.0.1:6185</code>。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/main_window.py</code>：只要本地存在 <code>dc_feishu_session</code>，就启动 Pet Live/codex-pets viewer；deep link 成功后直接进入 <code>宠物系统</code> 页；普通启动时如果已有 <code>desktop_session.txt</code> 也直接进入 <code>宠物系统</code> 页。</li>
+    <li><code>启动宠物</code> 按钮在 Pet Live session 存在时只打开宠物页，不再启动旧 DyberPet。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/tests/test_live_pet_activation_gate.py</code> 增加启动脚本和 Pet Live activation gate 静态回归测试。</li>
+  </ul>
+  <pre><code>/Users/dianchi/dianchi-desktop/.venv/bin/python -m unittest tests.test_desktop_session tests.test_pet_assets tests.test_live_pet_activation_gate -v
+/Users/dianchi/dianchi-desktop/.venv/bin/python -m py_compile src/main_window.py src/config.py src/api_client.py src/app.py src/desktop_session.py tests/test_live_pet_activation_gate.py</code></pre>
+  <p>结果：桌面端测试通过：<code>4 tests OK</code>；编译检查通过。真实 OAuth session 已在 DC-Agent 中绑定：<code>pet_id=pet_52fcd05b27244e639d952778d1010e0f</code>，<code>display_name=小橘</code>，<code>asset_id=orange-cat-v1</code>，<code>live_state=thinking</code>，<code>codex_state=review</code>。</p>
+
+  <h3>20. 桌宠形态纠偏：live pet 不能退化为页面组件（2026-06-18）</h3>
+  <p>用户复核后确认：第 19 节中的“deep link 后进入宠物系统页 / 启动宠物按钮打开宠物页”方向是错误的。桌宠系统的主形态必须是桌面上的透明悬浮宠物，能在桌面环境中移动、停留和交互；工作台页面里的 codex-pets 视图只能作为 Playground/管理/场景模式，不能替代桌宠本体。</p>
+  <p>已确认的问题：</p>
+  <ul>
+    <li>当前所谓 codex-pets 版本只是“身份链路 + codex-pets atlas 兼容桥”，不是官方 codex-pet-share 的完整产品形态。</li>
+    <li>桌面端曾把 live pet 显示在工作台页面里，这比原始 DyberPet 形态退步。</li>
+    <li>视觉资源仍是自研 <code>orange-cat-v1</code> 转换包，不是官方主页所呈现的高质量宠物/场景效果。</li>
+    <li>官方 codex-pet-share 的真实场景核心在 <code>src/playground/*</code>，包含 Three.js 场景、RO Prontera biome、动作系统、房间、聊天、换宠物和玩具/NPC 系统；这些还没有完整嵌入桌面端。</li>
+  </ul>
+  <p>本次纠偏：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py</code>：新增 live pet 桌面透明悬浮窗口，使用同一份 Pet Live / codex-pets 状态和资产缓存，支持桌面置顶显示、拖动、按状态移动、按 9x8 atlas 行播放动画。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/src/main_window.py</code>：有 <code>dc_feishu_session</code> 时启动 Pet Live runtime 后启动桌面悬浮宠物；OAuth deep link 成功后不再自动切到 <code>宠物系统</code> 页面；<code>启动宠物</code> 按钮在 live session 存在时启动/显示桌面悬浮宠物，不再打开页面版 viewer。</li>
+    <li><code>/Users/dianchi/dianchi-desktop/tests/test_live_pet_activation_gate.py</code>：增加静态约束，live session 必须调用 <code>_start_live_pet_desktop()</code>，并禁止重新引入 <code>show_local_page("pet")</code> 作为默认启动路径。</li>
+  </ul>
+  <pre><code>python3 -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -q
+python3 -m py_compile /Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py /Users/dianchi/dianchi-desktop/src/main_window.py /Users/dianchi/dianchi-desktop/src/pet_state.py /Users/dianchi/dianchi-desktop/src/codex_pets_view.py
+screencapture -x /private/tmp/dianchi_live_pet_overlay_check.png</code></pre>
+  <p>结果：桌面端测试通过：<code>4 tests OK</code>；Python 编译检查通过；已重启桌面端，PID <code>46148</code>；截图确认桌面上出现独立透明悬浮宠物，不再只是页面内组件；DC-Agent <code>http://127.0.0.1:6185/api/pet/assets/orange-cat-v1</code> 返回 200。</p>
+  <p>仍需继续：替换 <code>orange-cat-v1</code> 占位资源；把官方 <code>codex-pet-share/src/playground/*</code> 打成桌面可加载的 Playground/场景模式；桌面悬浮宠物继续保留为主入口，官方 playground 作为“进入场景/房间”的第二形态；增加真实 UI 自动化断言，启动后必须能在桌面截图中检测到透明悬浮宠物，而不是只检测页面 DOM。</p>
+
+  <h3>21. 替换小橘占位：接入官方 codex-pets 热门宠物包（2026-06-18）</h3>
+  <p><code>orange-cat-v1 / 小橘</code> 只是自研资源转出来的链路占位包，不再作为默认产品视觉。本次从官方 <code>https://codex-pets.net/</code> 热门列表 API 拉取并下载官方宠物包。</p>
+  <ul>
+    <li>官方列表 API：<code>GET https://codex-pets.net/api/pets?page=1&amp;pageSize=12&amp;sort=popular</code></li>
+    <li>已下载官方包：<code>clawd</code>、<code>doro</code>、<code>clippit</code></li>
+    <li>原始 zip：<code>/Users/dianchi/DC-Agent/vendor/codex-pets/official-picks/*.codex-pet.zip</code></li>
+    <li>DC-Agent 服务端资产：<code>/Users/dianchi/DC-Agent/data/pet_assets/{id}/</code></li>
+    <li>桌面端内置资产：<code>/Users/dianchi/dianchi-desktop/assets/pets/{id}/</code></li>
+    <li>来源标记：<code>/Users/dianchi/DC-Agent/vendor/codex-pets/official-picks/官方宠物包来源说明.md</code> 和 <code>/Users/dianchi/dianchi-desktop/assets/pets/官方宠物包来源说明.md</code></li>
+  </ul>
+  <p>默认切换：DC-Agent 和桌面端默认 <code>PetState</code> 已从 <code>小橘 / orange-cat-v1</code> 改为 <code>Clawd / clawd</code>；当前本地 <code>feishu_pet.db</code> 的 <code>pet_state_snapshots</code> 也已迁移为 <code>name=Clawd</code>、<code>asset_id=clawd</code>、<code>species=codex-creature</code>。<code>orange-cat-v1</code> 只保留为历史占位资源。</p>
+  <pre><code>curl -i --max-time 5 http://127.0.0.1:6185/api/pet/assets/clawd
+python3 -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -q
+uv run pytest tests/test_codex_pets_adapter.py tests/test_pet_live_route.py -q
+python3 -m py_compile /Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py /Users/dianchi/dianchi-desktop/src/main_window.py /Users/dianchi/dianchi-desktop/src/pet_state.py /Users/dianchi/dianchi-desktop/src/pet_assets.py /Users/dianchi/dianchi-desktop/src/codex_pets_view.py
+screencapture -x /private/tmp/dianchi_clawd_overlay_check_2.png</code></pre>
+  <p>结果：<code>/api/pet/assets/clawd</code> 返回 200；桌面端测试 <code>4 tests OK</code>；DC-Agent 测试 <code>16 passed, 2 warnings</code>；Python 编译检查通过；已重启桌面端，PID <code>24149</code>；截图确认桌面悬浮宠物显示为官方 <code>Clawd</code>，不是小橘。</p>
+
+  <h3>22. 保留自研桌宠优势：抓起、拖动、落地（2026-06-18）</h3>
+  <p>用户复核后明确指出：原自研版本至少能作为真正桌宠在桌面上被抓起和拖动，这个体验不能因为接入官方 codex-pets 素材而丢掉。官方宠物包解决“角色视觉”，但桌宠讨喜与否首先取决于桌面行为是否自然、是否有陪伴感。</p>
+  <p>本次纠偏：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py</code> 移除默认左右机械晃动，不再让桌宠只做无意义往返。</li>
+    <li>左键按住宠物进入 <code>held</code> 模式，显示抓取手势，播放 <code>jumping</code> 行作为被抓起反馈。</li>
+    <li>拖动时根据鼠标轨迹记录水平/垂直速度。</li>
+    <li>松手后进入 <code>falling</code> 模式，按重力下落，碰到地面后弹跳衰减，最终稳定回到 <code>idle</code>。</li>
+    <li>桌面悬浮宠物仍使用 DC-Agent Pet Live reducer 的服务端状态作为唯一状态源；拖拽/下落只属于本地表现层，不写第二套业务状态。</li>
+  </ul>
+  <pre><code>python3 -m py_compile /Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py
+python3 -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -q
+open /Users/dianchi/dianchi-desktop/启动.app
+screencapture -x /private/tmp/dianchi_grab_fall_check.png</code></pre>
+  <p>结果：<code>codex_pets_desktop.py</code> 编译通过；桌面端测试 <code>4 tests OK</code>；已重启桌面端，PID <code>59529</code>；截图确认官方 <code>Clawd</code> 作为独立桌面悬浮宠物显示在桌面上，不只是页面内组件。</p>
+  <p>下一步需要做真实手感调参：抓起时缩放/表情、松手落地音效、点击气泡、Feishu 消息触发的冒泡/转身/跳跃反馈。</p>
+
+  <h3>23. 桌宠右键菜单 UI 纠偏（2026-06-18）</h3>
+  <p>先纠正：官方 <code>codex-pet-share</code> 里没有可直接复制的“桌面宠物右键菜单”。上一版右键菜单只是基于官方 Playground 功能分组做的 MVP 映射，不是官方形态复刻，也不满足原自研宠物系统的完整右键体验。</p>
+  <p>官方可参考的是 Playground/Web UI 的功能分组：<code>PlaygroundHeader.tsx</code> 的 <code>Open as Room</code>、<code>Change pet</code>、room share/close；<code>openAsRoomLauncher.tsx</code> 的打开房间弹出菜单；<code>PetSwapMenu.tsx</code> 的房间内换宠物菜单；<code>PlaygroundChatBar.tsx</code> 的聊天室输入与表情；<code>PlaygroundNpcBar.tsx</code> 的 NPC/玩具入口。</p>
+  <p>原自研/DyberPet 可参考的是完整桌宠右键体系：<code>DyberPet.py::_set_Statusmenu()</code> 的状态头、等级、饱食度、好感度、Dashboard、System；<code>DyberPet.py::_set_menu()</code> 的选择动作、召唤伙伴、更换角色；<code>DyberPet.py::mousePressEvent()</code> 的右键打开状态菜单与拖拽时锁定右键菜单。</p>
+  <p>本次处理：</p>
+  <ul>
+    <li><code>/Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py</code> 新增桌面原生右键菜单，不依赖工作台页面。</li>
+    <li>右键菜单改为完整桌宠入口骨架：状态头、直接互动、<code>选择动作</code>、<code>召唤伙伴</code>、<code>更换宠物</code>、状态面板、背包、商店、进入场景、宠物设置、隐藏宠物、退出桌面端。</li>
+    <li>状态头显示当前宠物名、asset、live state、等级、能量、XP。</li>
+    <li><code>摸摸</code> 和 <code>选择动作</code> 先在桌宠本地播放临时表现状态，不会马上跳二级页。</li>
+    <li><code>喂食</code> 接入现有 Pet Live action，source 标记为 <code>desktop_context_menu</code>。</li>
+    <li><code>对话</code> 打开工作台飞书消息页并刷新会话。</li>
+    <li><code>状态面板</code>、<code>背包</code>、<code>商店</code>、<code>进入场景</code>、<code>宠物设置</code> 当前进入宠物系统二级页面；后续必须拆成右键菜单内的专用轻面板。</li>
+    <li><code>隐藏宠物</code> 直接隐藏当前桌面悬浮宠物，保留工作台入口可召回。</li>
+    <li><code>退出桌面端</code> 走主窗口正常关闭流程。</li>
+  </ul>
+  <pre><code>python3 -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -q
+python3 -m py_compile /Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py /Users/dianchi/dianchi-desktop/src/main_window.py /Users/dianchi/dianchi-desktop/tests/test_desktop_pet_interaction.py /Users/dianchi/dianchi-desktop/tests/test_live_pet_activation_gate.py
+open /Users/dianchi/dianchi-desktop/启动.app</code></pre>
+  <p>结果：桌面端测试 <code>8 tests OK</code>；编译检查通过；<code>tests/test_desktop_pet_interaction.py</code> 已增加右键菜单静态回归约束，防止后续删除完整右键入口。</p>
+
+  <h3>24. 换掉 Clawd：默认宠物切换为 Doro，并复核飞书交互链路（2026-06-18）</h3>
+  <p>用户明确不喜欢 Clawd 的章鱼/怪物观感，本轮将当前默认宠物切换为 <code>Doro</code>。Doro 官方 manifest 描述为白色 chibi 宠物、粉发、紫眼、侧边玫瑰丝带，更适合作为当前桌面陪伴形态。</p>
+  <p>本次处理：</p>
+  <ul>
+    <li>DC-Agent <code>PetState</code> 默认值改为 <code>name=Doro</code>、<code>species=chibi-creature</code>、<code>asset_id=doro</code>。</li>
+    <li>桌面端 <code>PetState</code>、fallback asset、codex-pets viewer 默认值同步改为 <code>Doro / doro</code>。</li>
+    <li>本地 <code>feishu_pet.db</code> 现有 <code>pet_state_snapshots</code> 已迁移：<code>Clawd / clawd / codex-creature</code> → <code>Doro / doro / chibi-creature</code>。</li>
+    <li><code>scripts-tools/pet_live_identity_smoke.py</code> 的资源检查从 <code>orange-cat-v1</code> 改为 <code>doro</code>，避免后续 smoke 继续验证旧占位资源。</li>
+    <li>桌面端飞书工作台补线：刷新会话、选择会话、发送消息三个 UI signal 已连接到主窗口 API flow。</li>
+    <li>新增 <code>/Users/dianchi/dianchi-desktop/tests/test_feishu_workspace_wiring.py</code>，防止飞书消息 UI 信号再次断开。</li>
+  </ul>
+  <pre><code>python3 -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -q
+uv run pytest tests/test_codex_pets_adapter.py tests/test_pet_live_route.py -q
+python3 -m py_compile /Users/dianchi/dianchi-desktop/src/main_window.py /Users/dianchi/dianchi-desktop/src/pet_state.py /Users/dianchi/dianchi-desktop/src/pet_assets.py /Users/dianchi/dianchi-desktop/src/codex_pets_view.py /Users/dianchi/dianchi-desktop/tests/test_feishu_workspace_wiring.py /Users/dianchi/DC-Agent/scripts-tools/pet_live_identity_smoke.py
+scripts-tools/pet_live_identity_smoke.py --local-store-session
+screencapture -x /private/tmp/dianchi_doro_overlay_check.png</code></pre>
+  <p>结果：桌面端测试 <code>9 tests OK</code>；DC-Agent Pet Live 测试 <code>16 passed, 2 warnings</code>；编译检查通过；<code>GET /api/pet/assets/doro</code> 返回 200；<code>pet_live_identity_smoke.py --local-store-session</code> 的 <code>dc-agent:pet-assets</code> 与 <code>desktop-session:/api/pet/me</code> 均 OK；截图确认桌面端状态栏显示 <code>Doro · 开心 · 能量 70 · Lv.1</code>。</p>
+  <p>真实 OAuth mutating bind 仍 blocked：当前 shell 环境缺 <code>FEISHU_APP_ID</code>、<code>FEISHU_APP_SECRET</code>、<code>PET_LIVE_BINDING_TOKEN</code>。</p>
+  <p>飞书交互复核结论：飞书 OAuth/session/Pet Live 身份绑定到宠物状态这条链路已经具备本地 smoke 通过证据；桌面端飞书消息 UI 原本存在 signal 断线，本轮已修复；但 DC-Agent 目前没有实现桌面端使用的 <code>/api/workspace/conversations</code>、<code>/api/workspace/messages</code> 路由，现有 <code>ConversationRoute</code> 是 dashboard 的 <code>/conversation/*</code> 管理接口；<code>/api/workspace/*</code> 也没有基于 <code>dc_feishu_session</code> 放行，所以“飞书聊天小助手 ↔ 桌宠语言交互”还没有形成闭环。</p>
+  <p>下一步：在 DC-Agent 增加 <code>/api/workspace/conversations</code>、<code>/api/workspace/messages</code>、<code>POST /api/workspace/messages</code>，使用 <code>dc_feishu_session</code> 解析员工身份；将 workspace 消息事件写入 Pet Live outbox，让宠物收到飞书消息时有气泡/动作反馈；桌面端收到消息列表变化时驱动 Doro 的临时表现状态，不写第二套业务状态。</p>
+
+  <h3>25. 纠偏标记：停止低配自研悬浮窗，转向官方 Playground 搬运（2026-06-18）</h3>
+  <p>用户复核后明确指出：当前 Doro/简化 PySide 悬浮窗形态不但没有达到 codex-pets 官方体验，甚至会因为自动弹出、闪烁、遮挡输入而影响正常工作。本轮将该问题标记为路线错误，而不是继续在单个宠物素材上微调。</p>
+  <p>错误结论：</p>
+  <ul>
+    <li>之前把 codex-pets 当成“宠物包格式 + spritesheet 播放器”来接入，这是不完整的。</li>
+    <li>codex-pets 的主要产品形态不在 <code>src/pets/PetPreview.tsx</code>，而在 <code>src/playground/</code>。</li>
+    <li><code>PetPlaygroundModal.tsx</code> 组合完整可玩场景；<code>core/createPlaygroundScene.ts</code> 创建 Three.js 场景、相机、光照、RO 风格地形、sprite、地面阴影；<code>hooks/usePlaygroundSceneLoop.ts</code> 负责场景循环、移动、相机跟随、玩具、NPC、远端角色广播。</li>
+    <li><code>core/inputControls.ts</code> 负责键盘、缩放、相机拖动；<code>hooks/useRoomBubbles.ts</code> 与 <code>room/roomOverlay.tsx</code> 负责房间气泡；<code>world/</code> 负责球、跳板、NPC 等场景物件。</li>
+    <li>因此，后续不能继续手写一个低配 PySide 桌宠窗口来冒充 codex-pets。</li>
+  </ul>
+  <p>本轮修复：</p>
+  <ul>
+    <li>立即停掉当前桌面端 GUI 进程，后续开发和测试不再自动打开宠物预览。</li>
+    <li><code>dianchi-desktop/src/main_window.py</code> 已改为：飞书 OAuth deep link、已有 <code>dc_feishu_session</code>、激活状态刷新都只启动 Pet Live 后台 runtime，不自动弹出桌宠。</li>
+    <li>只有用户点击“启动宠物/召回宠物”按钮时，才显示桌宠。</li>
+    <li><code>dianchi-desktop/tests/test_live_pet_activation_gate.py</code> 已增加回归约束，防止后续把自动弹窗加回来。</li>
+    <li>Doro 闪烁根因已定位：官方包部分动画行后半段是透明空帧，旧播放器固定播放 8 帧导致周期性消失。<code>codex_pets_desktop.py</code> 已改为按行检测有效帧数，并在单图/非 9 行 atlas 时退回第 0 行。</li>
+    <li>本地状态已从 <code>Doro/doro/chibi-creature</code> 迁移到 <code>散猫猫/sanmaomao/legacy-desktop-pet</code>，仅作为过渡本地资产，不代表最终产品形态。</li>
+    <li>新增资源：<code>/Users/dianchi/dianchi-desktop/assets/pets/sanmaomao/</code> 和 <code>/Users/dianchi/DC-Agent/data/pet_assets/sanmaomao/</code>。</li>
+  </ul>
+  <pre><code>python3 -m unittest discover -s tests -q
+uv run pytest tests/test_codex_pets_adapter.py tests/test_pet_live_route.py -q
+python3 -m py_compile /Users/dianchi/dianchi-desktop/src/main_window.py /Users/dianchi/dianchi-desktop/src/codex_pets_desktop.py /Users/dianchi/dianchi-desktop/src/pet_state.py /Users/dianchi/dianchi-desktop/src/pet_assets.py
+sqlite3 /Users/dianchi/DC-Agent/data/feishu_pet.db "select pet_id, json_extract(state_json,'$.name'), json_extract(state_json,'$.asset_id'), json_extract(state_json,'$.species') from pet_state_snapshots;"</code></pre>
+  <p>结果：桌面端测试 <code>11 tests OK</code>；DC-Agent Pet Live 测试 <code>16 passed, 2 warnings</code>；编译检查通过；<code>pet_state_snapshots</code> 已全部迁移为 <code>散猫猫 / sanmaomao / legacy-desktop-pet</code>；当前没有桌面端 GUI 进程。</p>
+  <p>下一步主线：在 <code>dianchi-desktop</code> 新增官方 Playground WebView/本地 bundle 容器，承载 <code>vendor/codex-pets/codex-pet-share/src/playground</code> 的核心体验；PySide 只负责系统托盘、右键入口、窗口管理、飞书身份传递；将飞书消息事件转成 playground chat bubble / join toast / pet emotion event；右键菜单保留完整入口，但二级场景进入官方 Playground 容器；当前 <code>sanmaomao</code> 只作为过渡本地资产。</p>
+
+  <h3>26. 一期实施：员工身份绑定的轻量宠物系统（2026-06-18）</h3>
+  <p>本轮按“员工身份的轻量可视化投影”实施一期，不启动桌宠 GUI，不继续把 Doro/codex-pets 简化播放器当主形态。</p>
+  <p>已完成：</p>
+  <ul>
+    <li>Pet Live 身份层改为 <code>employee_id</code> 优先：同员工多次 OAuth、替换 <code>feishu_open_id</code>、替换 <code>desktop_session_id</code> 都回到同一个 <code>pet_id</code>。</li>
+    <li><code>pet_identity_links</code> 保留 <code>pet_id</code> 主键，新增非空 <code>employee_id</code> 唯一索引；<code>feishu_open_id</code> 改为非空才唯一，支持飞书兜底身份后补员工 ID。</li>
+    <li>增加身份归并逻辑：仅飞书 open_id 兜底创建的宠物，在补齐 <code>employee_id</code> 后归并到员工稳定宠物。</li>
+    <li><code>/api/pet/bind-desktop</code> 改为 <code>dc_feishu_session -&gt; employee identity -&gt; stable pet_id -&gt; desktop_session_id</code>；<code>/api/pet/me</code> 返回完整身份、状态和 <code>light_feedback</code>。</li>
+    <li>PetState 新增轻量字段：<code>mood</code>、<code>focus_level</code>、<code>memory_affinity</code>、<code>work_rhythm</code>、<code>last_signal</code>。</li>
+    <li>新增蒸馏事件：<code>assistant_distillation_observed</code>、<code>work_habit_updated</code>、<code>memory_signal_promoted</code>；这些事件只更新 outbox/state snapshot 的轻量字段，不改变桌宠启动行为。</li>
+    <li>Router、Harness、Hermes、Obsidian、飞书小助手写入 Pet Live outbox 时携带 <code>employee_id</code> 或 <code>source_ref.employee_id</code>。</li>
+    <li>新增 <code>/api/workspace/conversations</code>、<code>GET/POST /api/workspace/messages</code>，基于 <code>dc_feishu_session</code> 解析到同一个宠物身份；默认不发真实飞书消息，只写 Pet Live 轻反馈事件；显式配置 sender 或打开 <code>WORKSPACE_FEISHU_SEND_ENABLED=1</code> 后走 Feishu Open Platform 文本发送。</li>
+    <li>桌面端保留不自动弹出防线；状态刷新只更新状态条/本地状态对象，不调用 <code>_start_live_pet_desktop()</code>。</li>
+  </ul>
+  <pre><code>uv run pytest tests/test_pet_live_identity.py tests/test_pet_live_event_bus.py tests/test_pet_live_reducer.py tests/test_pet_live_route.py tests/test_workspace_route.py tests/dc_router/test_pet_live_tap.py tests/harness/test_pet_live_system_contract.py tests/harness/test_pet_live_hermes_bridge.py dc_engines/tests/test_pet_live_harness_events.py -q
+uv run pytest dc_engines/tests/test_feishu_hub.py -q
+uv run pytest tests/test_pet_live_identity_smoke_script.py -q
+python3 -m unittest tests.test_live_pet_activation_gate tests.test_desktop_pet_interaction tests.test_feishu_workspace_wiring</code></pre>
+  <p>真实环境 e2e 已补验：在本机凭证和 <code>WORKSPACE_FEISHU_SEND_ENABLED=1</code> 下，后台 POST <code>/api/workspace/messages</code> 返回 <code>sent=true</code>，获得 Feishu provider message id，并在同一 <code>pet_id</code> outbox 写入 <code>feishu_message_received</code>、<code>assistant_response_sent</code>。验证只走后台 Quart test client 和 Feishu Open Platform，不启动桌宠 GUI。</p>
+  <p>绑定授权路径已补验：在本机 <code>PET_LIVE_BINDING_TOKEN</code> 下，后台 POST <code>/api/pet/bind-desktop</code> 可把 smoke <code>employee_id</code>、Feishu open_id 和 <code>dc_feishu_session</code> 绑定到同一个 <code>pet_id</code>；同员工更换 open_id 后仍保持同一 <code>pet_id</code>，<code>/api/pet/me</code> 可用该 session 读回同一身份。</p>
+  <p>真实后台 smoke 已固化到 <code>scripts-tools/pet_live_identity_smoke.py</code>：新增 <code>--employee-id</code>、<code>--rotated-open-id</code>、<code>--workspace-send-message</code>、<code>--expect-feishu-send</code>、<code>--skip-webui</code>。脚本默认不打开浏览器、不触发 deep link、不启动桌宠；显式加 <code>--mutating-bind</code> 才写绑定，显式加 <code>--workspace-send-message</code> 才写 workspace 消息事件/可能发送飞书消息。本轮已用该脚本在 6185 上跑通：资产、负向绑定、正确 token 绑定、员工稳定 <code>pet_id</code>、workspace 真实发送全部 OK。</p>
+  <p>小助手消息回流补线：<code>/api/workspace/conversations</code> 现在会返回默认“飞书小助手”会话，并用同一 <code>pet_id</code> 的 Pet Live outbox 生成会话预览；<code>GET /api/workspace/messages</code> 会回放 workspace 消息事件，桌面端发送的文本和“已发送到飞书小助手”的发送确认可以直接出现在原生消息列表。真实后台 e2e 已验证：POST <code>/api/workspace/messages</code> 后，GET <code>/api/workspace/messages</code> 能读回刚发出的用户文本，并能看到 <code>assistant_response_sent</code> 对应的助手侧确认。</p>
+  <p>飞书真实历史读取已验证并接入：新增 <code>scripts-tools/feishu_message_read_probe.py</code>，默认脱敏输出消息正文，只报告数量、类型、message_id/chat_id 摘要；显式 <code>--send-probe-text</code> 时会先发送一条探测消息并用返回的 <code>chat_id</code> 调 <code>im.v1.message.list</code>。本轮真实 probe 证明当前应用具备消息历史读取权限，<code>WORKSPACE_FEISHU_READ_ENABLED=1</code> 已打开；<code>/api/workspace/messages</code> 现在会在 outbox 兜底基础上合并 Feishu 历史，读失败时仍返回 outbox，不让桌面空白。真实后台 e2e 已验证：<code>history_status=ok</code>、<code>has_feishu_history=true</code>、<code>history_contains_sent_text=true</code>。</p>
+  <p>小助手真实回复轻反馈已接入但做了防回灌：Feishu 历史中的助手侧消息只在晚于当前会话已有 workspace outbox 事件时，才写入 <code>assistant_message_observed</code> 并更新 <code>last_signal</code>；没有本地会话上下文或属于旧历史的消息只展示在消息列表，不触发新的宠物轻反馈，避免历史回放刷屏。</p>
+  <p>真实发送验证已加显式防线：<code>scripts-tools/pet_live_identity_smoke.py</code> 在 <code>WORKSPACE_FEISHU_SEND_ENABLED=1</code> 时，必须额外传 <code>--allow-real-feishu-send</code> 才会执行 workspace 发送检查；<code>scripts-tools/feishu_message_read_probe.py --send-probe-text</code> 也必须同时传 <code>--allow-real-feishu-send</code>。默认验证路径保持只读或单元测试，避免再次向真实飞书会话写入 smoke 文本。</p>
+
+  <p>桌面端未正常运行的本轮诊断与修复：</p>
+  <ul>
+    <li>本机 <code>6185</code> 由 DC-Agent 进程监听，当前并没有实际桌面 GUI 进程；桌面问题不是宠物窗口被隐藏，而是桌面端没有完成身份绑定。</li>
+    <li><code>启动.command</code> 原来没有设置 <code>DIANCHI_SERVER_URL</code>，会落到桌面端默认线上地址；已改为默认 <code>http://127.0.0.1:6185</code>，并禁用代理。</li>
+    <li><code>scripts/rebuild_macos_launcher.sh</code> 已同步补上 <code>DIANCHI_SERVER_URL</code>，避免后续重建 <code>.app</code> 时把本地入口修正冲掉。</li>
+    <li><code>/api/pet/bind-desktop</code> 已支持用有效 <code>dc_feishu_session</code> 的签名内容自动解析 <code>employee_id</code> 与 <code>feishu_open_id</code>，桌面端不再需要也不应该直接声明员工身份。</li>
+    <li>桌面端 <code>ApiClient</code> 新增 <code>bind_pet_desktop()</code>；<code>MainWindow</code> 在已有 session 或 deep link 后只做后台绑定与 Pet Live runtime 启动，不调用 <code>_start_live_pet_desktop()</code>，不弹出悬浮宠物。</li>
+    <li>当前本机 <code>desktop_session.txt</code> 已过期，本轮脱敏探针返回 <code>pet live session is expired or invalid</code>。因此要让用户当前桌面端恢复，需要重新走一次飞书 OAuth/打开桌面端，生成新的 <code>dc_feishu_session</code>；有效新 session 会自动后台绑定到同一员工 <code>pet_id</code>。</li>
+    <li>桌面端新增过期 session 安静清理路径：后台绑定返回 <code>pet live session is expired or invalid</code> 时，客户端会停止 Pet Live runtime、隐藏宠物控制条、清掉本地 <code>desktop_session.txt</code>，并提示重新从公司主页打开桌面端；不会启动悬浮宠物。</li>
+    <li>桌面端激活横幅的“打开入口”已改为专用桌面 OAuth URL，不再误跳到飞书 Messenger；启动器默认设置 <code>DIANCHI_DESKTOP_AUTH_URL=http://127.0.0.1:8032/auth/feishu/start?next=desktop</code>。</li>
+    <li>本机 <code>8032</code> homepage/OAuth 服务已后台启动，使用同一套飞书 App 凭证和 <code>PET_LIVE_BINDING_TOKEN</code>；<code>/auth/feishu/start?next=desktop</code> 已脱敏验证返回 302 到 <code>accounts.feishu.cn/open-apis/authen/v1/authorize</code>，并设置 OAuth state cookie。</li>
+    <li>DC-Agent-WebUI 新增 <code>scripts/start_homepage_oauth.py</code>，用于可重复启动/检查本地 homepage OAuth 服务；它按字面量读取 <code>/Users/dianchi/.dc-agent.env</code>，不通过 shell 展开 secret，不打印凭证，优先复用已监听的 <code>8032</code>。</li>
+    <li>后端已用 <code>safe_restart.sh astrbot</code> 重启并通过 card-system 自检。</li>
+  </ul>
+  <pre><code>uv run pytest tests/test_pet_live_route.py tests/test_workspace_route.py tests/test_pet_live_reducer.py -q
+python3 -m unittest tests.test_live_pet_activation_gate tests.test_desktop_session tests.test_feishu_workspace_wiring
+python3 -m py_compile /Users/dianchi/DC-Agent/astrbot/dashboard/routes/pet_live.py
+python3 -m py_compile /Users/dianchi/dianchi-desktop/src/api_client.py /Users/dianchi/dianchi-desktop/src/main_window.py /Users/dianchi/dianchi-desktop/src/pet_runtime.py
+SAFE_RESTART_WATCHDOG_QUIET_SECONDS=0 /Users/dianchi/DC-Agent/scripts-tools/safe_restart.sh astrbot
+python3 -m unittest tests.test_feishu_auth_server  # /Users/dianchi/DC-Agent-WebUI
+HEAD http://127.0.0.1:8032/auth/feishu/start?next=desktop  # 仅脱敏检查状态码/Location host
+/Users/dianchi/DC-Agent/.venv/bin/python scripts/start_homepage_oauth.py  # /Users/dianchi/DC-Agent-WebUI</code></pre>
+  <p>结果：DC-Agent 路由/Workspace/Reducer 测试 <code>31 passed, 2 warnings</code>；桌面端无 GUI 单测 <code>5 tests OK</code>；Python 编译检查通过；后端重启自检 <code>Card System: OK</code>；当前真实桌面 session 探针按预期返回过期/无效；没有启动桌面 GUI。</p>
+  <p>继续补测过期清理路径后，桌面端无 GUI 单测为 <code>6 tests OK</code>，编译检查通过。</p>
+  <p>DC-Agent-WebUI OAuth 单测通过：<code>3 tests OK</code>。<code>8032</code> 当前由后台 homepage 服务监听；没有启动桌面 GUI。</p>
+  <p><code>scripts/start_homepage_oauth.py</code> 验证通过：识别现有 <code>8032</code>，并脱敏报告 OAuth 入口 <code>302 -&gt; accounts.feishu.cn/open-apis/authen/v1/authorize</code>。</p>
+
+  <p>2026-06-23 真人桌面启动补测：</p>
+  <ul>
+    <li>用户明确要求开始真人测试后，本轮只启动桌面主窗口，不启动宠物悬浮层。</li>
+    <li>新增桌面早期启动诊断日志：<code>~/Library/Logs/DianchiDesktop/startup-debug.log</code>。日志只记录阶段名、PID、Python 版本和 Qt 主循环状态，不写 session、secret 或 cookie。</li>
+    <li>诊断确认 <code>/Users/dianchi/dianchi-desktop/启动.app/Contents/MacOS/启动</code> 能进入 <code>.venv/bin/python main.py</code>，并走到 <code>main:exec:start</code>；修复后桌面主进程 PID <code>4157</code> 正常停留在 Qt 主循环。</li>
+    <li>修复桌面端过期 session 清理分支：<code>WorkspaceView</code> 原来定义了 <code>_build_messages_page()</code>，但没有把消息页挂进 <code>QStackedWidget</code>，导致后台绑定返回 <code>pet live session is expired or invalid</code> 时调用 <code>set_messages()</code> 抛 <code>AttributeError: message_layout</code>。现在新增“消息”页并默认初始化，官方飞书 WebView/OAuth 保留在单独“飞书”页。</li>
+    <li>小助手消息桌面入口补齐：<code>/api/workspace/conversations</code>、<code>/api/workspace/messages</code> 对应原生“消息”页；宠物右键“对话/聊天”入口也切到消息页，不再误跳官方 Feishu WebView。</li>
+    <li>重新验证后，旧 PID <code>90478</code> 的 <code>message_layout</code> 异常没有在新 PID <code>4157</code> 重现；当前仍未自动启动 codex-pets/宠物悬浮层。</li>
+    <li>同步更新 <code>scripts/rebuild_macos_launcher.sh</code>，避免重建 <code>.app</code> 时丢失本地 <code>6185</code>、<code>8032</code> 默认入口和启动诊断日志。</li>
+  </ul>
+  <pre><code>/Users/dianchi/dianchi-desktop/.venv/bin/python -m py_compile main.py src/app.py src/main_window.py src/web_view.py src/feishu_view.py src/shared_profile.py
+python3 -m unittest tests.test_live_pet_activation_gate tests.test_desktop_session tests.test_feishu_workspace_wiring
+sh -x /Users/dianchi/dianchi-desktop/启动.app/Contents/MacOS/启动
+pgrep -fl 'dianchi-desktop|巅池桌面端|启动.app|python.*main.py|Python.*main.py|codex_pets'
+tail -80 ~/Library/Logs/DianchiDesktop/startup-debug.log</code></pre>
+  <p>结果：桌面端编译检查通过；无 GUI 单测 <code>7 tests OK</code>；真人启动进入 Qt 主循环；进程列表只出现桌面主进程和 DC-Agent 后端，没有 codex-pets/宠物悬浮层。</p>
+
+  <h2>当前链路</h2>
+  <p class="flow">employee_id + 飞书 open_id 兜底 + dc_feishu_session → /api/pet/bind-desktop → PetIdentity → pet_id → Pet Event Outbox → Reducer 状态快照 → 飞书卡片 / workspace API / 桌面入口与 dianchi 桌面端。Router、Harness、Hermes、Obsidian、workspace 消息事件也进入同一个 outbox。</p>
+
+  <h2>剩余优先事项</h2>
+  <ol>
+    <li>在不自动打开桌宠 GUI 的前提下，用真实 OAuth 回调验证：8032 生成 session、调用 <code>/api/pet/bind-desktop</code>、桌面端 deep link 保存 session、<code>/api/pet/me</code> 返回同一个 <code>pet_id</code>。</li>
+    <li>将真实 OAuth/deep link 验证固化成后台优先的 smoke 脚本，只有显式参数才允许打开浏览器或桌面端。</li>
+    <li>把 codex-pet-share playground/room 的可复用渲染逻辑继续下沉到桌面端，只保留 DC-Agent reducer 作为唯一状态源。</li>
+    <li>增加桌面端资源下载失败后的安静重试与版本校验。</li>
+    <li>将当前程序化 <code>orange-cat-v1</code> 替换为更接近官方主页的设计 spritesheet 和场景资源。</li>
+  </ol>
+</main>
+</body>
+</html>

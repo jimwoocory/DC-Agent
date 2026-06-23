@@ -79,7 +79,7 @@ def test_dc_hub_summary_groups_assistant_plugins(tmp_path: Path) -> None:
 
     assert summary["plugin"] == "dc_hub"
     assert summary["version"] == "0.1.0"
-    assert summary["total"] == 34
+    assert summary["total"] == 35
     assistant = next(c for c in summary["categories"] if c["id"] == "assistant_core")
     assistant_ids = {m["plugin_id"] for m in assistant["modules"]}
     assert {
@@ -87,6 +87,7 @@ def test_dc_hub_summary_groups_assistant_plugins(tmp_path: Path) -> None:
         "concierge_plugin",
         "ai_inbox_plugin",
         "employee_onboarding",
+        "persona_factory",
     }.issubset(assistant_ids)
     feishu = next(c for c in summary["categories"] if c["id"] == "assistant_feishu")
     feishu_ids = {m["plugin_id"] for m in feishu["modules"]}

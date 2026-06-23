@@ -57,13 +57,24 @@ from dc_engines.harness.content_sop_runtime import settle_content_sop_result
 from dc_engines.harness.contracts import HARNESS_TERMINAL_STATUSES
 from dc_engines.harness.workflows import parse_workflow_result
 from dc_engines.hermes_bridge_engine import (
+    HERMES_FINAL_FAILURE_RE,
     HermesCallbackDispatcher,
     HermesDLQLogger,
+    HermesTaskDispatcher,
     PermanentSendError,
     RetriableSendError,
+    build_harness_result,
+    callback_failure_reason,
+    callback_provenance_fields,
+    callback_response_text,
+    callback_text_value,
     classify_http_status,
     verify_hmac_signature,
 )
+from dc_engines.memory_governance.runtime_config import (
+    build_content_sop_memory_governance_kwargs,
+)
+from dc_engines.persona_factory import DEFAULT_DATA_ROOT, PersonaFactoryStore
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
@@ -82,96 +93,12 @@ _HERMES_INTERMEDIATE_RE = _re_card.compile(
     r"context compression will drop middle turns",
     _re_card.IGNORECASE,
 )
-# Hermes Agent 最终失败特征
-_HERMES_FINAL_FAILURE_RE = _re_card.compile(
-    r"API failed after \d+ retries|Final error|Request timed out\.",
-    _re_card.IGNORECASE,
-)
-_HERMES_FAILURE_STATUSES = {
-    "failed",
-    "failure",
-    "error",
-    "errored",
-    "cancelled",
-    "canceled",
-}
-_HERMES_PROVENANCE_FIELDS = (
-    "source_citations",
-    "hits",
-    "sources",
-    "knowledge_sources",
-    "provenance",
-)
-
-
-def _callback_text_value(value: object) -> str:
-    if isinstance(value, str):
-        return value.strip()
-    if isinstance(value, dict):
-        for key in ("text", "response", "message", "result", "content", "error"):
-            text = _callback_text_value(value.get(key))
-            if text:
-                return text
-    if isinstance(value, list):
-        parts = [_callback_text_value(item) for item in value]
-        return "\n".join(part for part in parts if part).strip()
-    return ""
-
-
-def _callback_response_text(data: dict) -> str:
-    for key in ("response", "message", "result"):
-        text = _callback_text_value(data.get(key))
-        if text:
-            return text
-    return ""
-
-
-def _callback_provenance_fields(data: dict) -> dict[str, object]:
-    result = data.get("result")
-    containers = [data]
-    if isinstance(result, dict):
-        containers.append(result)
-
-    provenance: dict[str, object] = {}
-    for key in _HERMES_PROVENANCE_FIELDS:
-        for container in containers:
-            value = container.get(key)
-            if value:
-                provenance[key] = value
-                break
-    return provenance
-
-
-def _callback_failure_reason(data: dict, response_text: str) -> str | None:
-    for key in ("status", "state"):
-        value = data.get(key)
-        if isinstance(value, str) and value.strip().lower() in _HERMES_FAILURE_STATUSES:
-            return (
-                _callback_text_value(data.get("error"))
-                or response_text
-                or f"hermes callback {key}={value.strip()}"
-            )
-
-    error_text = _callback_text_value(data.get("error"))
-    if error_text:
-        return error_text
-    if response_text and _HERMES_FINAL_FAILURE_RE.search(response_text):
-        return response_text
-    return None
-
-
-def _harness_result(
-    response_text: str,
-    provenance_fields: dict[str, object] | None = None,
-) -> dict[str, object]:
-    result: dict[str, object] = {
-        "summary": response_text[:200],
-        "response_preview": response_text[:500],
-        "source": "hermes",
-    }
-    if provenance_fields:
-        result.update(provenance_fields)
-    return result
+_callback_text_value = callback_text_value
+_callback_response_text = callback_response_text
+_callback_provenance_fields = callback_provenance_fields
+_callback_failure_reason = callback_failure_reason
+_harness_result = build_harness_result
+_HERMES_FINAL_FAILURE_RE = HERMES_FINAL_FAILURE_RE
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,43 +332,50 @@ class HermesBridgePlugin(Star):
 
         # feishu_streamers 改走 lazy init（运行时 ensure_streamers_on_context 创建）
         # —— initialize 阶段 platform 还没加载完，提前建会拿到空 list
+        #
+        # Harness bootstrap now belongs to harness_runtime_plugin. Keep this
+        # fallback call for compatibility when Hermes loads before that plugin,
+        # but Hermes only registers itself as the task execution adapter.
+        from data.plugins.harness_runtime_plugin.main import ensure_harness_runtime
 
-        # 自建 Harness sidecar（重装后 core_lifecycle 不再初始化它，由插件自己管）
-        # 装到 context 上以便后续代码 `self.context.harness_engine` 仍可使用。
-        if getattr(self.context, "harness_engine", None) is None:
-            from dc_engines.harness import (
-                HarnessEngine,
-                HarnessMemoryPromoter,
-                HarnessMemoryStore,
-                HarnessTaskStore,
-            )
+        await ensure_harness_runtime(self.context, self._hcfg)
+        await self._ensure_legacy_harness_memory_promoter()
+        self.context.hermes_task_dispatcher = self.dispatch_task_to_hermes
 
-            data_dir_override = (
-                self.context.get_config().get("hermes_bridge", {}).get("data_dir")
-            )
-            if data_dir_override:
-                data_dir = Path(data_dir_override)
-            else:
-                data_dir = Path(__file__).resolve().parents[3] / "data"
-            data_dir.mkdir(parents=True, exist_ok=True)
+    async def _ensure_legacy_harness_memory_promoter(self) -> None:
+        """Keep legacy Hermes-owned Harness bootstrap compatible."""
+        engine = getattr(self.context, "harness_engine", None)
+        if engine is not None and getattr(engine, "memory_promoter", None) is not None:
+            return
 
-            task_store = HarnessTaskStore(str(data_dir / "harness.db"))
-            await task_store.initialize()
+        from dc_engines.harness import (
+            HarnessEngine,
+            HarnessMemoryPromoter,
+            HarnessMemoryStore,
+            HarnessTaskStore,
+        )
+
+        data_dir = Path(str(self._hcfg.get("data_dir") or "data"))
+        data_dir.mkdir(parents=True, exist_ok=True)
+        memory_store = getattr(self.context, "harness_memory_store", None)
+        if memory_store is None:
             memory_store = HarnessMemoryStore(str(data_dir / "harness_memory.db"))
             await memory_store.initialize()
-            promoter = HarnessMemoryPromoter(memory_store)
-            engine = HarnessEngine(task_store, memory_promoter=promoter)
+            self.context.harness_memory_store = memory_store
+        promoter = HarnessMemoryPromoter(memory_store)
 
-            self.context.harness_engine = engine
+        if engine is not None:
+            engine.memory_promoter = promoter
+            return
+
+        task_store = getattr(self.context, "harness_store", None)
+        if task_store is None:
+            task_store = HarnessTaskStore(str(data_dir / "harness.db"))
+            await task_store.initialize()
             self.context.harness_store = task_store
-            self.context.dispatch_task_to_hermes = self.dispatch_task_to_hermes
-            logger.info(
-                "[HermesBridge] 自建 Harness sidecar：%s + %s",
-                data_dir / "harness.db",
-                data_dir / "harness_memory.db",
-            )
-        else:
-            self.context.dispatch_task_to_hermes = self.dispatch_task_to_hermes
+        self.context.harness_engine = HarnessEngine(
+            task_store, memory_promoter=promoter
+        )
 
     # ── 长期任务记忆注入（LLM 调用前钩子） ────────────────────────────────────
 
@@ -719,46 +653,21 @@ class HermesBridgePlugin(Star):
         brief: str,
         umo: str,
         cognitive_context: dict,
+        extra_payload: dict | None = None,
     ) -> bool:
         """将 Harness workflow 任务派发给 Hermes 执行。返回是否成功。"""
-        payload = {
-            "task_id": task_id,
-            "workflow_kind": workflow_kind,
-            "brief": brief,
-            "session_id": umo,
-            "unified_msg_origin": umo,
-            "cognitive_context": cognitive_context,
-        }
-        try:
-            body, signature = self._signed_json_payload(payload)
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.hermes_task_webhook_url,
-                    data=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Hub-Signature-256": signature,
-                        "X-Webhook-Event": "harness_task",
-                        "X-Task-ID": task_id,
-                    },
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status in (200, 201, 202):
-                        logger.info(
-                            "[HermesBridge] 任务 %s 已派发给 Hermes（%s）",
-                            task_id,
-                            self.hermes_task_webhook_url,
-                        )
-                        return True
-                    logger.warning(
-                        "[HermesBridge] Hermes 任务派发失败 HTTP %s: %s",
-                        resp.status,
-                        await resp.text(),
-                    )
-                    return False
-        except Exception as exc:
-            logger.warning("[HermesBridge] Hermes 任务派发异常：%s", exc)
-            return False
+        dispatcher = HermesTaskDispatcher(
+            task_webhook_url=self.hermes_task_webhook_url,
+            secret=self.hermes_secret,
+        )
+        return await dispatcher.dispatch(
+            task_id,
+            workflow_kind,
+            brief,
+            umo,
+            cognitive_context,
+            extra_payload=extra_payload,
+        )
 
     # ── Hermes 响应接收 ───────────────────────────────────────────────────────
 
@@ -795,6 +704,10 @@ class HermesBridgePlugin(Star):
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 logger.warning("[HermesBridge] 回调 body 解析失败：%s", exc)
                 return web.json_response({"status": "bad_request"}, status=400)
+
+            persona_status_text = self._settle_persona_factory_callback(data)
+            if persona_status_text and not callback_text_value(data.get("response")):
+                data["response"] = persona_status_text
 
             response_text = _callback_response_text(data)
             provenance_fields = _callback_provenance_fields(data)
@@ -1029,7 +942,7 @@ class HermesBridgePlugin(Star):
             try:
                 finalized = await finalize_card_via_runtime(
                     streamer,
-                    card_type="thinking_waiting",
+                    card_type="task_error",
                     message_id=message_id,
                     card=err_card,
                     platform_id="",
@@ -1074,7 +987,7 @@ class HermesBridgePlugin(Star):
         try:
             finalized = await finalize_card_via_runtime(
                 streamer,
-                card_type="thinking_waiting",
+                card_type="task_result",
                 message_id=message_id,
                 card=final_card,
                 platform_id="",
@@ -1169,6 +1082,45 @@ class HermesBridgePlugin(Star):
             logger.warning("[HermesBridge] 完成 Harness 任务 %s 失败：%s", task_id, exc)
             return False
 
+    def _settle_persona_factory_callback(self, data: dict[str, object]) -> str:
+        if data.get("workflow_kind") != "persona_factory":
+            return ""
+        result = data.get("result")
+        result = result if isinstance(result, dict) else {}
+        artifact_bundle = data.get("artifact_bundle") or result.get("artifact_bundle")
+        if not isinstance(artifact_bundle, dict):
+            return ""
+        request_id = str(
+            data.get("request_id")
+            or artifact_bundle.get("request_id")
+            or data.get("task_id")
+            or ""
+        ).strip()
+        if not request_id:
+            return ""
+        artifact_status = str(artifact_bundle.get("status") or "").strip()
+        next_status = (
+            "awaiting_review" if artifact_status == "awaiting_review" else "blocked"
+        )
+        try:
+            store = getattr(self.context, "persona_factory_store", None)
+            if store is None:
+                store = PersonaFactoryStore(DEFAULT_DATA_ROOT / "persona_factory.db")
+            store.set_status(request_id, next_status, reviewer="hermes_worker")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[HermesBridge] Persona Factory 状态推进失败 request=%s: %s",
+                request_id,
+                exc,
+            )
+            return ""
+        workspace_dir = str(artifact_bundle.get("workspace_dir") or "")
+        return (
+            f"Persona Factory 任务 {request_id} 已进入 {next_status}。\n"
+            f"Artifact 目录：{workspace_dir}\n"
+            "请管理员 review 后执行 /persona approve 或 /persona reject。"
+        )
+
     async def _fail_harness_task(self, task_id: str, reason: str) -> bool:
         engine = getattr(self.context, "harness_engine", None)
         if engine is None:
@@ -1184,24 +1136,8 @@ class HermesBridgePlugin(Star):
 
     def _content_sop_memory_governance_kwargs(self) -> dict[str, object]:
         try:
-            from dc_engines.memory_governance.store import MemoryGovernanceStore
-
             dc_root = Path(__file__).resolve().parents[3]
-            config = self._hcfg
-            data_dir_override = str(config.get("data_dir") or "").strip()
-            data_dir = (
-                Path(data_dir_override) if data_dir_override else dc_root / "data"
-            )
-            vault_override = str(config.get("obsidian_vault_path") or "").strip()
-            vault_path = (
-                Path(vault_override) if vault_override else dc_root / "ObsidianVault"
-            )
-            return {
-                "memory_governance_store": MemoryGovernanceStore(
-                    data_dir / "governed_memory.db"
-                ),
-                "obsidian_vault_path": vault_path,
-            }
+            return build_content_sop_memory_governance_kwargs(dc_root, self._hcfg)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[HermesBridge] Content SOP 记忆治理参数构造失败：%s", exc)
             return {}
@@ -1599,6 +1535,8 @@ class HermesBridgePlugin(Star):
         self,
         event: AstrMessageEvent,
         card: dict,
+        *,
+        card_type: str = "skill_review",
     ) -> str | None:
         context = getattr(self, "context", None)
         if context is None:
@@ -1613,7 +1551,7 @@ class HermesBridgePlugin(Star):
             return None
         stream = await send_card_via_runtime(
             streamer,
-            card_type="skill_review",
+            card_type=card_type,
             chat_id=chat_id,
             receive_id_type=receive_id_type,
             card=card,
@@ -1622,6 +1560,20 @@ class HermesBridgePlugin(Star):
             detail="hermes skill card",
         )
         return stream.message_id if stream else None
+
+    async def _send_skill_card_with_type(
+        self,
+        event: AstrMessageEvent,
+        card: dict,
+        *,
+        card_type: str,
+    ) -> str | None:
+        try:
+            return await self._send_skill_card(event, card, card_type=card_type)
+        except TypeError as exc:
+            if "card_type" not in str(exc):
+                raise
+            return await self._send_skill_card(event, card)
 
     async def _handle_skill_card_action(
         self,
@@ -1718,7 +1670,9 @@ class HermesBridgePlugin(Star):
             operator_id=str(event.get_sender_id() or ""),
             risk_note="会把当前 Skill 移入回收站，恢复前不会再参与后续命中。",
         )
-        if not await self._send_skill_card(event, card):
+        if not await self._send_skill_card_with_type(
+            event, card, card_type="skill_confirm"
+        ):
             await event.send(
                 MessageChain([Plain("删除会把 skill 移入回收区，请确认后再点确认。")])
             )
@@ -1754,7 +1708,9 @@ class HermesBridgePlugin(Star):
             operator_id=str(event.get_sender_id() or ""),
             risk_note="会用备份版本覆盖当前 Skill，请确认版本号无误。",
         )
-        if not await self._send_skill_card(event, card):
+        if not await self._send_skill_card_with_type(
+            event, card, card_type="skill_confirm"
+        ):
             await event.send(
                 MessageChain([Plain("回滚会覆盖当前 skill，请确认版本后再点确认。")])
             )
@@ -1826,9 +1782,10 @@ class HermesBridgePlugin(Star):
         if not bundles:
             await event.send(MessageChain([Plain(f"当前还没有生成任何{title}。")]))
             return
-        if await self._send_skill_card(
+        if await self._send_skill_card_with_type(
             event,
             build_skill_list_card(kind=kind, skills=bundles),
+            card_type="skill_list",
         ):
             return
         lines = [f"【{title}】"]
@@ -1849,9 +1806,10 @@ class HermesBridgePlugin(Star):
         if not bundles:
             await event.send(MessageChain([Plain(f"当前没有{title}。")]))
             return
-        if await self._send_skill_card(
+        if await self._send_skill_card_with_type(
             event,
             build_deleted_skill_list_card(kind=kind, skills=bundles),
+            card_type="skill_deleted_list",
         ):
             return
         lines = [f"【{title}】"]
@@ -1934,9 +1892,10 @@ class HermesBridgePlugin(Star):
             )
             return
         detail = self._skill_bundle_detail(kind, slug)
-        if detail and await self._send_skill_card(
+        if detail and await self._send_skill_card_with_type(
             event,
             build_skill_detail_card(kind=kind, skill=detail),
+            card_type="skill_detail",
         ):
             return
         ok, message = self._inspect_skill_bundle(kind, slug)
@@ -1963,9 +1922,10 @@ class HermesBridgePlugin(Star):
             )
             return
         review = self._skill_bundle_review(kind, slug)
-        if review and await self._send_skill_card(
+        if review and await self._send_skill_card_with_type(
             event,
             build_skill_review_card(kind=kind, review=review),
+            card_type="skill_review",
         ):
             return
         ok, message = self._review_skill_bundle(kind, slug)

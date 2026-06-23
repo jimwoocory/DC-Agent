@@ -2,6 +2,7 @@ import enum
 import json
 import logging
 import os
+import tempfile
 
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from astrbot.core.utils.auth_password import (
@@ -220,8 +221,29 @@ class AstrBotConfig(dict):
         """
         if replace_config:
             self.update(replace_config)
-        with open(self.config_path, "w", encoding="utf-8-sig") as f:
-            json.dump(self, f, indent=2, ensure_ascii=False)
+        config_dir = os.path.dirname(os.path.abspath(self.config_path)) or "."
+        os.makedirs(config_dir, exist_ok=True)
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8-sig",
+                dir=config_dir,
+                prefix=f".{os.path.basename(self.config_path)}.",
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                tmp_path = f.name
+                json.dump(self, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.config_path)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    logger.warning("Failed to clean temp config file: %s", tmp_path)
 
     def __getattr__(self, item):
         try:

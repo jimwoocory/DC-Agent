@@ -113,6 +113,11 @@
       "verification": "uv run pytest tests/test_employee_insight_plugin.py -q"
     },
     {
+      "id": "eil-002h1",
+      "description": "The AstrBot plugin defaults to pilot_only for normal Lark DMs: unknown employees are observe-only and do not get an employee_insight session unless they self-register, already have an active pilot profile, or auto_observe_private_dm is explicitly enabled; side-effect processing times out fail-open so normal chat is not blocked.",
+      "verification": "uv run pytest tests/test_employee_insight_plugin.py -q"
+    },
+    {
       "id": "eil-002i",
       "description": "The dashboard exposes /employee-insight/verification/report with grey verification sent_rate, open_rate, form_open_rate, submit_rate, anomaly_rate, go/no-go thresholds, and rollback reasons so expansion decisions are metric-gated instead of manual judgement.",
       "verification": "uv run pytest tests/test_employee_insight_route.py -q"

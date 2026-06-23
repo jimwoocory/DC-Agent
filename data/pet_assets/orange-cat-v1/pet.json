@@ -1,0 +1,106 @@
+{
+  "id": "orange-cat-v1",
+  "displayName": "小橘",
+  "description": "巅池工作宠物，小助手身份闭环的桌面表现层资源。由自研 10 行 atlas 转换为 codex-pets 9 行 atlas。",
+  "kind": "animal",
+  "spritesheetPath": "spritesheet.webp",
+  "name": "小橘",
+  "scene": "desk",
+  "spritesheet": "spritesheet.webp",
+  "cell": {
+    "width": 192,
+    "height": 208
+  },
+  "colors": {
+    "body": "#f7b267",
+    "head": "#f5a35c",
+    "ground": "#d9eadf",
+    "accent": "#0f766e"
+  },
+  "states": {
+    "idle": {
+      "row": 0,
+      "frames": 6,
+      "fps": 6,
+      "label": "待机",
+      "color": "#0f766e"
+    },
+    "running-right": {
+      "row": 1,
+      "frames": 8,
+      "fps": 12,
+      "label": "向右移动",
+      "color": "#b45309"
+    },
+    "running-left": {
+      "row": 2,
+      "frames": 8,
+      "fps": 12,
+      "label": "向左移动",
+      "color": "#b45309"
+    },
+    "waving": {
+      "row": 3,
+      "frames": 4,
+      "fps": 5,
+      "label": "回应",
+      "color": "#be123c"
+    },
+    "jumping": {
+      "row": 4,
+      "frames": 5,
+      "fps": 14,
+      "label": "跃起",
+      "color": "#15803d"
+    },
+    "failed": {
+      "row": 5,
+      "frames": 8,
+      "fps": 6,
+      "label": "遇到问题",
+      "color": "#b91c1c"
+    },
+    "waiting": {
+      "row": 6,
+      "frames": 6,
+      "fps": 4,
+      "label": "等待",
+      "color": "#1d4ed8"
+    },
+    "running": {
+      "row": 7,
+      "frames": 6,
+      "fps": 12,
+      "label": "工作中",
+      "color": "#b45309"
+    },
+    "review": {
+      "row": 8,
+      "frames": 6,
+      "fps": 6,
+      "label": "待审核",
+      "color": "#475569"
+    }
+  },
+  "codexPets": {
+    "compatible": true,
+    "atlas": {
+      "width": 1536,
+      "height": 1872,
+      "columns": 8,
+      "rows": 9
+    },
+    "source": "archives/自研宠物系统_2026-06-18/dianchi-desktop/pets/orange-cat-v1/spritesheet.webp",
+    "rowMap": {
+      "0": 0,
+      "1": 3,
+      "2": 3,
+      "3": 7,
+      "4": 4,
+      "5": 5,
+      "6": 1,
+      "7": 3,
+      "8": 6
+    }
+  }
+}

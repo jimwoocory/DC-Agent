@@ -16,12 +16,15 @@ import runtime_bootstrap  # noqa: E402
 runtime_bootstrap.initialize_runtime_bootstrap()
 
 from dc_engines.card_system import (  # noqa: E402
+    build_card_asset_manifest,
     card_system_next_step,
+    format_card_asset_matrix,
     list_card_specs,
     list_card_versions,
     load_card_contract,
     recent_card_runtime_events,
     rollback_card_version,
+    run_card_system_engineering_gate,
     run_card_system_health,
     set_card_version,
 )
@@ -33,6 +36,26 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="list registered cards")
     parser.add_argument("--versions", action="store_true", help="list card versions")
     parser.add_argument("--contract", action="store_true", help="print contract gates")
+    parser.add_argument(
+        "--manifest",
+        action="store_true",
+        help="print machine-readable card asset manifest",
+    )
+    parser.add_argument(
+        "--matrix",
+        action="store_true",
+        help="print a human-readable card asset matrix",
+    )
+    parser.add_argument(
+        "--strict-gate",
+        action="store_true",
+        help="run the reusable engineering gate, including manifest and runtime call-site checks",
+    )
+    parser.add_argument(
+        "--require-grey",
+        action="store_true",
+        help="with --strict-gate, require grey_push evidence for every registered card type",
+    )
     parser.add_argument(
         "--events", action="store_true", help="show recent runtime events"
     )
@@ -106,6 +129,18 @@ def main() -> int:
                 print(f"  verify: {item.get('verification')}")
         return 0
 
+    if args.manifest:
+        print(json.dumps(build_card_asset_manifest(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.matrix:
+        manifest = build_card_asset_manifest()
+        if args.json:
+            print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        else:
+            print(format_card_asset_matrix(manifest))
+        return 0
+
     if args.events:
         payload = {"events": recent_card_runtime_events(args.limit)}
         if args.json:
@@ -134,7 +169,11 @@ def main() -> int:
             print(card_system_next_step(report))
         return 0 if report.ok else 2
 
-    report = run_card_system_health()
+    report = (
+        run_card_system_engineering_gate(require_recent_grey=args.require_grey)
+        if args.strict_gate
+        else run_card_system_health()
+    )
     if args.json:
         print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
     else:

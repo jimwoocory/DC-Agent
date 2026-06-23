@@ -28,6 +28,7 @@ from dc_engines.feishu_card_streamer import (
     ensure_streamers_on_context,
     extract_chat_info_from_event,
 )
+from dc_engines.org_permissions import CONTENT_RULE_REVIEW, DC_ADMIN
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
@@ -68,11 +69,16 @@ class ContentSopRuleReviewPlugin(Star):
             return cfg if isinstance(cfg, dict) else {}
         return {}
 
-    def _allowed_reviewers(self) -> set[str]:
+    def _allowed_reviewers(self, event: AstrMessageEvent | None = None) -> set[str]:
         raw = self._config().get("admin_reviewers") or []
-        if not isinstance(raw, list):
-            return set()
-        return {str(item).strip() for item in raw if str(item).strip()}
+        reviewers = set()
+        if isinstance(raw, list):
+            reviewers.update(str(item).strip() for item in raw if str(item).strip())
+        if event is not None and self._event_has_dc_review_permission(event):
+            sender = self._sender_id(event).strip()
+            if sender:
+                reviewers.add(sender)
+        return reviewers
 
     def _max_cards(self) -> int:
         try:
@@ -87,10 +93,25 @@ class ContentSopRuleReviewPlugin(Star):
             return ""
 
     def _is_reviewer(self, event: AstrMessageEvent) -> bool:
-        allowed = self._allowed_reviewers()
+        allowed = self._allowed_reviewers(event)
         if not allowed:
             return False
         return self._sender_id(event) in allowed
+
+    def _event_has_dc_review_permission(self, event: AstrMessageEvent) -> bool:
+        permission_rows = []
+        try:
+            permission_rows = event.get_extra("requester_dc_permissions", default=[])
+        except Exception:  # noqa: BLE001
+            permission_rows = getattr(event, "requester_dc_permissions", [])
+        if not isinstance(permission_rows, list):
+            return False
+        for item in permission_rows:
+            if not isinstance(item, dict):
+                continue
+            if item.get("permission") in {DC_ADMIN, CONTENT_RULE_REVIEW}:
+                return True
+        return False
 
     def _is_trusted_card_action(self, event: AstrMessageEvent) -> bool:
         msg = getattr(event, "message_obj", None)
@@ -102,7 +123,13 @@ class ContentSopRuleReviewPlugin(Star):
     def _reply(self, event: AstrMessageEvent, text: str) -> None:
         event.set_result(MessageEventResult().message(text).use_t2i(False).stop_event())
 
-    async def _send_card(self, event: AstrMessageEvent, card: dict[str, Any]) -> bool:
+    async def _send_card(
+        self,
+        event: AstrMessageEvent,
+        card: dict[str, Any],
+        *,
+        card_type: str = "content_sop_rule_review",
+    ) -> bool:
         streamer = ensure_streamers_on_context(self.context).get(
             event.get_platform_id() or ""
         )
@@ -111,7 +138,7 @@ class ContentSopRuleReviewPlugin(Star):
             return False
         stream = await send_card_via_runtime(
             streamer,
-            card_type="skill_review",
+            card_type=card_type,
             chat_id=chat_id,
             receive_id_type=receive_id_type,
             card=card,
@@ -120,6 +147,20 @@ class ContentSopRuleReviewPlugin(Star):
             detail="content SOP rule review card",
         )
         return stream is not None
+
+    async def _send_card_with_type(
+        self,
+        event: AstrMessageEvent,
+        card: dict[str, Any],
+        *,
+        card_type: str,
+    ) -> bool:
+        try:
+            return await self._send_card(event, card, card_type=card_type)
+        except TypeError as exc:
+            if "card_type" not in str(exc):
+                raise
+            return await self._send_card(event, card)
 
     @filter.regex(r"^(内容SOP规则候选|内容 SOP 规则候选|SOP规则候选)$")
     async def list_pending_proposals(self, event: AstrMessageEvent) -> None:
@@ -142,7 +183,11 @@ class ContentSopRuleReviewPlugin(Star):
 
         sent = 0
         for proposal in proposals:
-            if await self._send_card(event, build_rule_proposal_review_card(proposal)):
+            if await self._send_card_with_type(
+                event,
+                build_rule_proposal_review_card(proposal),
+                card_type="content_sop_rule_review",
+            ):
                 sent += 1
         if sent:
             event.stop_event()
@@ -171,7 +216,11 @@ class ContentSopRuleReviewPlugin(Star):
         )
         reminders = build_content_sop_ops_reminders(dashboard)
         card = build_content_sop_ops_reminder_card(reminders)
-        if await self._send_card(event, card):
+        if await self._send_card_with_type(
+            event,
+            card,
+            card_type="content_sop_ops_reminder",
+        ):
             event.stop_event()
             return
         if reminders:
@@ -205,7 +254,7 @@ class ContentSopRuleReviewPlugin(Star):
             return
 
         reviewer = self._sender_id(event)
-        allowed = self._allowed_reviewers()
+        allowed = self._allowed_reviewers(event)
         if reviewer not in allowed:
             logger.warning(
                 "[content_sop_rule_review] 拒绝非管理员卡片操作 reviewer=%s action=%s",

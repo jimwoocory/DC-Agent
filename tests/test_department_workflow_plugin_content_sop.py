@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dc_engines"))
 
 import pytest
 import pytest_asyncio
+from dc_engines.employee_directory.contracts import Employee
 from dc_engines.harness.contracts import HarnessTaskCreateRequest
 from dc_engines.harness.engine import HarnessEngine
 from dc_engines.harness.task_store import HarnessTaskStore
@@ -62,6 +63,19 @@ class _FakeConversationManager:
 class _FakeStore:
     async def list_tasks_for_conversation(self, _conv_id: str, *, limit: int):
         return []
+
+
+class _FakeExecutionEmployeeStore:
+    async def get_employee(self, _open_id: str) -> Employee:
+        return Employee(
+            open_id="ou_user",
+            display_name="蔡挺",
+            department="数字化应用部",
+            preferences={
+                "business_parent_department": "执行部门",
+                "department_path": ["总经办", "执行部门", "数字化应用部"],
+            },
+        )
 
 
 class _FakeCreateEngine:
@@ -120,6 +134,15 @@ class _PrivateClientFollowupEvent:
 
     async def send(self, chain) -> None:
         self.sent_messages.append(str(chain))
+
+
+class _ProposalFrameworkEvent(_PrivateClientFollowupEvent):
+    message_str = (
+        "灰度测试：中台同事上传给甲方的方案框架后，请小助手基于附件生成一版"
+        "给甲方看的提案文案。请输出标题3个、开场说明、方案亮点、执行节奏、"
+        "风险提醒、待甲方确认项。必须引用附件作为事实来源，不能编造价格、"
+        "承诺、客户身份；只生成内部审稿版，不要直接外发。"
+    )
 
 
 @pytest.mark.asyncio
@@ -205,7 +228,9 @@ async def test_department_workflow_plugin_does_not_override_auto_complete_gate()
 
 
 @pytest.mark.asyncio
-async def test_department_workflow_private_advisory_match_is_silent() -> None:
+async def test_department_workflow_private_advisory_match_is_observe_only_by_default() -> (
+    None
+):
     engine = _FakeCreateEngine()
     plugin_cls = _load_plugin_class()
     plugin = plugin_cls(
@@ -226,8 +251,68 @@ async def test_department_workflow_private_advisory_match_is_silent() -> None:
 
     await plugin.on_message(event)
 
+    assert len(engine.requests) == 0
+    assert event.sent_messages == []
+    assert event.extra["department_workflow_candidate"]["mode"] == "observe_only"
+
+
+@pytest.mark.asyncio
+async def test_department_workflow_implicit_task_creation_requires_config() -> None:
+    engine = _FakeCreateEngine()
+    plugin_cls = _load_plugin_class()
+    plugin = plugin_cls(
+        SimpleNamespace(
+            harness_engine=engine,
+            harness_store=_FakeStore(),
+            conversation_manager=_FakeConversationManager(),
+            employee_store=None,
+            case_engine=None,
+        ),
+        {
+            "enabled": True,
+            "dry_run": False,
+            "notify_on_match": True,
+            "implicit_create_tasks": True,
+        },
+    )
+    event = _PrivateClientFollowupEvent()
+
+    await plugin.on_message(event)
+
     assert len(engine.requests) == 1
     assert event.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_proposal_framework_request_is_observe_only_for_execution_employee() -> (
+    None
+):
+    engine = _FakeCreateEngine()
+    plugin_cls = _load_plugin_class()
+    plugin = plugin_cls(
+        SimpleNamespace(
+            harness_engine=engine,
+            harness_store=_FakeStore(),
+            conversation_manager=_FakeConversationManager(),
+            employee_store=_FakeExecutionEmployeeStore(),
+            case_engine=None,
+        ),
+        {
+            "enabled": True,
+            "dry_run": False,
+            "notify_on_match": True,
+        },
+    )
+    event = _ProposalFrameworkEvent()
+
+    await plugin.on_message(event)
+
+    assert len(engine.requests) == 0
+    assert event.sent_messages == []
+    assert event.extra["department_workflow_candidate"]["department_id"] in {
+        "execution_ops",
+        "client_dept",
+    }
 
 
 @pytest.mark.asyncio

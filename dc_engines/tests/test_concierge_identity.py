@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,15 +19,27 @@ def _plugin() -> ConciergePlugin:
 
 
 class _DummyEvent:
-    def __init__(self, *, admin: bool, private: bool) -> None:
+    def __init__(
+        self,
+        *,
+        admin: bool,
+        private: bool,
+        requester_dc_permissions: list[dict] | None = None,
+    ) -> None:
         self.role = "admin" if admin else "member"
         self._private = private
+        self._requester_dc_permissions = requester_dc_permissions or []
 
     def is_admin(self) -> bool:
         return self.role == "admin"
 
     def is_private_chat(self) -> bool:
         return self._private
+
+    def get_extra(self, key=None, default=None):
+        if key == "requester_dc_permissions":
+            return self._requester_dc_permissions
+        return default
 
 
 class _DummyFeishuEvent:
@@ -245,6 +258,42 @@ async def test_inject_employee_context_appends_kb_bridge_context(
     assert "项目流程资料" in req.system_prompt
 
 
+async def test_employee_kb_context_timeout_fails_open(
+    monkeypatch,
+) -> None:
+    plugin = _plugin()
+    plugin.context = SimpleNamespace()
+    plugin.config = {"employee_kb_context_timeout_seconds": 0.01}
+    plugin.memory_bridge = EmployeeMemoryBridge()
+    event = _DummyFeishuEvent(message="帮我查一下项目流程")
+    req = ProviderRequest(prompt="帮我查一下项目流程", system_prompt="")
+    emp = Employee(
+        open_id="ou_staff_daily",
+        display_name="张三",
+        department="活动统筹部",
+        role="活动统筹",
+    )
+
+    async def slow_retrieve(*args, **kwargs) -> str:
+        await asyncio.sleep(1)
+        return "不应该阻塞到这里"
+
+    monkeypatch.setattr(
+        "astrbot.core.tools.knowledge_base_tools.retrieve_knowledge_base",
+        slow_retrieve,
+    )
+
+    context = await plugin._retrieve_employee_kb_context(
+        event,
+        req,
+        emp,
+        [],
+        preferred_address="张三",
+    )
+
+    assert context == ""
+
+
 def test_boss_response_guard_replaces_full_name_and_adds_honorific() -> None:
     plugin = _plugin()
     emp = Employee(open_id="ou_boss", display_name="杨国民")
@@ -288,6 +337,115 @@ def test_employee_debug_commands_require_admin_private_chat() -> None:
     assert plugin._is_private_event(_DummyEvent(admin=True, private=True)) is True
     assert plugin._is_admin_event(_DummyEvent(admin=False, private=True)) is False
     assert plugin._is_private_event(_DummyEvent(admin=True, private=False)) is False
+
+
+def test_employee_debug_commands_accept_explicit_dc_admin_permission() -> None:
+    plugin = _plugin()
+
+    event = _DummyEvent(
+        admin=False,
+        private=True,
+        requester_dc_permissions=[
+            {"permission": "dc_admin", "scope": "*", "source": "admins_id"}
+        ],
+    )
+
+    assert plugin._is_admin_event(event) is True
+
+
+def test_employee_debug_commands_do_not_accept_feishu_admin_fact() -> None:
+    plugin = _plugin()
+
+    event = _DummyEvent(
+        admin=False,
+        private=True,
+        requester_dc_permissions=[
+            {
+                "permission": "feishu_admin_observed",
+                "scope": "feishu",
+                "source": "manual_confirmed_by_user",
+            }
+        ],
+    )
+
+    assert plugin._is_admin_event(event) is False
+
+
+async def test_employee_api_filters_profiles_by_department_manager_scope(
+    employee_store: EmployeeStore,
+) -> None:
+    plugin = _plugin()
+    plugin.store = employee_store
+    plugin.config = {}
+    plugin.permission_store = None
+    await employee_store.get_or_create(
+        "ou_hr",
+        platform_id="lark",
+        display_name="周芳",
+    )
+    await employee_store.update_profile("ou_hr", department="综合部")
+    await employee_store.get_or_create(
+        "ou_client",
+        platform_id="lark",
+        display_name="客户同事",
+    )
+    await employee_store.update_profile("ou_client", department="客户部")
+
+    payload = await plugin._api_list_employees(
+        requester_dc_permissions=[
+            {
+                "permission": "department_manager",
+                "scope": "综合部",
+                "source": "organization_identity",
+            }
+        ]
+    )
+    denied = await plugin._api_get_employee(
+        open_id="ou_client",
+        requester_dc_permissions=[
+            {
+                "permission": "department_manager",
+                "scope": "综合部",
+                "source": "organization_identity",
+            }
+        ],
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["data"]["scope_filter_applied"] is True
+    assert [item["open_id"] for item in payload["data"]["employees"]] == ["ou_hr"]
+    assert denied["status"] == "error"
+    assert denied["message"] == "permission denied"
+
+
+async def test_employee_api_preserves_unfiltered_dashboard_behavior(
+    employee_store: EmployeeStore,
+) -> None:
+    plugin = _plugin()
+    plugin.store = employee_store
+    plugin.config = {}
+    plugin.permission_store = None
+    await employee_store.get_or_create(
+        "ou_hr",
+        platform_id="lark",
+        display_name="周芳",
+    )
+    await employee_store.update_profile("ou_hr", department="综合部")
+    await employee_store.get_or_create(
+        "ou_client",
+        platform_id="lark",
+        display_name="客户同事",
+    )
+    await employee_store.update_profile("ou_client", department="客户部")
+
+    payload = await plugin._api_list_employees()
+
+    assert payload["status"] == "ok"
+    assert payload["data"]["scope_filter_applied"] is False
+    assert {item["open_id"] for item in payload["data"]["employees"]} == {
+        "ou_hr",
+        "ou_client",
+    }
 
 
 def test_identity_override_takes_priority(tmp_path) -> None:

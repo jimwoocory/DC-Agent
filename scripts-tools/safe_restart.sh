@@ -19,6 +19,9 @@ set -euo pipefail
 DC_ROOT="/Users/dianchi/DC-Agent"
 WD_ROOT="$DC_ROOT/data/watchdog"
 LOCK_FILE="$WD_ROOT/maintenance.lock"
+WATCHDOG_QUIET_SECONDS="${SAFE_RESTART_WATCHDOG_QUIET_SECONDS:-120}"
+ASTRBOT_TMUX_SESSION="${SAFE_RESTART_ASTRBOT_TMUX_SESSION:-dc-agent-astrbot}"
+SERVICE="${1:-}"
 
 usage() {
     echo "用法: $(basename "$0") <service>"
@@ -28,7 +31,7 @@ usage() {
 
 [ $# -lt 1 ] && usage
 
-case "$1" in
+case "$SERVICE" in
     astrbot)
         LABEL="io.astrbot.bot"
         HEALTH_CMD="curl --noproxy '*' -sf --max-time 2 http://127.0.0.1:6185/api/stat/start-time"
@@ -65,6 +68,34 @@ case "$1" in
         ;;
 esac
 
+restart_astrbot_without_launchd() {
+    echo "⚠️  launchd 未接管 AstrBot，改用当前部署方式重启：tmux/start-all.sh"
+
+    if command -v tmux >/dev/null 2>&1; then
+        tmux kill-session -t "$ASTRBOT_TMUX_SESSION" >/dev/null 2>&1 || true
+    fi
+
+    local pids
+    pids="$(pgrep -f "([.]venv/bin/python|$DC_ROOT/.venv/bin/python) main.py" 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+        echo "🛑 停止现有 AstrBot 进程：$pids"
+        for pid in $pids; do
+            kill "$pid" >/dev/null 2>&1 || true
+        done
+        sleep 2
+    fi
+
+    if command -v tmux >/dev/null 2>&1; then
+        tmux new-session -d -s "$ASTRBOT_TMUX_SESSION" \
+            "cd $DC_ROOT && ./start-all.sh"
+        echo "✅ AstrBot 已通过 tmux session=$ASTRBOT_TMUX_SESSION 启动"
+        return 0
+    fi
+
+    "$DC_ROOT/start-all.sh" > "$WD_ROOT/astrbot_manual_restart.out" 2>&1 &
+    echo "✅ AstrBot 已通过后台进程启动 pid=$!"
+}
+
 cleanup() {
     rm -f "$LOCK_FILE"
 }
@@ -87,8 +118,12 @@ echo "🔒 维护窗口开启（lock=${LOCK_FILE}，看门狗会跳过告警）"
 # 2. kickstart 服务
 echo "♻️  重启 $DESC ($LABEL) ..."
 if ! launchctl kickstart -k "gui/$(id -u)/$LABEL"; then
-    echo "❌ kickstart 下发失败 —— 可能 launchd 不认识这个 label"
-    exit 1
+    if [ "$SERVICE" = "astrbot" ]; then
+        restart_astrbot_without_launchd
+    else
+        echo "❌ kickstart 下发失败 —— 可能 launchd 不认识这个 label"
+        exit 1
+    fi
 fi
 
 # 3. 等服务就绪
@@ -115,6 +150,11 @@ if [ -n "${POST_HEALTH_CMD:-}" ]; then
     fi
     echo "🔗 自检后衔接："
     "$POST_HEALTH_CMD" --next-step || true
+fi
+
+if [ "$WATCHDOG_QUIET_SECONDS" -gt 0 ]; then
+    echo "🕊️  继续保持 watchdog 静默 ${WATCHDOG_QUIET_SECONDS}s，等待联动探针稳定..."
+    sleep "$WATCHDOG_QUIET_SECONDS"
 fi
 
 # 4. cleanup trap 会删 lock

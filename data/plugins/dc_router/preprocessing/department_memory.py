@@ -51,6 +51,111 @@ _METACONV_PATTERNS: Final[tuple[re.Pattern, ...]] = (
 )
 # 部门记忆回调时 (true) 跳过 suggest
 _TRUSTED_CARD_SOURCE: Final[str] = "department_memory_prompt"
+_IDENTITY_OVERRIDES_PATH: Final[Path] = data_path(
+    "config", "employee_identity_overrides.json"
+)
+
+
+def _short_id(value: str) -> str:
+    if not value:
+        return ""
+    return value if len(value) <= 16 else f"{value[:8]}…{value[-6:]}"
+
+
+def _read_event_attr(obj: Any, attr_path: tuple[str, ...]) -> Any:
+    cur = obj
+    for attr in attr_path:
+        if cur is None:
+            return None
+        if isinstance(cur, dict):
+            cur = cur.get(attr)
+        else:
+            cur = getattr(cur, attr, None)
+    return cur
+
+
+def _candidate_event_ids(event: Any) -> dict[str, str]:
+    try:
+        sender_id = str(event.get_sender_id() or "")
+    except Exception:  # noqa: BLE001
+        sender_id = ""
+    message_obj = getattr(event, "message_obj", None)
+    raw_message = getattr(message_obj, "raw_message", None)
+    candidates = {
+        "sender_id": sender_id,
+        "origin": str(getattr(event, "unified_msg_origin", "") or ""),
+        "message_sender_user_id": str(
+            _read_event_attr(message_obj, ("sender", "user_id")) or ""
+        ),
+        "message_sender_open_id": str(
+            _read_event_attr(message_obj, ("sender", "open_id")) or ""
+        ),
+        "raw_sender_id": str(
+            _read_event_attr(raw_message, ("sender", "sender_id")) or ""
+        ),
+        "raw_sender_open_id": str(
+            _read_event_attr(raw_message, ("sender", "sender_id", "open_id")) or ""
+        ),
+        "raw_chat_id": str(_read_event_attr(raw_message, ("chat_id",)) or ""),
+        "raw_p2p_chat_id": str(_read_event_attr(raw_message, ("p2p_chat_id",)) or ""),
+    }
+    return {key: value for key, value in candidates.items() if value}
+
+
+def _is_system_tester_event(event: Any) -> bool:
+    """Return true for configured system testers.
+
+    System testers intentionally switch department context during realistic QA. Do
+    not interrupt their normal work requests with department-memory suggestion
+    cards; inject available memory context and let routing continue instead.
+    """
+    candidates = _candidate_event_ids(event)
+    try:
+        raw = _IDENTITY_OVERRIDES_PATH.read_text(encoding="utf-8-sig")
+        payload = json.loads(raw)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "[dc_router] identity overrides unavailable for tester check: %s", exc
+        )
+        return False
+    for employee in payload.get("employees") or []:
+        if not isinstance(employee, dict) or not employee.get("is_system_tester"):
+            continue
+        open_id = str(employee.get("open_id") or "")
+        chat_ids = {str(x) for x in employee.get("chat_ids") or [] if x}
+        exact_ids = {
+            value
+            for value in candidates.values()
+            if value and not value.startswith("aiocqhttp:")
+        }
+        origin = candidates.get("origin", "")
+        if open_id and (open_id in exact_ids or open_id in origin):
+            logger.info(
+                "[dc_router] system tester matched by open_id open_id=%s candidates=%s",
+                _short_id(open_id),
+                {key: _short_id(value) for key, value in candidates.items()},
+            )
+            return True
+        matched_chat_id = next(
+            (
+                chat_id
+                for chat_id in chat_ids
+                if chat_id in exact_ids or chat_id in origin
+            ),
+            "",
+        )
+        if matched_chat_id:
+            logger.info(
+                "[dc_router] system tester matched by chat_id chat_id=%s candidates=%s",
+                _short_id(matched_chat_id),
+                {key: _short_id(value) for key, value in candidates.items()},
+            )
+            return True
+    logger.debug(
+        "[dc_router] system tester not matched candidates=%s",
+        {key: _short_id(value) for key, value in candidates.items()},
+    )
+    return False
 
 
 @dataclass(slots=True)
@@ -271,7 +376,19 @@ def try_handle_department_memory(
                 suggestion_id=pending.suggestion_id,
             )
 
-    # 2) 显式记忆查询 — 直接 inject
+    # 2) 系统测试者 — 不弹部门记忆建议卡片，直接注入可用记忆并继续。
+    if _is_system_tester_event(event):
+        logger.info(
+            "[dc_router] dept memory prompt skipped for system tester platform=%s",
+            _safe_platform(event),
+        )
+        return DepartmentMemoryDecision(
+            inject_memory=True,
+            effective_text=text,
+            memory_query_text=query_text,
+        )
+
+    # 3) 显式记忆查询 — 直接 inject
     if _EXPLICIT_MEMORY_LOOKUP_RE.search(text):
         return DepartmentMemoryDecision(
             inject_memory=True,

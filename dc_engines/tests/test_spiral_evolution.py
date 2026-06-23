@@ -9,9 +9,13 @@ from dc_engines.harness.contracts import HarnessTask
 from dc_engines.memory_governance.models import GovernedMemory
 from dc_engines.memory_governance.store import MemoryGovernanceStore
 from dc_engines.spiral_evolution import (
+    analyze_employee_sop_signal,
+    build_employee_sop_memory_candidate,
+    build_low_friction_sop_confirmation,
     build_spiral_evolution_snapshot,
     build_subagent_driven_upgrade_plan,
     detect_stable_rule_candidates,
+    diagnose_rule_proposal_readiness,
     draft_content_sop_rule_proposals_from_governed_memory,
     experiences_from_governed_memories,
 )
@@ -287,3 +291,120 @@ def test_draft_rule_proposals_does_not_overwrite_reviewed_proposal(tmp_path) -> 
 
     assert redrafted == []
     assert proposal_store.get_proposal(proposals[0].proposal_id).status == "rejected"  # type: ignore[union-attr]
+
+
+def test_employee_chat_signal_requires_reusable_scope() -> None:
+    signal = analyze_employee_sop_signal(
+        "以后这种客户共创会邀约，先确认对方是谁、活动目的和飞书私域口吻，再出文案。",
+        department_id="client_dept",
+        scenario_id="client_invitation_copy",
+        source_task_id="task_001",
+        actor_id="ou_employee",
+    )
+
+    assert signal["status"] == "candidate"
+    assert signal["signal_type"] == "reusable_operating_habit"
+    assert signal["department_id"] == "client_dept"
+    assert signal["scenario_id"] == "client_invitation_copy"
+    assert signal["source_task_id"] == "task_001"
+    assert signal["confidence"] >= 0.8
+    assert "先确认对方是谁" in signal["rule_text"]
+
+
+def test_one_off_wording_edit_is_not_sop_signal() -> None:
+    signal = analyze_employee_sop_signal(
+        "这句帮我改短点，别那么正式。",
+        department_id="client_dept",
+        scenario_id="client_invitation_copy",
+        source_task_id="task_002",
+    )
+
+    assert signal["status"] == "ignored"
+    assert signal["reason"] == "one_off_or_low_reuse_signal"
+
+
+def test_employee_confirmation_is_low_friction_and_no_sop_jargon() -> None:
+    signal = analyze_employee_sop_signal(
+        "以后这种客户共创会邀约，先确认对方是谁、活动目的和飞书私域口吻，再出文案。",
+        department_id="client_dept",
+        scenario_id="client_invitation_copy",
+    )
+
+    confirmation = build_low_friction_sop_confirmation(signal)
+
+    assert confirmation["title"] == "这个处理习惯要不要记住？"
+    assert confirmation["choices"] == ["记住", "只这次", "不用"]
+    rendered = f"{confirmation['title']}\n{confirmation['message']}"
+    assert "蔡挺" not in rendered
+    assert "SOP" not in rendered
+    assert "规则候选" not in rendered
+    assert "流程" not in rendered
+    assert "飞书私域口吻" in rendered
+
+
+def test_employee_signal_builds_need_review_process_memory_candidate() -> None:
+    signal = analyze_employee_sop_signal(
+        "以后这种客户共创会邀约，先确认对方是谁、活动目的和飞书私域口吻，再出文案。",
+        department_id="client_dept",
+        scenario_id="client_invitation_copy",
+        source_task_id="task_003",
+        actor_id="ou_employee",
+    )
+
+    candidate = build_employee_sop_memory_candidate(signal)
+
+    assert candidate["memory_kind"] == "process_memory"
+    assert candidate["review_status"] == "need_review"
+    assert candidate["promotion_gate"] == "obsidian_approved_required"
+    assert candidate["target_governance"] == "ObsidianVault/40_MemoryGovernance/Inbox"
+    assert candidate["source_task_id"] == "task_003"
+    assert candidate["department_id"] == "client_dept"
+    assert candidate["scenario_id"] == "client_invitation_copy"
+    assert "department_id:client_dept" in candidate["tags"]
+    assert "scenario_id:client_invitation_copy" in candidate["tags"]
+    assert candidate["runtime_change_allowed"] is False
+
+
+def test_rule_proposal_readiness_diagnoses_support_gap() -> None:
+    readiness = diagnose_rule_proposal_readiness(
+        [
+            {
+                "candidate_id": "cand_1",
+                "department_id": "client_dept",
+                "scenario_id": "client_invitation_copy",
+                "rule_text": "客户共创会邀约先确认对象、目的和飞书私域口吻。",
+                "review_status": "approved",
+            },
+            {
+                "candidate_id": "cand_2",
+                "department_id": "client_dept",
+                "scenario_id": "client_invitation_copy",
+                "rule_text": "客户共创会邀约先确认对象、目的和飞书私域口吻。",
+                "review_status": "approved",
+            },
+            {
+                "candidate_id": "cand_unapproved",
+                "department_id": "client_dept",
+                "scenario_id": "client_invitation_copy",
+                "rule_text": "客户共创会邀约先确认对象、目的和飞书私域口吻。",
+                "review_status": "need_review",
+            },
+            {
+                "candidate_id": "cand_no_scope",
+                "department_id": "",
+                "scenario_id": "client_invitation_copy",
+                "rule_text": "客户共创会邀约先确认对象、目的和飞书私域口吻。",
+                "review_status": "approved",
+            },
+        ],
+        min_support=3,
+    )
+
+    assert readiness["ready_count"] == 0
+    assert readiness["eligible_evidence_count"] == 2
+    assert readiness["ineligible_counts"]["unapproved"] == 1
+    assert readiness["ineligible_counts"]["missing_scope"] == 1
+    bucket = readiness["buckets"][0]
+    assert bucket["support_count"] == 2
+    assert bucket["support_needed"] == 1
+    assert bucket["ready"] is False

@@ -148,7 +148,7 @@ async def reason_with_llm_v1(
     context: Any,
     text: str,
     *,
-    timeout_sec: float = 8.0,
+    timeout_sec: float = 20.0,
 ) -> str | None:
     """调小 LLM 判断意图。失败 / 超时返回 None，由调用方走 keyword 兜底。"""
     try:

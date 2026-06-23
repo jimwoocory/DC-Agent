@@ -1,0 +1,24 @@
+{
+  "feature": "lark_polling_restart_dedup",
+  "goal": "Prevent the Lark polling fallback from replaying already-handled messages after an adapter restart.",
+  "acceptance_criteria": [
+    {
+      "id": "lark-polling-restart-001",
+      "description": "Seen Lark message ids are persisted to the AstrBot temp directory so polling and socket dedupe survives process restarts.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_lark_polling_fallback.py -v"
+    },
+    {
+      "id": "lark-polling-restart-002",
+      "description": "When no persisted seen-message cache exists, polling starts at current time instead of replaying the full startup backfill window.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_lark_polling_fallback.py -v"
+    },
+    {
+      "id": "lark-polling-restart-003",
+      "description": "When a persisted seen-message cache exists, polling keeps the configured backfill window while skipping already seen message ids.",
+      "verification": ".venv/bin/python -m pytest tests/unit/test_lark_polling_fallback.py -v"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

@@ -11,6 +11,10 @@ def test_runtime_workspace_and_nas_outputs_are_forbidden() -> None:
     assert violation_for(".qoder/cache/session.json") == "runtime output directory"
 
 
+def test_workspace_uv_cache_is_allowed_for_sandboxed_checks() -> None:
+    assert violation_for(".uv-cache/sdists-v9/index") is None
+
+
 def test_runtime_event_and_state_files_are_forbidden() -> None:
     assert (
         violation_for("data/antigravity_health_events.jsonl")

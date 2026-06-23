@@ -33,6 +33,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = command_promote(dc_root, actor=args.actor, dry_run=args.dry_run)
     elif args.command == "stale-scan":
         payload = command_stale_scan(dc_root, actor=args.actor)
+    elif args.command == "review-summary":
+        payload = command_review_summary(dc_root, limit=args.limit)
     else:
         parser.error(f"unknown command: {args.command}")
         return 2
@@ -64,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     stale_parser = subparsers.add_parser("stale-scan")
     stale_parser.add_argument("--actor", default="obsidian-governance-cli")
+
+    review_summary_parser = subparsers.add_parser("review-summary")
+    review_summary_parser.add_argument("--limit", type=int, default=10)
     return parser
 
 
@@ -237,6 +242,21 @@ def command_promote(dc_root: Path, *, actor: str, dry_run: bool) -> dict[str, An
         "dry_run": result.dry_run,
         "promoted_memory_ids": result.promoted_memory_ids,
         "skipped_memory_ids": result.skipped_memory_ids,
+    }
+
+
+def command_review_summary(dc_root: Path, *, limit: int) -> dict[str, Any]:
+    _ensure_import_path(dc_root)
+    from dc_engines.memory_governance.review_summary import build_review_summary
+    from dc_engines.memory_governance.store import MemoryGovernanceStore
+
+    paths = _paths(dc_root)
+    store = MemoryGovernanceStore(paths["governed_db"])
+    summary = build_review_summary(store=store, limit=limit)
+    return {
+        "ok": True,
+        "card": summary.to_card_payload(),
+        "markdown": summary.to_markdown(),
     }
 
 

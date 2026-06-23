@@ -25,7 +25,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
-from dc_router.content_sop import infer_content_sop_metadata
+from dc_router_core.content_sop import infer_content_sop_metadata
 
 _TRIGGER_KEYWORDS: tuple[str, ...] = (
     "部门工作流",
@@ -54,6 +54,7 @@ class DepartmentWorkflowPlugin(Star):
         self.group_min_score = int(cfg.get("group_min_score", 24))
         self.explicit_min_score = int(cfg.get("explicit_min_score", 10))
         self.create_tasks = bool(cfg.get("create_tasks", True))
+        self.implicit_create_tasks = bool(cfg.get("implicit_create_tasks", False))
         self.attach_case = bool(cfg.get("attach_case", True))
         self.notify_on_match = bool(cfg.get("notify_on_match", True))
         self.notify_in_dry_run = bool(cfg.get("notify_in_dry_run", False))
@@ -111,6 +112,27 @@ class DepartmentWorkflowPlugin(Star):
         if match is None:
             return
         if is_group and not explicit_trigger and match.score < self.group_min_score:
+            return
+
+        if not explicit_trigger and not self.implicit_create_tasks:
+            event.set_extra(
+                "department_workflow_candidate",
+                {
+                    "department_id": match.department_id,
+                    "scenario_id": match.scenario_id,
+                    "score": match.score,
+                    "reasons": list(match.reasons),
+                    "mode": "observe_only",
+                },
+            )
+            logger.info(
+                "[department_workflow][observe] implicit match skipped umo=%s department=%s scenario=%s score=%s reasons=%s",
+                event.unified_msg_origin,
+                match.department_id,
+                match.scenario_id,
+                match.score,
+                ",".join(match.reasons),
+            )
             return
 
         if self.dry_run:

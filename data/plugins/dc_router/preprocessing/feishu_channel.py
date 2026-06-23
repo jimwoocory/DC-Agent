@@ -60,7 +60,7 @@ async def try_apply_feishu_channel_route(
         metadata=route,
     )
     try:
-        handled = await apply_decision.apply_decision(context, event, decision)
+        handled = await apply_decision(context, event, decision)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[dc_router] feishu channel route failed: %s", exc)
         return False

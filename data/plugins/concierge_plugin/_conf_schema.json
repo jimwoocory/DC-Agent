@@ -1,0 +1,32 @@
+{
+  "employee_kb_context_timeout_seconds": {
+    "description": "员工记忆桥接知识库检索超时时间；超时后跳过补充上下文并继续正常聊天",
+    "type": "float",
+    "default": 1.0
+  },
+  "employee_directory_auto_sync_enabled": {
+    "description": "是否启用员工目录自动同步任务",
+    "type": "bool",
+    "default": true
+  },
+  "employee_directory_startup_sync_enabled": {
+    "description": "是否在插件启动时执行一次员工目录同步",
+    "type": "bool",
+    "default": true
+  },
+  "employee_directory_sync_authoritative": {
+    "description": "是否以飞书通讯录为权威源同步员工目录",
+    "type": "bool",
+    "default": true
+  },
+  "employee_directory_sync_cron": {
+    "description": "员工目录自动同步 cron 表达式",
+    "type": "string",
+    "default": "15 8 * * *"
+  },
+  "employee_directory_sync_timezone": {
+    "description": "员工目录自动同步时区",
+    "type": "string",
+    "default": "Asia/Shanghai"
+  }
+}

@@ -20,6 +20,10 @@ from dc_engines.feishu_card_streamer import (
     ensure_streamers_on_context,
     extract_chat_info_from_event,
 )
+from dc_engines.pet_live.contracts import PetSourceRef, StoredPetEvent
+from dc_engines.pet_live.integrations import employee_id_from_source, pet_live_enabled
+from dc_engines.pet_live.service import PetLiveService
+from dc_engines.pet_live.store import PetLiveStore
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
@@ -50,23 +54,56 @@ class FeishuPetAssistantPlugin(Star):
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._store = PetStore(db_path)
         self._service = PetService(self._store)
+        self._live_service = PetLiveService(PetLiveStore(db_path))
         self._h5_url: str | None = conf.get("h5_url") or None
+        self._desktop_entry_url: str | None = (
+            conf.get("desktop_entry_url")
+            or os.environ.get("PET_LIVE_DESKTOP_ENTRY_URL")
+            or None
+        )
         logger.info(
-            "[FeishuPet] 初始化完成 db=%s h5_url=%s",
+            "[FeishuPet] 初始化完成 db=%s h5_url=%s desktop_entry_url=%s",
             db_path,
             self._h5_url or "(未配置)",
+            self._desktop_entry_url or "(未配置)",
         )
 
     def _get_formatted_h5_url(self, user_id: str) -> str | None:
-        if not self._h5_url:
+        return self._format_url_template(self._h5_url, user_id=user_id)
+
+    def _get_formatted_desktop_url(
+        self,
+        user_id: str,
+        live_state: dict[str, Any] | None,
+    ) -> str | None:
+        return self._format_url_template(
+            self._desktop_entry_url,
+            user_id=user_id,
+            pet_id=str((live_state or {}).get("pet_id") or ""),
+        )
+
+    @staticmethod
+    def _format_url_template(
+        template: str | None,
+        *,
+        user_id: str,
+        pet_id: str = "",
+    ) -> str | None:
+        if not template:
             return None
-        url = self._h5_url
+        url = template
         if "{user_id}" in url:
-            return url.replace("{user_id}", user_id)
+            url = url.replace("{user_id}", user_id)
         if "${user_id}" in url:
-            return url.replace("${user_id}", user_id)
-        separator = "&" if "?" in url else "?"
-        return f"{url}{separator}user_id={user_id}"
+            url = url.replace("${user_id}", user_id)
+        if "{pet_id}" in url:
+            url = url.replace("{pet_id}", pet_id)
+        if "${pet_id}" in url:
+            url = url.replace("${pet_id}", pet_id)
+        if user_id not in url:
+            separator = "&" if "?" in url else "?"
+            return f"{url}{separator}user_id={user_id}"
+        return url
 
     # ── 命令路由 ──────────────────────────────────────────────────────────
 
@@ -77,14 +114,35 @@ class FeishuPetAssistantPlugin(Star):
         if not user_id:
             return
         pet = self._service.get_or_create_pet(user_id)
-        stats = self._service.build_stats(user_id)
-        card = cards.build_status_card(
-            pet, stats, h5_url=self._get_formatted_h5_url(user_id)
+        live_event = self._record_live_event(
+            event,
+            user_id=user_id,
+            event_type="pet_card_viewed",
+            payload={"command": "/pet"},
         )
-        if await self._send_card(event, card):
+        stats = self._service.build_stats(user_id)
+        live_state = self._live_state_payload(live_event)
+        desktop_bound = self._desktop_bound_for_user(user_id)
+        card = cards.build_status_card(
+            pet,
+            stats,
+            h5_url=self._get_formatted_h5_url(user_id),
+            live_state=live_state,
+            desktop_url=self._get_formatted_desktop_url(user_id, live_state),
+            desktop_bound=desktop_bound,
+        )
+        if await self._send_card(event, card, card_type="pet_status"):
             event.stop_event()
             return
-        self._reply(event, cards.render_status_text(pet, stats))
+        self._reply(
+            event,
+            cards.render_status_text(
+                pet,
+                stats,
+                live_state=live_state,
+                desktop_bound=desktop_bound,
+            ),
+        )
 
     @filter.regex(r"^(看看任务|/tasks?)\s*$")
     async def task_list(self, event: AstrMessageEvent) -> None:
@@ -94,10 +152,14 @@ class FeishuPetAssistantPlugin(Star):
             return
         pet = self._service.get_or_create_pet(user_id)
         tasks = self._service.list_today_tasks(user_id)
+        live_state = self._live_state_for_user(user_id)
         card = cards.build_tasks_card(
-            pet, tasks, h5_url=self._get_formatted_h5_url(user_id)
+            pet,
+            tasks,
+            h5_url=self._get_formatted_h5_url(user_id),
+            desktop_url=self._get_formatted_desktop_url(user_id, live_state),
         )
-        if await self._send_card(event, card):
+        if await self._send_card(event, card, card_type="pet_tasks"):
             event.stop_event()
             return
         self._reply(event, cards.render_tasks_text(tasks))
@@ -114,14 +176,28 @@ class FeishuPetAssistantPlugin(Star):
             self._reply(event, cards.NO_REAL_TASKS_TEXT)
             return
         pet, task = result
-        stats = self._service.build_stats(user_id)
-        card = cards.build_done_card(
-            pet, task, stats, h5_url=self._get_formatted_h5_url(user_id)
+        live_event = self._record_live_event(
+            event,
+            user_id=user_id,
+            event_type="task_completed",
+            payload={"task_id": task["id"], "task_source": task.get("source", "")},
         )
-        if await self._send_card(event, card):
+        stats = self._service.build_stats(user_id)
+        live_state = self._live_state_payload(live_event)
+        card = cards.build_done_card(
+            pet,
+            task,
+            stats,
+            h5_url=self._get_formatted_h5_url(user_id),
+            live_state=live_state,
+            desktop_url=self._get_formatted_desktop_url(user_id, live_state),
+        )
+        if await self._send_card(event, card, card_type="pet_done"):
             event.stop_event()
             return
-        self._reply(event, cards.render_done_text(pet, task, stats))
+        self._reply(
+            event, cards.render_done_text(pet, task, stats, live_state=live_state)
+        )
 
     @filter.regex(r"^__card_action__:")
     async def handle_card_action(self, event: AstrMessageEvent) -> None:
@@ -149,6 +225,13 @@ class FeishuPetAssistantPlugin(Star):
             action,
             source,
         )
+        if action:
+            self._record_live_event(
+                event,
+                user_id=user_id,
+                event_type="pet_card_action",
+                payload={"action": action, "source": source or ""},
+            )
 
         # ── 隔离膜：不处理其他插件渲染的卡片来源 ──────────────────────────
         if source == "department_memory_prompt":
@@ -174,10 +257,14 @@ class FeishuPetAssistantPlugin(Star):
         if action == "pet_view_tasks":
             pet = self._service.get_or_create_pet(user_id)
             tasks = self._service.list_today_tasks(user_id)
+            live_state = self._live_state_for_user(user_id)
             card = cards.build_tasks_card(
-                pet, tasks, h5_url=self._get_formatted_h5_url(user_id)
+                pet,
+                tasks,
+                h5_url=self._get_formatted_h5_url(user_id),
+                desktop_url=self._get_formatted_desktop_url(user_id, live_state),
             )
-            if await self._send_card(event, card):
+            if await self._send_card(event, card, card_type="pet_tasks"):
                 event.stop_event()
             return
 
@@ -186,16 +273,30 @@ class FeishuPetAssistantPlugin(Star):
             result = self._service.complete_first_pending(user_id)
             if result is None:
                 await self._send_card(
-                    event, cards.build_error_card(cards.NO_REAL_TASKS_TEXT)
+                    event,
+                    cards.build_error_card(cards.NO_REAL_TASKS_TEXT),
+                    card_type="pet_error",
                 )
                 event.stop_event()
                 return
             pet, task = result
-            stats = self._service.build_stats(user_id)
-            card = cards.build_done_card(
-                pet, task, stats, h5_url=self._get_formatted_h5_url(user_id)
+            live_event = self._record_live_event(
+                event,
+                user_id=user_id,
+                event_type="task_completed",
+                payload={"task_id": task["id"], "task_source": task.get("source", "")},
             )
-            if await self._send_card(event, card):
+            stats = self._service.build_stats(user_id)
+            live_state = self._live_state_payload(live_event)
+            card = cards.build_done_card(
+                pet,
+                task,
+                stats,
+                h5_url=self._get_formatted_h5_url(user_id),
+                live_state=live_state,
+                desktop_url=self._get_formatted_desktop_url(user_id, live_state),
+            )
+            if await self._send_card(event, card, card_type="pet_done"):
                 event.stop_event()
             return
 
@@ -203,7 +304,9 @@ class FeishuPetAssistantPlugin(Star):
             task_id = value.get("task_id") if isinstance(value, dict) else None
             if not isinstance(task_id, str) or not task_id:
                 await self._send_card(
-                    event, cards.build_error_card("按钮没带 task_id，刷一下卡片再点。")
+                    event,
+                    cards.build_error_card("按钮没带 task_id，刷一下卡片再点。"),
+                    card_type="pet_error",
                 )
                 event.stop_event()
                 return
@@ -211,16 +314,30 @@ class FeishuPetAssistantPlugin(Star):
             result = self._service.complete_task(user_id, task_id)
             if result is None:
                 await self._send_card(
-                    event, cards.build_error_card("这条任务找不到或不属于你。")
+                    event,
+                    cards.build_error_card("这条任务找不到或不属于你。"),
+                    card_type="pet_error",
                 )
                 event.stop_event()
                 return
             pet, task = result
-            stats = self._service.build_stats(user_id)
-            card = cards.build_done_card(
-                pet, task, stats, h5_url=self._get_formatted_h5_url(user_id)
+            live_event = self._record_live_event(
+                event,
+                user_id=user_id,
+                event_type="task_completed",
+                payload={"task_id": task["id"], "task_source": task.get("source", "")},
             )
-            if await self._send_card(event, card):
+            stats = self._service.build_stats(user_id)
+            live_state = self._live_state_payload(live_event)
+            card = cards.build_done_card(
+                pet,
+                task,
+                stats,
+                h5_url=self._get_formatted_h5_url(user_id),
+                live_state=live_state,
+                desktop_url=self._get_formatted_desktop_url(user_id, live_state),
+            )
+            if await self._send_card(event, card, card_type="pet_done"):
                 event.stop_event()
             return
 
@@ -236,7 +353,121 @@ class FeishuPetAssistantPlugin(Star):
             logger.warning("[FeishuPet] 拿不到 sender_id，跳过事件")
         return sender_id
 
-    async def _send_card(self, event: AstrMessageEvent, card: dict) -> bool:
+    def _record_live_event(
+        self,
+        event: AstrMessageEvent,
+        *,
+        user_id: str,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> StoredPetEvent | None:
+        """Best-effort bridge into Pet Live Core.
+
+        Pet live telemetry must never break the Feishu assistant's existing card
+        and text fallback behavior, so failures are logged and swallowed.
+        """
+
+        if not pet_live_enabled():
+            return None
+
+        try:
+            employee_id = employee_id_from_source(event)
+            identity = self._live_service.get_or_create_identity(
+                feishu_open_id=user_id,
+                employee_id=employee_id,
+            )
+            return self._live_service.record_event(
+                pet_id=identity.pet_id,
+                user_id=identity.employee_id or identity.feishu_open_id,
+                source="feishu",
+                event_type=event_type,
+                source_ref=self._source_ref_for_event(event).to_dict(),
+                payload={"employee_id": identity.employee_id, **(payload or {})},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[FeishuPet] live event 记录失败 user=%s event=%s err=%s",
+                user_id[:12],
+                event_type,
+                exc,
+            )
+            return None
+
+    @staticmethod
+    def _live_state_payload(event: StoredPetEvent | None) -> dict[str, Any] | None:
+        if event is None or event.state_after is None:
+            return None
+        return event.state_after.to_dict()
+
+    def _live_state_for_user(self, user_id: str) -> dict[str, Any] | None:
+        if not pet_live_enabled():
+            return None
+        try:
+            identity = self._live_service.store.get_identity_by_employee_id(
+                user_id
+            ) or self._live_service.store.get_identity_by_feishu_open_id(user_id)
+            if identity is None:
+                return None
+            state = self._live_service.get_pet_state(identity.pet_id)
+            return state.to_dict() if state is not None else None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[FeishuPet] live state 读取失败 user=%s err=%s",
+                user_id[:12],
+                exc,
+            )
+            return None
+
+    def _desktop_bound_for_user(self, user_id: str) -> bool | None:
+        if not pet_live_enabled():
+            return None
+        try:
+            identity = self._live_service.store.get_identity_by_employee_id(
+                user_id
+            ) or self._live_service.store.get_identity_by_feishu_open_id(user_id)
+            if identity is None:
+                return False
+            return bool(identity.desktop_session_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[FeishuPet] desktop binding 状态读取失败 user=%s err=%s",
+                user_id[:12],
+                exc,
+            )
+            return None
+
+    @staticmethod
+    def _source_ref_for_event(event: AstrMessageEvent) -> PetSourceRef:
+        payload = getattr(
+            getattr(event, "message_obj", None), "card_action_payload", None
+        )
+        message_id = str(getattr(event, "message_id", "") or "")
+        if not message_id:
+            message_id = str(
+                getattr(getattr(event, "message_obj", None), "message_id", "") or ""
+            )
+        chat_id = ""
+        if isinstance(payload, dict):
+            chat_id = str(payload.get("open_chat_id") or "")
+        conversation_id = (
+            chat_id
+            or str(getattr(event, "session_id", "") or "")
+            or str(getattr(event, "conversation_id", "") or "")
+        )
+        return PetSourceRef(
+            employee_id=employee_id_from_source(event),
+            platform=str(getattr(event, "get_platform_name", lambda: "")() or ""),
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+
+    async def _send_card(
+        self,
+        event: AstrMessageEvent,
+        card: dict,
+        *,
+        card_type: str = "pet_status",
+    ) -> bool:
         if (event.get_platform_name() or "").lower() != "lark":
             return False
 
@@ -257,7 +488,7 @@ class FeishuPetAssistantPlugin(Star):
 
         stream = await send_card_via_runtime(
             streamer,
-            card_type="daily_response",
+            card_type=card_type,
             chat_id=chat_id,
             receive_id_type=receive_id_type,
             card=card,

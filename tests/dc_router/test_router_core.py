@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import sys
@@ -66,6 +67,34 @@ def test_explicit_prd_task_routes_to_deep_insight() -> None:
 
     assert match is not None
     assert match.intent is RouterIntent.DEEP_INSIGHT
+
+
+def test_marketing_funnel_data_request_routes_to_deep_insight() -> None:
+    match = match_keywords(
+        "帮我整理一下上周抖音推广活动的投放数据和转化漏斗，"
+        "对比小红书同期，找出抖音哪一步流失最大，给3条优化建议。"
+    )
+
+    assert match is not None
+    assert match.intent is RouterIntent.DEEP_INSIGHT
+
+
+@pytest.mark.asyncio
+async def test_marketing_funnel_data_request_does_not_fallback() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide(
+        MessageEnvelope(
+            text=(
+                "帮我整理一下上周抖音推广活动的投放数据和转化漏斗，"
+                "对比小红书同期，找出抖音哪一步流失最大，给3条优化建议。"
+            ),
+            metadata={"platform_id": "巅池-Agent小助手"},
+        )
+    )
+
+    assert decision.intent == RouterIntent.DEEP_INSIGHT.value
+    assert decision.provider_id == "aihubmix/claude-opus-4-8"
 
 
 def test_feishu_document_link_routes_to_multimodal_preprocess() -> None:
@@ -320,3 +349,52 @@ async def test_content_sop_metadata_marks_attachment_request_partial() -> None:
     assert decision.metadata["department"] == "client_dept"
     assert decision.metadata["content_type"] == "mixed"
     assert decision.metadata["material_status"] in {"partial", "ready"}
+
+
+# ───────────────── Classifier timeout & error resilience ─────────────────
+
+
+class HangingClassifier:
+    """Simulates a classifier that hangs indefinitely."""
+
+    async def classify(self, text: str) -> ClassifierResult | None:
+        import asyncio
+
+        await asyncio.sleep(999)
+        return None  # pragma: no cover
+
+
+class BrokenClassifier:
+    """Simulates a classifier that raises an unexpected exception."""
+
+    async def classify(self, text: str) -> ClassifierResult | None:
+        msg = "simulated provider failure"
+        raise RuntimeError(msg)
+
+
+@pytest.mark.asyncio
+async def test_classifier_timeout_falls_back_to_rules() -> None:
+    """When classifier hangs, _maybe_classify should timeout and return FALLBACK."""
+    import dc_router_core.entrypoint as ep
+
+    original = ep.CLASSIFIER_TIMEOUT_SECONDS
+    ep.CLASSIFIER_TIMEOUT_SECONDS = 0.1  # fast timeout for test
+    try:
+        dc_router = DCRouter(classifier=HangingClassifier())
+        decision = await dc_router.decide("这句没有任何关键词匹配的话")
+
+        # Should fall through to FALLBACK (not hang forever)
+        assert decision.intent == RouterIntent.FALLBACK.value
+        assert decision.source == "fallback"
+    finally:
+        ep.CLASSIFIER_TIMEOUT_SECONDS = original
+
+
+@pytest.mark.asyncio
+async def test_classifier_exception_falls_back_to_rules() -> None:
+    """When classifier raises, _maybe_classify should catch and return FALLBACK."""
+    dc_router = DCRouter(classifier=BrokenClassifier())
+    decision = await dc_router.decide("这句没有任何关键词匹配的话")
+
+    assert decision.intent == RouterIntent.FALLBACK.value
+    assert decision.source == "fallback"

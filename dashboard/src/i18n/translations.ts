@@ -27,6 +27,7 @@ import zhCNChart from './locales/zh-CN/features/chart.json';
 import zhCNDashboard from './locales/zh-CN/features/dashboard.json';
 import zhCNCron from './locales/zh-CN/features/cron.json';
 import zhCNStats from './locales/zh-CN/features/stats.json';
+import zhCNLiveMonitor from './locales/zh-CN/features/live-monitor.json';
 import zhCNAlkaidIndex from './locales/zh-CN/features/alkaid/index.json';
 import zhCNAlkaidKnowledgeBase from './locales/zh-CN/features/alkaid/knowledge-base.json';
 import zhCNAlkaidMemory from './locales/zh-CN/features/alkaid/memory.json';
@@ -69,6 +70,7 @@ import enUSChart from './locales/en-US/features/chart.json';
 import enUSDashboard from './locales/en-US/features/dashboard.json';
 import enUSCron from './locales/en-US/features/cron.json';
 import enUSStats from './locales/en-US/features/stats.json';
+import enUSLiveMonitor from './locales/en-US/features/live-monitor.json';
 import enUSAlkaidIndex from './locales/en-US/features/alkaid/index.json';
 import enUSAlkaidKnowledgeBase from './locales/en-US/features/alkaid/knowledge-base.json';
 import enUSAlkaidMemory from './locales/en-US/features/alkaid/memory.json';
@@ -111,6 +113,7 @@ import ruRUChart from './locales/ru-RU/features/chart.json';
 import ruRUDashboard from './locales/ru-RU/features/dashboard.json';
 import ruRUCron from './locales/ru-RU/features/cron.json';
 import ruRUStats from './locales/ru-RU/features/stats.json';
+import ruRULiveMonitor from './locales/ru-RU/features/live-monitor.json';
 import ruRUAlkaidIndex from './locales/ru-RU/features/alkaid/index.json';
 import ruRUAlkaidKnowledgeBase from './locales/ru-RU/features/alkaid/knowledge-base.json';
 import ruRUAlkaidMemory from './locales/ru-RU/features/alkaid/memory.json';
@@ -157,6 +160,7 @@ export const translations = {
       dashboard: zhCNDashboard,
       cron: zhCNCron,
       stats: zhCNStats,
+      'live-monitor': zhCNLiveMonitor,
       alkaid: {
         index: zhCNAlkaidIndex,
         'knowledge-base': zhCNAlkaidKnowledgeBase,
@@ -207,6 +211,7 @@ export const translations = {
       dashboard: enUSDashboard,
       cron: enUSCron,
       stats: enUSStats,
+      'live-monitor': enUSLiveMonitor,
       alkaid: {
         index: enUSAlkaidIndex,
         'knowledge-base': enUSAlkaidKnowledgeBase,
@@ -257,6 +262,7 @@ export const translations = {
       dashboard: ruRUDashboard,
       cron: ruRUCron,
       stats: ruRUStats,
+      'live-monitor': ruRULiveMonitor,
       alkaid: {
         index: ruRUAlkaidIndex,
         'knowledge-base': ruRUAlkaidKnowledgeBase,

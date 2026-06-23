@@ -22,8 +22,16 @@ def list_recall_memories(
     if limit < 1:
         return []
     store.initialize()
-    candidates = store.list_memories(limit=10000)
     query_text = query.strip().lower()
+    if query_text:
+        return store.search_memories(
+            query=query_text,
+            include_unreviewed=include_unreviewed,
+            include_sensitive=include_sensitive,
+            limit=limit,
+        )
+
+    candidates = store.list_memories(limit=10000)
     filtered = [
         memory
         for memory in candidates

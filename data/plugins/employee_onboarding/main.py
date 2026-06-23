@@ -143,6 +143,14 @@ class EmployeeOnboardingPlugin(Star):
         self.active_outreach_enabled = self._is_operational() and bool(
             cfg.get("active_outreach_enabled", False)
         )
+        # 全员开放模式下，onboarding 只能处理显式入职流程/卡片回调，不能吞掉首次业务请求。
+        # 历史默认保持 True，避免测试/旧灰度环境行为漂移；生产配置可设 False。
+        self.block_business_until_complete = bool(
+            cfg.get("block_business_until_complete", True)
+        )
+        self.side_effect_timeout_seconds = max(
+            0.0, float(cfg.get("side_effect_timeout_seconds", 1.0))
+        )
         self.sync_contacts_before_scan = bool(
             cfg.get("sync_contacts_before_scan", False)
         )
@@ -177,6 +185,13 @@ class EmployeeOnboardingPlugin(Star):
         self._lesson_timeout_tasks: dict[str, asyncio.Task] = {}
 
     async def initialize(self) -> None:
+        logger.info(
+            "[onboarding] 初始化 enabled=%s maintenance=%s block_business_until_complete=%s active_outreach=%s",
+            self.enabled,
+            self.maintenance_mode,
+            self.block_business_until_complete,
+            self.active_outreach_enabled,
+        )
         if not self._is_operational():
             logger.info("[onboarding] 插件处于关闭或维护模式，不启动自动流程")
             return
@@ -301,8 +316,12 @@ class EmployeeOnboardingPlugin(Star):
     def _card_type_for_stage(stage: str) -> str:
         if stage == "dept":
             return "onboarding_department"
-        if stage in {"role", "name"}:
+        if stage == "role":
             return "onboarding_role"
+        if stage == "name":
+            return "onboarding_name_prompt"
+        if stage in {"tutorial", "quiz_failed"}:
+            return "onboarding_tutorial_list"
         if stage in {"quiz", "quiz_feedback", "quiz_result"}:
             return "training_quiz"
         return "training_lesson"
@@ -585,6 +604,23 @@ class EmployeeOnboardingPlugin(Star):
             return
         if not self._is_operational():
             return
+        try:
+            if self.side_effect_timeout_seconds > 0:
+                await asyncio.wait_for(
+                    self._handle_lark_private(event),
+                    timeout=self.side_effect_timeout_seconds,
+                )
+            else:
+                await self._handle_lark_private(event)
+        except TimeoutError:
+            logger.warning(
+                "[onboarding] 私聊旁路处理超时，已放行主聊天：origin=%s",
+                getattr(event, "unified_msg_origin", "") or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[onboarding] 私聊旁路处理失败，已放行主聊天：%s", exc)
+
+    async def _handle_lark_private(self, event: AstrMessageEvent) -> None:
         store = self._store()
         if not store:
             return  # concierge 没就绪
@@ -667,11 +703,21 @@ class EmployeeOnboardingPlugin(Star):
                 event.stop_event()
             return
 
-        # ─── 没有任何 onboarding 状态 → 启动新流程 ───
+        # ─── 没有任何 onboarding 状态 → 默认启动新流程；全员开放模式下不阻断业务首问 ───
         needs_onboarding = (
             emp is None or not state or not self._is_completed_state(state)
         )
         if needs_onboarding:
+            if not self.block_business_until_complete:
+                if emp is None:
+                    await store.get_or_create(
+                        open_id, platform_id=event.get_platform_id() or ""
+                    )
+                logger.info(
+                    "[onboarding] 全员开放模式：放行未完成 onboarding 的业务消息 open_id=%s",
+                    open_id[:12],
+                )
+                return
             await self._start_onboarding(event)
             event.stop_event()
             return
@@ -853,7 +899,7 @@ class EmployeeOnboardingPlugin(Star):
             build_onboarding_name_prompt_card(
                 role_name=ROLE_DISPLAY[role_code],
             ),
-            card_type="onboarding_role",
+            card_type="onboarding_name_prompt",
             detail="employee onboarding name prompt",
         )
 
@@ -1024,7 +1070,7 @@ class EmployeeOnboardingPlugin(Star):
                 display_name=name,
                 dept_code=dept_code,
             ),
-            card_type="training_lesson",
+            card_type="onboarding_tutorial_list",
             detail="employee onboarding tutorial list",
         )
 
@@ -1129,7 +1175,7 @@ class EmployeeOnboardingPlugin(Star):
                     next_q=None,
                     total=total,
                 ),
-                card_type="training_quiz",
+                card_type="training_quiz_feedback",
                 detail=f"employee onboarding quiz feedback: {q_num}",
             )
             await asyncio.sleep(0.5)  # 让用户看清反馈
@@ -1146,7 +1192,7 @@ class EmployeeOnboardingPlugin(Star):
                     total=total,
                     lesson_id=wrong_lesson_id,
                 ),
-                card_type="training_quiz",
+                card_type="training_quiz_feedback",
                 detail=f"employee onboarding quiz feedback: {q_num}",
             )
 
@@ -1277,7 +1323,7 @@ class EmployeeOnboardingPlugin(Star):
             message_id = await self._send_card(
                 event,
                 card,
-                card_type="training_quiz",
+                card_type="training_quiz_result",
                 detail="employee onboarding quiz result",
             )
         except Exception as exc:  # noqa: BLE001

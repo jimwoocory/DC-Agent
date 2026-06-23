@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,9 +54,13 @@ def _read_yaml(path: Path) -> dict | None:
 
 def _expand_env(val: str) -> str:
     """支持 ``${VAR}`` / ``$VAR`` 展开。未设置的 env var 返空串（让上层判失败）。"""
+    raw = val.strip()
     expanded = os.path.expandvars(val)
-    # 未展开的占位（如 ${FOO} 但 FOO 没设）会原样保留 → 视为空
-    if "$" in expanded and ("${" in expanded or expanded.startswith("$")):
+    # 未展开的显式占位（如 ${FOO} 或整个值就是 $FOO）会原样保留 → 视为空。
+    # 飞书 app_secret 本身可能包含普通 "$" 字符，不能按 "$" 一刀切判失败。
+    if re.search(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}", expanded):
+        return ""
+    if re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*", raw) and expanded == raw:
         return ""
     return expanded
 

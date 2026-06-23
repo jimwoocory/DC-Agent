@@ -95,6 +95,19 @@ def test_credentials_explicit_paths_override(tmp_path: Path) -> None:
     assert creds.app_id == "cli_custom"
 
 
+def test_credentials_app_secret_allows_literal_dollar(tmp_path: Path) -> None:
+    """飞书 app_secret 可能包含普通 $ 字符，不能误判为未展开环境变量。"""
+    _write_yaml(
+        tmp_path / "data/feishu_whitelist.yaml",
+        "feishu:\n  app_id: cli_x\n  app_secret: sec$ret\n  enable: true\n",
+    )
+
+    creds = load_credentials(repo_root=tmp_path)
+
+    assert creds is not None
+    assert creds.app_secret == "sec$ret"
+
+
 # ────────────────────────── FeishuHub 单例 ──────────────────────────
 
 
@@ -220,8 +233,9 @@ async def test_private_message_sender_maps_successful_feishu_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_message_sender_can_send_interactive_card() -> None:
+async def test_private_message_sender_can_send_interactive_card(monkeypatch) -> None:
     """飞书私聊 sender 支持发送 interactive card，用于小白入口按钮卡。"""
+    monkeypatch.setenv("TESTING", "true")
     client = _FakeMessageClient()
     sender = FeishuPrivateMessageSender(client=client)
 
@@ -232,7 +246,22 @@ async def test_private_message_sender_can_send_interactive_card() -> None:
 
     assert result.success is True
     assert result.provider_message_id == "om_message_001"
+    assert result.raw["card_type"] == "employee_insight_welcome"
     assert len(client.im.v1.message.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_private_message_sender_rejects_unregistered_card_type() -> None:
+    sender = FeishuPrivateMessageSender(client=_FakeMessageClient())
+
+    result = await sender.send_interactive_card(
+        "ou_employee",
+        {"config": {"wide_screen_mode": True}, "elements": []},
+        card_type="unknown_card",
+    )
+
+    assert result.success is False
+    assert "unknown_card" in result.error
 
 
 class _FakeFailedMessageResponse:

@@ -2,19 +2,24 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 from quart import Response as QuartResponse
 from quart import g, make_response, request, send_file
+from sqlmodel import col, select
 
 from astrbot.core import logger, sp
 from astrbot.core.agent.message import get_checkpoint_id, is_checkpoint_message
+from astrbot.core.assistant_chat_health import assistant_chat_health_tracker
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
 from astrbot.core.db import BaseDatabase
+from astrbot.core.db.po import ProviderStat
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.platform.sources.webchat.message_parts_helper import (
     build_webchat_message_parts,
@@ -44,11 +49,31 @@ def _sanitize_upload_filename(filename: str | None) -> str:
 
 
 @asynccontextmanager
-async def track_conversation(convs: dict, conv_id: str):
-    convs[conv_id] = True
+async def track_conversation(convs: dict, conv_id: str, *, kind: str = "session"):
+    now = time.time()
+    existing = convs.get(conv_id)
+    if isinstance(existing, dict):
+        existing["active_count"] = int(existing.get("active_count") or 1) + 1
+        existing["last_seen_at"] = now
+        existing.setdefault("started_at", now)
+        existing["kind"] = existing.get("kind") or kind
+    else:
+        convs[conv_id] = {
+            "active_count": 2 if existing else 1,
+            "kind": kind,
+            "started_at": now,
+            "last_seen_at": now,
+        }
     try:
         yield
     finally:
+        existing = convs.get(conv_id)
+        if isinstance(existing, dict):
+            active_count = int(existing.get("active_count") or 1)
+            if active_count > 1:
+                existing["active_count"] = active_count - 1
+                existing["last_seen_at"] = time.time()
+                return
         convs.pop(conv_id, None)
 
 
@@ -258,6 +283,7 @@ class ChatRoute(Route):
             "/chat/stop": ("POST", self.stop_session),
             "/chat/delete_session": ("GET", self.delete_webchat_session),
             "/chat/batch_delete_sessions": ("POST", self.batch_delete_sessions),
+            "/chat/health": ("GET", self.assistant_chat_health),
             "/chat/update_session_display_name": (
                 "POST",
                 self.update_session_display_name,
@@ -284,7 +310,8 @@ class ChatRoute(Route):
         self.db = db
         self.umop_config_router = core_lifecycle.umop_config_router
 
-        self.running_convs: dict[str, bool] = {}
+        self.running_convs: dict[str, dict[str, Any] | bool] = {}
+        self.chat_health_tracker = assistant_chat_health_tracker
 
     async def get_file(self):
         filename = request.args.get("filename")
@@ -528,6 +555,266 @@ class ChatRoute(Route):
             "created_at": to_utc_isoformat(thread.created_at),
             "updated_at": to_utc_isoformat(thread.updated_at),
         }
+
+    def _is_conversation_running(self, conv_id: str) -> bool:
+        return bool(self.running_convs.get(conv_id))
+
+    @staticmethod
+    def _epoch_to_utc_iso(value: float) -> str:
+        return (
+            datetime.fromtimestamp(value, timezone.utc)
+            .isoformat()
+            .replace(
+                "+00:00",
+                "Z",
+            )
+        )
+
+    @staticmethod
+    def _datetime_to_utc_iso(value: datetime) -> str:
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _parse_stale_after_sec(raw_value: str | None) -> int:
+        try:
+            value = int(raw_value) if raw_value is not None else 900
+        except (TypeError, ValueError):
+            value = 900
+        return max(60, min(value, 86400))
+
+    def _running_runtime_summary(
+        self,
+        *,
+        now: float,
+        stale_after_sec: int,
+    ) -> dict[str, Any]:
+        by_kind: dict[str, int] = {}
+        active_runs = 0
+        stale_runs = 0
+        oldest_started_at: float | None = None
+
+        for value in self.running_convs.values():
+            if isinstance(value, dict):
+                kind = str(value.get("kind") or "session")
+                active_count = max(1, int(value.get("active_count") or 1))
+                started_at = value.get("started_at")
+                started_at = (
+                    float(started_at) if isinstance(started_at, (int, float)) else None
+                )
+            else:
+                kind = "session"
+                active_count = 1
+                started_at = None
+
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+            active_runs += active_count
+
+            if started_at is None:
+                continue
+            age = max(0, now - started_at)
+            if oldest_started_at is None or started_at < oldest_started_at:
+                oldest_started_at = started_at
+            if age > stale_after_sec:
+                stale_runs += active_count
+
+        oldest_age = (
+            int(max(0, now - oldest_started_at)) if oldest_started_at is not None else 0
+        )
+        tracker_runtime = self.chat_health_tracker.runtime_summary(
+            now=now,
+            stale_after_sec=stale_after_sec,
+        )
+        tracker_oldest_started_at = self.chat_health_tracker.oldest_started_at()
+        combined_oldest_started_at = oldest_started_at
+        if tracker_oldest_started_at is not None and (
+            combined_oldest_started_at is None
+            or tracker_oldest_started_at < combined_oldest_started_at
+        ):
+            combined_oldest_started_at = tracker_oldest_started_at
+        return {
+            "active_runs": active_runs + int(tracker_runtime["active_runs"]),
+            "active_conversations": len(self.running_convs)
+            + int(tracker_runtime["active_conversations"]),
+            "active_sessions": by_kind.get("session", 0)
+            + int(tracker_runtime["active_sessions"]),
+            "active_threads": by_kind.get("thread", 0)
+            + int(tracker_runtime["active_threads"]),
+            "active_platforms": int(tracker_runtime["active_platforms"]),
+            "stale_runs": stale_runs + int(tracker_runtime["stale_runs"]),
+            "stale_after_sec": stale_after_sec,
+            "oldest_run_age_sec": max(
+                oldest_age,
+                int(tracker_runtime["oldest_run_age_sec"]),
+            ),
+            "oldest_run_started_at": (
+                self._epoch_to_utc_iso(combined_oldest_started_at)
+                if combined_oldest_started_at is not None
+                else None
+            ),
+        }
+
+    def _record_chat_activity(
+        self,
+        *,
+        kind: str,
+        phase: str,
+        at: float | None = None,
+        started_at: float | None = None,
+    ) -> None:
+        self.chat_health_tracker.record_activity(
+            kind=kind,
+            phase=phase,
+            at=at,
+            started_at=started_at,
+        )
+
+    def _chat_activity_summary(self, *, now: float) -> dict[str, Any]:
+        return self.chat_health_tracker.activity_summary(now=now)
+
+    async def _collection_summary(self, *, now: float) -> dict[str, Any]:
+        local_tz = datetime.now().astimezone().tzinfo or timezone.utc
+        now_local = datetime.fromtimestamp(now, timezone.utc).astimezone(local_tz)
+        since_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        since_utc = since_local.astimezone(timezone.utc)
+        summary: dict[str, Any] = {
+            "source": "provider_stats",
+            "timezone": os.environ.get("TZ") or str(local_tz),
+            "since_local": since_local.isoformat(),
+            "since_at": self._datetime_to_utc_iso(since_utc),
+            "total_calls": 0,
+            "completed_calls": 0,
+            "failed_calls": 0,
+            "aborted_calls": 0,
+            "last_call_at": None,
+            "last_status": None,
+        }
+        get_db = getattr(self.db, "get_db", None)
+        if not callable(get_db):
+            return summary
+
+        try:
+            async with get_db() as session:
+                result = await session.execute(
+                    select(ProviderStat)
+                    .where(
+                        ProviderStat.agent_type == "internal",
+                        ProviderStat.created_at >= since_utc,
+                    )
+                    .order_by(col(ProviderStat.created_at).asc())
+                )
+                records = list(result.scalars().all())
+        except Exception:
+            logger.warning(
+                "Assistant chat health collection summary failed", exc_info=True
+            )
+            return summary
+
+        summary["total_calls"] = len(records)
+        summary["completed_calls"] = sum(
+            1 for record in records if record.status == "completed"
+        )
+        summary["failed_calls"] = sum(
+            1 for record in records if record.status == "error"
+        )
+        summary["aborted_calls"] = sum(
+            1 for record in records if record.status == "aborted"
+        )
+        latest = max(records, key=lambda record: record.created_at, default=None)
+        if latest is not None:
+            summary["last_call_at"] = self._datetime_to_utc_iso(latest.created_at)
+            summary["last_status"] = latest.status
+        return summary
+
+    async def _chat_storage_health_check(self) -> dict[str, str]:
+        try:
+            await self.db.get_platform_sessions_by_creator_paginated(
+                creator="__assistant_health_probe__",
+                platform_id="webchat",
+                page=1,
+                page_size=1,
+                exclude_project_sessions=True,
+            )
+            return {"name": "chat_storage", "status": "ok"}
+        except Exception:
+            logger.warning("Assistant chat health storage check failed", exc_info=True)
+            return {
+                "name": "chat_storage",
+                "status": "fail",
+                "reason": "storage_unavailable",
+            }
+
+    async def assistant_chat_health(self):
+        """Health probe for assistant chat sessions and side threads."""
+        stale_after_sec = self._parse_stale_after_sec(
+            request.args.get("stale_after_sec")
+        )
+        now = time.time()
+        runtime = self._running_runtime_summary(
+            now=now,
+            stale_after_sec=stale_after_sec,
+        )
+        activity = self._chat_activity_summary(now=now)
+        collection = await self._collection_summary(now=now)
+        queue_snapshot = webchat_queue_mgr.health_snapshot()
+
+        checks: list[dict[str, str]] = [
+            {"name": "chat_route", "status": "ok"},
+            {
+                "name": "conversation_manager",
+                "status": "ok"
+                if hasattr(self.conv_mgr, "session_conversations")
+                else "fail",
+            },
+            await self._chat_storage_health_check(),
+        ]
+
+        queue_has_pending_work = bool(
+            queue_snapshot["queues"]
+            or queue_snapshot["back_queues"]
+            or queue_snapshot["pending_requests"]
+        )
+        if queue_has_pending_work and not queue_snapshot["listener_registered"]:
+            checks.append(
+                {
+                    "name": "webchat_queue_listener",
+                    "status": "fail",
+                    "reason": "listener_not_registered",
+                }
+            )
+        else:
+            checks.append({"name": "webchat_queue_listener", "status": "ok"})
+
+        if runtime["stale_runs"]:
+            checks.append(
+                {
+                    "name": "running_chat_threads",
+                    "status": "fail",
+                    "reason": "stale_running_chat",
+                }
+            )
+        else:
+            checks.append({"name": "running_chat_threads", "status": "ok"})
+
+        healthy = all(check["status"] == "ok" for check in checks)
+        payload = {
+            "status": "ok" if healthy else "degraded",
+            "generated_at": self._epoch_to_utc_iso(now),
+            "checks": checks,
+            "runtime": runtime,
+            "activity": activity,
+            "collection": collection,
+            "queues": queue_snapshot,
+        }
+        if healthy:
+            return Response().ok(payload).__dict__
+        return (
+            {
+                "status": "error",
+                "message": "assistant chat health degraded",
+                "data": payload,
+            },
+            503,
+        )
 
     async def _delete_threads_by_ids(self, thread_ids: list[str], creator: str) -> None:
         for thread_id in thread_ids:
@@ -774,10 +1061,13 @@ class ChatRoute(Route):
             message_id,
             webchat_conv_id,
         )
+        run_kind = "thread" if platform_history_id == "webchat_thread" else "session"
+        activity_started_at = time.time()
         saved_user_record = None
 
         async def stream():
             client_disconnected = False
+            stream_outcome = "failed"
             message_accumulator = BotMessageAccumulator()
             agent_stats = {}
             refs = {}
@@ -853,13 +1143,18 @@ class ChatRoute(Route):
                     }
                     yield f"data: {json.dumps(user_saved_info, ensure_ascii=False)}\n\n"
 
-                async with track_conversation(self.running_convs, webchat_conv_id):
+                async with track_conversation(
+                    self.running_convs,
+                    webchat_conv_id,
+                    kind=run_kind,
+                ):
                     while True:
                         result, should_break = await _poll_webchat_stream_result(
                             back_queue, username
                         )
                         if should_break:
                             client_disconnected = True
+                            stream_outcome = "disconnected"
                             break
                         if not result:
                             # Send an SSE comment as keep-alive so the client
@@ -900,6 +1195,7 @@ class ChatRoute(Route):
                                     f"[WebChat] 用户 {username} 断开聊天长连接。 {e}"
                                 )
                             client_disconnected = True
+                            stream_outcome = "disconnected"
 
                         try:
                             if not client_disconnected:
@@ -907,6 +1203,7 @@ class ChatRoute(Route):
                         except asyncio.CancelledError:
                             logger.debug(f"[WebChat] 用户 {username} 断开聊天长连接。")
                             client_disconnected = True
+                            stream_outcome = "disconnected"
 
                         # 累积消息部分
                         if msg_type == "plain":
@@ -985,9 +1282,14 @@ class ChatRoute(Route):
                                 except Exception:
                                     pass
                         if msg_type == "end":
+                            stream_outcome = "completed"
                             break
             except BaseException as e:
-                logger.exception(f"WebChat stream unexpected error: {e}", exc_info=True)
+                stream_outcome = "disconnected" if client_disconnected else "failed"
+                if not client_disconnected:
+                    logger.exception(
+                        f"WebChat stream unexpected error: {e}", exc_info=True
+                    )
             finally:
                 try:
                     await flush_pending_bot_message()
@@ -997,6 +1299,11 @@ class ChatRoute(Route):
                         exc_info=True,
                     )
                 webchat_queue_mgr.remove_back_queue(message_id)
+                self._record_chat_activity(
+                    kind=run_kind,
+                    phase="disconnected" if client_disconnected else stream_outcome,
+                    started_at=activity_started_at,
+                )
 
         # 将消息放入会话特定的队列
         chat_queue = webchat_queue_mgr.get_or_create_queue(webchat_conv_id)
@@ -1015,6 +1322,11 @@ class ChatRoute(Route):
                     "thread_selected_text": thread_selected_text,
                 },
             ),
+        )
+        self._record_chat_activity(
+            kind=run_kind,
+            phase="started",
+            at=activity_started_at,
         )
 
         message_parts_for_storage = strip_message_parts_path_fields(message_parts)
@@ -1116,6 +1428,7 @@ class ChatRoute(Route):
         # 清理队列（仅对 webchat）
         if session.platform_id == "webchat":
             webchat_queue_mgr.remove_queues(session_id)
+        self.running_convs.pop(session_id, None)
 
         # 删除会话
         await self.db.delete_platform_session(session_id)
@@ -1311,7 +1624,7 @@ class ChatRoute(Route):
         response_data = {
             "history": history_res,
             "threads": [self._serialize_thread(thread) for thread in threads],
-            "is_running": self.running_convs.get(session_id, False),
+            "is_running": self._is_conversation_running(session_id),
         }
 
         # 如果会话属于项目，添加项目信息
@@ -1432,7 +1745,7 @@ class ChatRoute(Route):
                 data={
                     "thread": self._serialize_thread(thread),
                     "history": [history.model_dump() for history in history_ls],
-                    "is_running": self.running_convs.get(thread_id, False),
+                    "is_running": self._is_conversation_running(thread_id),
                 }
             )
             .__dict__

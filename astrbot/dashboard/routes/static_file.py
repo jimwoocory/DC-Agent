@@ -12,6 +12,8 @@ class StaticFileRoute(Route):
             "/logs",
             "/extension",
             "/dashboard/default",
+            "/live-monitor",
+            "/assistant-health",
             "/alkaid",
             "/alkaid/knowledge-base",
             "/alkaid/long-term-memory",

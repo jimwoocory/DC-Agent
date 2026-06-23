@@ -24,14 +24,7 @@ class _RecordEnricherFilter(logging.Filter):
     """为 logging.LogRecord 注入 AstrBot 日志字段。"""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.plugin_tag = "[Plug]" if _is_plugin_path(record.pathname) else "[Core]"
-        record.short_levelname = _get_short_level_name(record.levelname)
-        record.astrbot_version_tag = (
-            f" [v{VERSION}]" if record.levelno >= logging.WARNING else ""
-        )
-        record.source_file = _build_source_file(record.pathname)
-        record.source_line = record.lineno
-        record.is_trace = record.name == "astrbot.trace"
+        _enrich_log_record(record)
         return True
 
 
@@ -77,6 +70,31 @@ def _build_source_file(pathname: str | None) -> str:
     return (
         os.path.basename(dirname) + "." + os.path.basename(pathname).replace(".py", "")
     )
+
+
+def _enrich_log_record(record: logging.LogRecord) -> None:
+    record.plugin_tag = getattr(
+        record,
+        "plugin_tag",
+        "[Plug]" if _is_plugin_path(record.pathname) else "[Core]",
+    )
+    record.short_levelname = getattr(
+        record,
+        "short_levelname",
+        _get_short_level_name(record.levelname),
+    )
+    record.astrbot_version_tag = getattr(
+        record,
+        "astrbot_version_tag",
+        f" [v{VERSION}]" if record.levelno >= logging.WARNING else "",
+    )
+    record.source_file = getattr(
+        record,
+        "source_file",
+        _build_source_file(record.pathname),
+    )
+    record.source_line = getattr(record, "source_line", record.lineno)
+    record.is_trace = getattr(record, "is_trace", record.name == "astrbot.trace")
 
 
 def _patch_record(record: "Record") -> None:
@@ -155,6 +173,11 @@ class LogQueueHandler(logging.Handler):
         self.log_broker = log_broker
 
     def emit(self, record: logging.LogRecord) -> None:
+        _enrich_log_record(record)
+        if not hasattr(record, "ansi_prefix"):
+            record.ansi_prefix = ""
+        if not hasattr(record, "ansi_reset"):
+            record.ansi_reset = ""
         log_entry = self.format(record)
         self.log_broker.publish(
             {
@@ -163,6 +186,18 @@ class LogQueueHandler(logging.Handler):
                 "data": log_entry,
             },
         )
+
+
+class SafeAstrBotFormatter(logging.Formatter):
+    """Formatter that never assumes AstrBot extra log fields already exist."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        _enrich_log_record(record)
+        if not hasattr(record, "ansi_prefix"):
+            record.ansi_prefix = ""
+        if not hasattr(record, "ansi_reset"):
+            record.ansi_reset = ""
+        return super().format(record)
 
 
 class LogManager:
@@ -274,7 +309,7 @@ class LogManager:
         handler.setLevel(logging.DEBUG)
         handler.addFilter(_QueueAnsiColorFilter())
         handler.setFormatter(
-            logging.Formatter(
+            SafeAstrBotFormatter(
                 "%(ansi_prefix)s[%(asctime)s.%(msecs)03d] %(plugin_tag)s [%(short_levelname)s]%(astrbot_version_tag)s "
                 "[%(source_file)s:%(source_line)d]: %(message)s%(ansi_reset)s",
                 datefmt="%Y-%m-%d %H:%M:%S",

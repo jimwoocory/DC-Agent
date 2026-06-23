@@ -72,12 +72,14 @@ class HermesBridge:
         resource_configs: dict[str, ResourceConfig] | None = None,
         cwd: str | Path | None = None,
         runtime_registry: RuntimeRegistry | None = None,
+        pet_live_store: Any | None = None,
     ) -> None:
         self.quota_gate = quota_gate
         self.callback_sink = callback_sink or _NullCallbackSink()
         self.resource_configs = resource_configs or DEFAULT_RESOURCE_CONFIGS
         self.cwd = Path(cwd) if cwd is not None else None
         self.runtime_registry = runtime_registry or RuntimeRegistry.from_env(os.environ)
+        self.pet_live_store = pet_live_store
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def submit(self, request: HermesTaskRequest) -> str:
@@ -151,6 +153,11 @@ class HermesBridge:
         await self._finish_failed(request, err)
 
     async def _notify_running(self, request: HermesTaskRequest, runtime: str) -> None:
+        self._publish_pet_event(
+            request,
+            "hermes_task_running",
+            {"runtime": runtime},
+        )
         try:
             await self.callback_sink.send(
                 TaskCallbackPayload(
@@ -366,6 +373,7 @@ class HermesBridge:
             return
         if self.quota_gate is not None:
             await self.quota_gate.complete(request.queue_job_id, result=result)
+        self._publish_pet_event(request, "hermes_task_completed", result)
         await self.callback_sink.send(
             TaskCallbackPayload(
                 job_id=request.queue_job_id,
@@ -378,6 +386,7 @@ class HermesBridge:
     async def _finish_failed(self, request: HermesTaskRequest, error: str) -> None:
         if self.quota_gate is not None:
             await self.quota_gate.fail(request.queue_job_id, error)
+        self._publish_pet_event(request, "hermes_task_failed", {"error": error})
         await self.callback_sink.send(
             TaskCallbackPayload(
                 job_id=request.queue_job_id,
@@ -386,6 +395,51 @@ class HermesBridge:
                 error=error,
             )
         )
+
+    def _publish_pet_event(
+        self,
+        request: HermesTaskRequest,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if self.pet_live_store is None:
+            return
+        pet_id = str(request.payload.get("pet_id") or "")
+        employee_id = str(request.payload.get("employee_id") or "")
+        user_id = str(
+            employee_id
+            or request.payload.get("user_id")
+            or request.payload.get("feishu_open_id")
+            or request.payload.get("session_id")
+            or ""
+        )
+        if not pet_id or not user_id:
+            return
+        try:
+            from dc_engines.pet_live.event_bus import publish_pet_event
+            from dc_engines.pet_live.integrations import pet_live_enabled
+
+            if not pet_live_enabled():
+                return
+
+            publish_pet_event(
+                self.pet_live_store,
+                pet_id=pet_id,
+                user_id=user_id,
+                source="hermes",
+                event_type=event_type,
+                source_ref={
+                    "employee_id": employee_id,
+                    "conversation_id": str(request.payload.get("session_id") or ""),
+                    "harness_task_id": str(
+                        request.payload.get("harness_task_id") or ""
+                    ),
+                    "hermes_job_id": request.queue_job_id,
+                },
+                payload={"employee_id": employee_id, **payload},
+            )
+        except Exception:
+            return
 
     async def _read_stream_json(
         self,

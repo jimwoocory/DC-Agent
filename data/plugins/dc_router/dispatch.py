@@ -7,12 +7,13 @@ Order matters:
   4) reasoning prefix provider pinning
   5) Feishu channel provider pinning
   6) truth intake material guard
-  7) department memory prompt
-  8) memory context injection via extras only
-  9) assistant tone context via extras only
- 10) media route background tasks
- 11) dc_router.decide() for intent classification and provider routing
- 12) v1.0 fallback when disabled, dry-run, or decide raises
+  7) employee SOP signal confirmation
+  8) department memory prompt
+  9) memory context injection via extras only
+ 10) assistant tone context via extras only
+ 11) media route background tasks
+ 12) dc_router.decide() for intent classification and provider routing
+ 13) v1.0 fallback when disabled, dry-run, or decide raises
 
 Any stage that returns ``stop=True`` ends dispatch immediately.
 """
@@ -28,8 +29,10 @@ from typing import Any
 from astrbot.api import logger
 
 from .config import DCRouterConfig, is_dc_router_managed_platform, load_config
+from .pet_live_tap import record_router_pet_event
 from .preprocessing import (
     try_apply_feishu_channel_route,
+    try_capture_sop_signal,
     try_handle_card_action,
     try_handle_chitchat,
     try_handle_department_memory,
@@ -115,20 +118,27 @@ async def _build_memory_query(context: Any, event: Any) -> str:
 
 
 async def _send_dept_memory_prompt(context: Any, event: Any, state: Any) -> None:
-    """Best-effort card send with text fallback."""
+    """Best-effort card send with text fallback.
+
+    Even when the card send succeeds, keep a plain-text result on the event.
+    Some Lark runtime card sends are side-channel effects and do not populate
+    the AstrBot result chain, which otherwise makes the respond stage silently
+    skip the user-visible reply.
+    """
+    from dc_engines.router_card_templates import build_department_memory_prompt_card
+
     from .preprocessing.department_memory import prompt_text
 
     try:
+        from dc_engines.card_runtime import send_card_via_runtime
         from dc_engines.feishu_card_streamer import (
             ensure_streamers_on_context,
             extract_chat_info_from_event,
-            send_card_via_runtime,
         )
     except Exception:  # noqa: BLE001
         ensure_streamers_on_context = None
         extract_chat_info_from_event = None
         send_card_via_runtime = None
-    sent = False
     if (
         getattr(event, "get_platform_name", lambda: "")() or ""
     ).lower() == "lark" and ensure_streamers_on_context is not None:
@@ -139,11 +149,11 @@ async def _send_dept_memory_prompt(context: Any, event: Any, state: Any) -> None
             if streamer is not None and extract_chat_info_from_event is not None:
                 chat_id, receive_id_type = extract_chat_info_from_event(event)
                 if chat_id:
-                    card = _build_dept_memory_card(state)
+                    card = build_department_memory_prompt_card(state)
                     if send_card_via_runtime is not None:
-                        stream = await send_card_via_runtime(
+                        await send_card_via_runtime(
                             streamer,
-                            card_type="daily_response",
+                            card_type="department_memory_prompt",
                             chat_id=chat_id,
                             receive_id_type=receive_id_type,
                             card=card,
@@ -151,66 +161,68 @@ async def _send_dept_memory_prompt(context: Any, event: Any, state: Any) -> None
                             event="start",
                             detail=f"department memory prompt {state.suggestion_id}",
                         )
-                        sent = stream is not None
         except Exception as exc:  # noqa: BLE001
             logger.debug("[dc_router] dept memory card send skipped: %s", exc)
-    if not sent:
+    try:
+        from astrbot.api.event import MessageEventResult
+
+        event.should_call_llm(False)
+        event.set_result(
+            MessageEventResult().message(prompt_text(state)).use_t2i(False).stop_event()
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _send_sop_signal_prompt(context: Any, event: Any, state: Any) -> None:
+    from dc_engines.router_card_templates import build_sop_signal_confirmation_card
+
+    from .preprocessing.sop_signal import sop_signal_prompt_text
+
+    try:
+        from dc_engines.card_runtime import send_card_via_runtime
+        from dc_engines.feishu_card_streamer import (
+            ensure_streamers_on_context,
+            extract_chat_info_from_event,
+        )
+    except Exception:  # noqa: BLE001
+        ensure_streamers_on_context = None
+        extract_chat_info_from_event = None
+        send_card_via_runtime = None
+    if (
+        getattr(event, "get_platform_name", lambda: "")() or ""
+    ).lower() == "lark" and ensure_streamers_on_context is not None:
         try:
-            from astrbot.api.event import MessageEventResult
-
-            event.should_call_llm(False)
-            event.set_result(
-                MessageEventResult()
-                .message(prompt_text(state))
-                .use_t2i(False)
-                .stop_event()
+            streamer = ensure_streamers_on_context(context).get(
+                event.get_platform_id() or ""
             )
-        except Exception:  # noqa: BLE001
-            pass
+            if streamer is not None and extract_chat_info_from_event is not None:
+                chat_id, receive_id_type = extract_chat_info_from_event(event)
+                if chat_id and send_card_via_runtime is not None:
+                    await send_card_via_runtime(
+                        streamer,
+                        card_type="sop_signal_confirmation",
+                        chat_id=chat_id,
+                        receive_id_type=receive_id_type,
+                        card=build_sop_signal_confirmation_card(state),
+                        platform_id=event.get_platform_id() or "",
+                        event="start",
+                        detail=f"sop signal confirmation {state.signal_id}",
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[dc_router] sop signal card send skipped: %s", exc)
+    try:
+        from astrbot.api.event import MessageEventResult
 
-
-def _build_dept_memory_card(state: Any) -> dict:
-    names = "、".join(state.department_names) or "相关部门"
-    base = {"source": "department_memory_prompt", "suggestion_id": state.suggestion_id}
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "template": "blue",
-            "title": {"tag": "plain_text", "content": "是否调用部门记忆"},
-        },
-        "elements": [
-            {
-                "tag": "markdown",
-                "content": (
-                    f"检测到这像 **{names}** 相关任务。\n"
-                    "可以调用已通过 Obsidian 审核的部门记忆辅助回答。"
-                ),
-            },
-            {
-                "tag": "markdown",
-                "content": (
-                    "调用后只作为低优先级参考，不覆盖你本轮明确要求和已提供资料。"
-                ),
-            },
-            {
-                "tag": "action",
-                "actions": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "调用记忆"},
-                        "type": "primary",
-                        "value": {**base, "action": "confirm"},
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "不用"},
-                        "type": "default",
-                        "value": {**base, "action": "dismiss"},
-                    },
-                ],
-            },
-        ],
-    }
+        event.should_call_llm(False)
+        event.set_result(
+            MessageEventResult()
+            .message(sop_signal_prompt_text(state))
+            .use_t2i(False)
+            .stop_event()
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _read_dynamic_aliases() -> list[dict]:
@@ -306,6 +318,26 @@ async def _build_arbiter(cfg: DCRouterConfig) -> Any:
         return None
 
 
+def _build_classifier(context: Any, cfg: DCRouterConfig) -> Any:
+    """cfg.classifier_enabled=true 时构造 AstrBotRouterClassifier，失败回退 None。
+
+    Returning None lets DCRouter fall back to NoopRouterClassifier internally,
+    which means rules-only routing with no LLM classification — safe default.
+    """
+    if not cfg.classifier_enabled:
+        return None
+    try:
+        from .routing.classifier_adapter import AstrBotRouterClassifier
+
+        return AstrBotRouterClassifier(context)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[dc_router] AstrBotRouterClassifier 构造失败，回退 NoopClassifier: %s",
+            exc,
+        )
+        return None
+
+
 async def _run_dc_router(
     context: Any,
     event: Any,
@@ -320,9 +352,23 @@ async def _run_dc_router(
         logger.error("[dc_router] dc_router_core import failed: %s", exc)
         return False, "", ""
     try:
-        router = DCRouter(arbiter=await _build_arbiter(cfg))
+        classifier = _build_classifier(context, cfg)
+        router = DCRouter(
+            classifier=classifier,
+            arbiter=await _build_arbiter(cfg),
+        )
         envelope = build_envelope(event)
         decision = await router.decide(envelope)
+        record_router_pet_event(
+            event,
+            event_type="router_decision_made",
+            payload={
+                "intent": str(getattr(decision, "intent", "") or ""),
+                "provider": str(getattr(decision, "provider_id", "") or ""),
+                "source": str(getattr(decision, "source", "") or ""),
+            },
+            router_trace_id=str(getattr(decision, "trace_id", "") or ""),
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[dc_router] decide() raised: %s", exc)
         return False, "", ""
@@ -354,6 +400,12 @@ async def dispatch(
     """
     text = str(getattr(event, "message_str", "") or "")
     platform_id = _safe_platform(event)
+    if is_dc_router_managed_platform(platform_id):
+        record_router_pet_event(
+            event,
+            event_type="feishu_message_received",
+            payload={"text_len": len(text)},
+        )
 
     # ── 1) 卡片回调 (最早) ──────────────────────────────────────────────
     if text.startswith("__card_action__:"):
@@ -403,11 +455,19 @@ async def dispatch(
                 source="feishu_channel",
             )
 
-    # ── 6-9) truth intake / dept memory / memory injection / tone ─────
+    # ── 6-10) truth intake / SOP signal / dept memory / memory injection / tone ─────
     memory_query_text = text
     if is_dc_router_managed_platform(platform_id):
         if await _maybe_truth_intake(context, event, cfg):
             return DispatchResult(handled=True, source="truth_intake")
+        sop_signal = try_capture_sop_signal(event, text=text)
+        if sop_signal.stop and sop_signal.pending_state is not None:
+            await _send_sop_signal_prompt(context, event, sop_signal.pending_state)
+            return DispatchResult(
+                handled=True,
+                source="sop_signal_prompt",
+                decision_intent="sop_signal_suggested",
+            )
         memory_query_text = await _build_memory_query(context, event)
         dept_decision = try_handle_department_memory(
             event,
@@ -427,13 +487,27 @@ async def dispatch(
             event,
             query_text=dept_decision.memory_query_text or memory_query_text,
         ):
+            record_router_pet_event(
+                event,
+                event_type="memory_context_injected",
+                payload={
+                    "query_len": len(
+                        dept_decision.memory_query_text or memory_query_text
+                    )
+                },
+            )
             try:
                 hits = event.get_extra("dc_agent_memory_hits") or {}
+                documents = int(hits.get("documents", 0) or 0)
+                governed_memories = int(hits.get("governed_memories", 0) or 0)
+                project_items = int(hits.get("project_items", 0) or 0)
                 logger.info(
-                    "[dc_router] memory injected platform=%s docs=%s items=%s",
+                    "[dc_router] memory injected platform=%s governed=%s docs=%s items=%s total=%s",
                     platform_id,
-                    hits.get("documents", 0),
-                    hits.get("project_items", 0),
+                    governed_memories,
+                    documents,
+                    project_items,
+                    governed_memories + documents + project_items,
                 )
             except Exception:  # noqa: BLE001
                 pass

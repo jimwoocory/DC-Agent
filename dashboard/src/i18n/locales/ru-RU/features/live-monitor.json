@@ -1,0 +1,148 @@
+{
+  "header": {
+    "title": "Мониторинг ассистента",
+    "subtitle": "Состояние настольной сессии, поток событий и текущий статус ассистента."
+  },
+  "actions": {
+    "refresh": "Обновить"
+  },
+  "filters": {
+    "presets": {
+      "today": "Сегодня",
+      "yesterday": "Вчера",
+      "week": "Эта неделя",
+      "month": "Этот месяц",
+      "custom": "Период"
+    },
+    "startDate": "Начало",
+    "endDate": "Конец",
+    "now": "Сейчас",
+    "summary": "{from} - {to}"
+  },
+  "connection": {
+    "connected": "Соединение активно",
+    "system": "Системный монитор",
+    "degraded": "Соединение нестабильно",
+    "disconnected": "Нет соединения"
+  },
+  "common": {
+    "unknown": "Неизвестно",
+    "notUpdated": "Не обновлялось"
+  },
+  "pet": {
+    "unknownName": "Ассистент",
+    "unbound": "Настольная сессия не привязана",
+    "level": "Lv.{level}"
+  },
+  "time": {
+    "justNow": "Только что",
+    "minutesAgo": "{minutes} мин назад",
+    "hoursAgo": "{hours} ч назад"
+  },
+  "metrics": {
+    "energy": {
+      "label": "Энергия",
+      "note": "Из последнего снимка состояния"
+    },
+    "xp": {
+      "label": "Опыт",
+      "note": "{coins} монет"
+    },
+    "streak": {
+      "label": "Активная серия",
+      "value": "{days} дн.",
+      "note": "По взаимодействиям с ассистентом"
+    },
+    "lastActive": {
+      "label": "Последняя активность",
+      "note": "Страница обновлена в {time}"
+    }
+  },
+  "events": {
+    "title": "Поток событий",
+    "subtitle": "Маршрутизация, задачи и heartbeat без полного текста сообщений.",
+    "count": "{count} событий в кэше",
+    "empty": "Новых событий пока нет.",
+    "action": "Действие: {action}",
+    "refs": {
+      "conversation": "Диалог {id}",
+      "trace": "Trace {id}",
+      "task": "Задача {id}",
+      "job": "Job {id}",
+      "desktop": "Desktop {id}"
+    }
+  },
+  "health": {
+    "title": "Состояние соединения",
+    "subtitle": "Текущая настольная сессия и курсор событий.",
+    "petId": "Pet ID",
+    "lastEvent": "Последнее событие",
+    "cachedEvents": "Локальный кэш",
+    "updatedAt": "Состояние обновлено"
+  },
+  "sources": {
+    "title": "Источники событий",
+    "empty": "Статистики пока нет",
+    "names": {
+      "feishu": "Feishu",
+      "astrbot": "AstrBot",
+      "router": "Router",
+      "harness": "Harness",
+      "hermes": "Hermes",
+      "obsidian": "Obsidian",
+      "desktop": "Desktop",
+      "unknown": "Неизвестно"
+    }
+  },
+  "states": {
+    "idle": "Ожидание",
+    "waiting": "Ждет",
+    "thinking": "Думает",
+    "working": "Работает",
+    "success": "Готово",
+    "failed": "Требует внимания",
+    "review": "На проверке",
+    "happy": "Доволен",
+    "focused": "Сфокусирован",
+    "sleeping": "Отдыхает",
+    "unknown": "Неизвестный статус"
+  },
+  "emotions": {
+    "calm": "Спокоен",
+    "happy": "Доволен",
+    "focused": "Сфокусирован",
+    "tired": "Устал",
+    "curious": "Любопытен",
+    "unknown": "Неизвестно"
+  },
+  "scenes": {
+    "desk": "Рабочий стол",
+    "meeting": "Встреча",
+    "coding": "Код",
+    "review": "Проверка",
+    "unknown": "Неизвестно"
+  },
+  "eventTypes": {
+    "desktop_session_bound": "Сессия привязана",
+    "desktop_heartbeat": "Desktop heartbeat",
+    "feishu_message_received": "Сообщение Feishu получено",
+    "pet_card_viewed": "Карточка просмотрена",
+    "pet_card_action": "Действие карточки",
+    "pet_fed": "Ассистент накормлен",
+    "router_decision_made": "Решение маршрутизатора",
+    "memory_context_injected": "Контекст памяти добавлен",
+    "harness_task_created": "Задача создана",
+    "harness_task_in_progress": "Задача выполняется",
+    "harness_task_completed": "Задача завершена",
+    "harness_task_review_required": "Нужна проверка задачи",
+    "harness_task_failed": "Задача не выполнена",
+    "hermes_task_running": "Задача Hermes выполняется",
+    "hermes_task_completed": "Задача Hermes завершена",
+    "hermes_task_failed": "Задача Hermes не выполнена",
+    "obsidian_note_linked": "Заметка Obsidian связана",
+    "memory_promoted": "Память повышена"
+  },
+  "errors": {
+    "loadFailed": "Не удалось загрузить мониторинг"
+  }
+}

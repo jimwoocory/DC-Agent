@@ -1,0 +1,48 @@
+{
+  "contract_id": "routing_side_effect_isolation",
+  "version": "1.0.0",
+  "status": "active",
+  "goal": "New routing and workflow frameworks must not change normal chat behavior unless explicitly activated.",
+  "rules": [
+    {
+      "id": "route-isolation-001",
+      "title": "Implicit workflow matches are observe-only by default",
+      "text": "Department workflow and workflow-intent matches triggered only by employee profile, department aliases, or ordinary business keywords must not create Harness tasks, send boundary notices, or otherwise alter the normal LLM response path unless the user used an explicit workflow trigger or implicit task creation is explicitly enabled."
+    },
+    {
+      "id": "route-isolation-002",
+      "title": "Candidate routing may annotate but not act",
+      "text": "Observe-only matches may store candidate metadata in event extras for logs and later analysis. They must not mutate message text, switch providers, dispatch Hermes work, create cases/tasks, or notify the user."
+    },
+    {
+      "id": "route-isolation-003",
+      "title": "Explicit activation preserves workflow behavior",
+      "text": "Explicit workflow triggers and reviewed configuration may still create Harness tasks so operators can deliberately test or enable a framework without changing ordinary chat traffic."
+    }
+  ],
+  "acceptance_tests": [
+    {
+      "id": "A1",
+      "title": "Private advisory chat is observed but does not create a workflow task by default",
+      "test_path": "tests/test_department_workflow_plugin_content_sop.py::test_department_workflow_private_advisory_match_is_observe_only_by_default"
+    },
+    {
+      "id": "A2",
+      "title": "Operators can explicitly allow implicit workflow task creation",
+      "test_path": "tests/test_department_workflow_plugin_content_sop.py::test_department_workflow_implicit_task_creation_requires_config"
+    },
+    {
+      "id": "A3",
+      "title": "Explicit department workflow requests still create Harness tasks",
+      "test_path": "tests/test_department_workflow_plugin_content_sop.py::test_department_workflow_plugin_does_not_override_auto_complete_gate"
+    },
+    {
+      "id": "A4",
+      "title": "Workflow-intent keyword matches are observed but do not create tasks by default",
+      "test_path": "dc_engines/tests/test_workflow_intent_plugin.py::test_workflow_intent_is_observe_only_by_default"
+    }
+  ],
+  "verification": {
+    "targeted": "uv run pytest tests/test_department_workflow_plugin_content_sop.py dc_engines/tests/test_workflow_intent_plugin.py -q"
+  }
+}

@@ -14,7 +14,7 @@
   /task reject <id> <note>          审批拒绝
 
 依赖：
-- hermes_bridge plugin 在 initialize 阶段把 ``harness_engine`` / ``harness_store``
+- harness_runtime_plugin 在 initialize 阶段把 ``harness_engine`` / ``harness_store``
   装到了 context；本插件在命令运行时（不是 init）懒读，因此加载顺序无关紧要。
 """
 
@@ -64,7 +64,10 @@ class TaskCliPlugin(Star):
     async def _get_task_for_current_conv(self, event: AstrMessageEvent, task_id: str):
         store = getattr(self.context, "harness_store", None)
         if store is None:
-            self._reply(event, "Harness 存储未初始化（hermes_bridge plugin 未加载？）")
+            self._reply(
+                event,
+                "Harness 存储未初始化（harness_runtime_plugin 未加载？）",
+            )
             return None
         task = await store.get_task(task_id.strip())
         if task is None:

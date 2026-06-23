@@ -3,6 +3,7 @@ import re
 import time
 import traceback
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 
 from astrbot.core import logger
 from astrbot.core.agent.message import Message
@@ -112,6 +113,55 @@ def _merge_buffered_llm_chains(
     return merged_chain
 
 
+def _is_empty_llm_chain(chain: MessageChain) -> bool:
+    if not chain.chain:
+        return True
+    return all(
+        isinstance(comp, Plain) and not comp.text.strip() for comp in chain.chain
+    )
+
+
+# Maximum consecutive empty LLM results (tool_calls only, no text) before
+# forcing the agent to stop and produce a summary response.
+MAX_CONSECUTIVE_EMPTY_LLM_RESULTS = 3
+
+_CONVERGENCE_PROMPT = (
+    "[SYSTEM] You have called tools multiple times without producing any text "
+    "response. You MUST stop calling tools now and provide a direct reply to "
+    "the user based on the information you have already gathered. "
+    "Do not call any more tools. Do not return an empty response."
+)
+
+
+@dataclass
+class _EmptyLLMResultPolicy:
+    consecutive_empty_results: int = 0
+    max_consecutive_empty_results: int = MAX_CONSECUTIVE_EMPTY_LLM_RESULTS
+
+    def should_skip_intermediate(
+        self, chain: MessageChain, *, runner_done: bool
+    ) -> bool:
+        return not runner_done and _is_empty_llm_chain(chain)
+
+    def record_empty_intermediate(self) -> bool:
+        self.consecutive_empty_results += 1
+        return self.consecutive_empty_results >= self.max_consecutive_empty_results
+
+    def record_sendable_result(self) -> None:
+        self.consecutive_empty_results = 0
+
+
+def _force_agent_convergence(agent_runner: AgentRunner) -> None:
+    if agent_runner.req:
+        agent_runner.req.func_tool = None
+    agent_runner.run_context.messages.append(
+        Message(
+            role="user",
+            content=_CONVERGENCE_PROMPT,
+        )
+    )
+
+
 async def run_agent(
     agent_runner: AgentRunner,
     max_step: int = 30,
@@ -122,6 +172,7 @@ async def run_agent(
     buffer_intermediate_messages: bool = False,
 ) -> AsyncGenerator[MessageChain | None, None]:
     step_idx = 0
+    empty_llm_policy = _EmptyLLMResultPolicy()
     astr_event = agent_runner.run_context.context.event
     tool_name_by_call_id: dict[str, str] = {}
     buffered_llm_chains: list[MessageChain] = []
@@ -250,6 +301,22 @@ async def run_agent(
                         buffered_llm_chains.append(resp.data["chain"])
                         continue
 
+                    if (
+                        resp.type == "llm_result"
+                        and empty_llm_policy.should_skip_intermediate(
+                            resp.data["chain"],
+                            runner_done=agent_runner.done(),
+                        )
+                    ):
+                        if empty_llm_policy.record_empty_intermediate():
+                            logger.warning(
+                                "[agent] %d consecutive empty LLM results "
+                                "(tool_calls only), forcing convergence.",
+                                empty_llm_policy.consecutive_empty_results,
+                            )
+                            _force_agent_convergence(agent_runner)
+                        continue
+
                     content_typ = (
                         ResultContentType.LLM_RESULT
                         if resp.type == "llm_result"
@@ -263,6 +330,8 @@ async def run_agent(
                     )
                     yield resp.data["chain"]
                     astr_event.clear_result()
+                    if resp.type == "llm_result":
+                        empty_llm_policy.record_sendable_result()
                 elif resp.type == "streaming_delta":
                     chain = resp.data["chain"]
                     if chain.type == "reasoning" and not show_reasoning:

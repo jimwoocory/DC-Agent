@@ -1,6 +1,18 @@
 import asyncio
 from types import SimpleNamespace
 
+from dc_engines.card_system import (
+    CARD_REGISTRY,
+    DEFAULT_CARD_BUILDER_MODULE,
+    PRIVATE_TEMPLATE_BUILDERS,
+    _active_runtime_card_type_literals,
+    _sample_payload,
+    _template_builders,
+    build_card_asset_manifest,
+    build_sample_card,
+    format_card_asset_matrix,
+    run_card_system_engineering_gate,
+)
 from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
     build_antigravity_queue_card,
@@ -51,6 +63,22 @@ def _markdown_contents(card):
     return contents
 
 
+def _lark_md_contents(card):
+    contents = []
+
+    def collect(element):
+        text = element.get("text")
+        if isinstance(text, dict) and text.get("tag") == "lark_md":
+            contents.append(text["content"])
+        for column in element.get("columns", []):
+            for child in column.get("elements", []):
+                collect(child)
+
+    for element in _body_elements(card):
+        collect(element)
+    return contents
+
+
 def _button_elements(card):
     buttons = []
 
@@ -66,17 +94,137 @@ def _button_elements(card):
     return buttons
 
 
-def test_daily_response_card_uses_stable_heading_sizes():
+def test_public_card_builders_are_fully_registered_with_samples():
+    builders = _template_builders()
+    public_builders = {
+        name
+        for name in builders
+        if name.startswith("build_") and name.endswith("_card")
+    }
+    registered_builders = {
+        spec.builder
+        for spec in CARD_REGISTRY.values()
+        if spec.builder_module == DEFAULT_CARD_BUILDER_MODULE
+    }
+
+    assert public_builders - registered_builders - PRIVATE_TEMPLATE_BUILDERS == set()
+    assert registered_builders - set(builders) == set()
+
+    for card_type, spec in CARD_REGISTRY.items():
+        assert spec.card_type == card_type
+        assert spec.owner
+        assert spec.triggers
+        assert spec.fallback
+        assert spec.version
+        assert _sample_payload(spec.builder, spec.builder_module), spec.builder
+
+        card = build_sample_card(card_type)
+        assert isinstance(card, dict), card_type
+        assert card.get("body") or card.get("elements"), card_type
+
+
+def test_runtime_literal_card_types_are_registered():
+    runtime_card_types = _active_runtime_card_type_literals()
+    assert set(runtime_card_types).difference(CARD_REGISTRY) == set()
+
+
+def test_engineering_gate_manifest_covers_runtime_card_types():
+    report = run_card_system_engineering_gate()
+    assert report.ok, report.to_dict()
+
+    manifest = build_card_asset_manifest()
+    assert manifest["card_count"] == len(CARD_REGISTRY)
+    assert manifest["runtime_gateway_call_site_count"] > 0
+    assert (
+        manifest["runtime_card_type_reference_count"]
+        >= (manifest["runtime_gateway_call_site_count"])
+    )
+
+    cards = {item["card_type"]: item for item in manifest["cards"]}
+    assert set(cards) == set(CARD_REGISTRY)
+    assert all(item["has_sample_payload"] for item in cards.values())
+    assert {item["runtime_status"] for item in cards.values()} == {
+        "gateway",
+        "wrapper",
+        "sample_only",
+    }
+    assert cards["daily_response"]["runtime_status"] == "gateway"
+    assert cards["skill_list"]["runtime_status"] == "wrapper"
+    assert cards["task_progress"]["runtime_status"] == "sample_only"
+    assert cards["skill_list"]["runtime_card_type_references"]
+    assert cards["skill_detail"]["runtime_card_type_references"]
+    assert cards["skill_deleted_list"]["runtime_card_type_references"]
+    assert cards["skill_confirm"]["runtime_card_type_references"]
+    assert cards["content_sop_ops_reminder"]["runtime_card_type_references"]
+    assert cards["pet_error"]["runtime_card_type_references"]
+
+    unsupported_dynamic = [
+        item
+        for item in manifest["runtime_gateway_call_sites"]
+        if item["dynamic"] and not item["dynamic_reason"]
+    ]
+    assert unsupported_dynamic == []
+
+    unknown_literals = {
+        literal
+        for item in manifest["runtime_gateway_call_sites"]
+        for literal in item["literal_card_types"]
+        if literal not in CARD_REGISTRY
+    }
+    assert unknown_literals == set()
+    unknown_references = {
+        literal
+        for item in manifest["runtime_card_type_references"]
+        for literal in item["literal_card_types"]
+        if literal not in CARD_REGISTRY
+    }
+    assert unknown_references == set()
+
+
+def test_card_asset_matrix_is_complete_and_readable():
+    manifest = build_card_asset_manifest()
+    matrix = format_card_asset_matrix(manifest)
+
+    assert "Card Asset Matrix: 45 cards" in matrix
+    assert (
+        "card_type | owner | builder | triggers | runtime_status | gateway_sites/runtime_refs | grey_push"
+        in matrix
+    )
+    for card_type in CARD_REGISTRY:
+        assert f"\n{card_type} | " in matrix
+    assert "daily_response | daily_card_renderer |" in matrix
+    assert "| gateway |" in matrix
+    assert "| wrapper |" in matrix
+    assert "| sample_only |" in matrix
+    assert "skill_list | hermes_bridge |" in matrix
+    assert "department_memory_prompt | dc_router |" in matrix
+    assert "sop_signal_confirmation | dc_router |" in matrix
+
+
+def test_daily_response_card_uses_explicit_markdown_text_sizes():
     card = build_daily_response_card(
         content_md="# 主标题\n\n## 章节\n\n### 小节\n\n正文内容",
     )
-    sizes = [
-        element.get("text_size")
-        for element in _body_elements(card)
-        if element.get("tag") == "markdown"
-    ]
+    body = _body_elements(card)
 
-    assert sizes == ["heading_1", "heading_2", "heading_3", "normal"]
+    assert [element["tag"] for element in body] == [
+        "markdown",
+        "markdown",
+        "markdown",
+        "markdown",
+    ]
+    assert [element["content"] for element in body] == [
+        "主标题",
+        "章节",
+        "小节",
+        "正文内容",
+    ]
+    assert [element["text_size"] for element in body] == [
+        "heading_1",
+        "heading_2",
+        "heading_3",
+        "normal",
+    ]
 
 
 def test_casual_response_card_renders_user_quote_inside_card():
@@ -88,10 +236,13 @@ def test_casual_response_card_renders_user_quote_inside_card():
     body = _body_elements(card)
 
     assert body[0]["tag"] == "markdown"
-    assert body[0]["text_size"] == "notation"
     assert "回复：好像这几天柳州的汛期来了，都是狂风暴雨" in body[0]["content"]
+    assert body[0]["content"].startswith("<font color='grey'>")
+    assert body[0]["text_size"] == "notation"
     assert body[1]["tag"] == "hr"
+    assert body[2]["tag"] == "markdown"
     assert body[2]["content"] == "刚才模型返回了空内容，我已收到消息。请您再发一次。"
+    assert body[2]["text_size"] == "normal"
 
 
 def test_daily_response_card_centers_compact_markdown_tables():

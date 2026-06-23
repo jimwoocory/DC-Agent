@@ -46,6 +46,8 @@ while (($# > 0)); do
 done
 
 mkdir -p data/plugins data/config data/temp data/skills
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT_DIR/.uv-cache}"
+mkdir -p "$UV_CACHE_DIR"
 export TESTING="${TESTING:-true}"
 export ZHIPU_API_KEY="${ZHIPU_API_KEY:-test-api-key}"
 export PYTHONPATH="$ROOT_DIR:$ROOT_DIR/dc_engines:${PYTHONPATH:-}"
@@ -76,7 +78,7 @@ echo "==> Checking fake-data runtime guard"
 uv run python scripts/check_fake_data_guard.py
 
 echo "==> Validating Feishu card system contract"
-uv run python scripts-tools/card-system-health.py
+uv run python scripts-tools/card-system-health.py --strict-gate
 
 echo "==> Running targeted harness tests"
 uv run pytest \

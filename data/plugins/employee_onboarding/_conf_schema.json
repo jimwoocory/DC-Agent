@@ -14,6 +14,16 @@
     "description": "是否启用定期巡检，主动给未完成 onboarding 的员工私聊推送新人卡片",
     "default": false
   },
+  "block_business_until_complete": {
+    "type": "bool",
+    "description": "是否在员工完成 onboarding 前阻断私聊业务消息；全员开放模式应设为 false，让首次业务请求继续进入正常回复链路",
+    "default": true
+  },
+  "side_effect_timeout_seconds": {
+    "type": "float",
+    "description": "员工入职旁路处理超时时间；超时后放行主聊天",
+    "default": 1.0
+  },
   "sync_contacts_before_scan": {
     "type": "bool",
     "description": "巡检前是否先从飞书通讯录同步员工到 EmployeeStore；需要 contact:* 权限",

@@ -7,6 +7,7 @@ a session-level Case automatically so later tasks have somewhere to attach.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -61,8 +62,12 @@ _COMMANDS_TO_IGNORE = (
     "0.1.0",
 )
 class AIInboxPlugin(Star):
-    def __init__(self, context: Context) -> None:
+    def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
+        cfg = config or {}
+        self.side_effect_timeout_seconds = float(
+            cfg.get("side_effect_timeout_seconds", 1.5)
+        )
         self.store: InboxStore | None = None
         self.engine: AIInboxEngine | None = None
 
@@ -108,6 +113,26 @@ class AIInboxPlugin(Star):
         if not self._should_track(event, text):
             return
 
+        try:
+            if self.side_effect_timeout_seconds > 0:
+                await asyncio.wait_for(
+                    self._record_message(event, text),
+                    timeout=self.side_effect_timeout_seconds,
+                )
+            else:
+                await self._record_message(event, text)
+        except TimeoutError:
+            logger.warning(
+                "[ai_inbox] side-effect timeout after %.2fs; skipped session=%s",
+                self.side_effect_timeout_seconds,
+                event.unified_msg_origin,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[ai_inbox] side-effect skipped: %s", exc)
+
+    async def _record_message(self, event: AstrMessageEvent, text: str) -> None:
+        if self.engine is None:
+            return
         category = self.engine.classify(text)
         conversation_id = await self._conversation_id(event)
         case_id = ""

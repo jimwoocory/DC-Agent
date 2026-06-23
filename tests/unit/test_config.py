@@ -529,6 +529,30 @@ class TestConfigHotReload:
         # Original fields are preserved because update merges
         assert "platform_settings" in loaded_config
 
+    def test_save_config_is_atomic_when_replace_fails(
+        self, temp_config_path, minimal_default_config, monkeypatch
+    ):
+        """A failed final replace must leave the existing config file intact."""
+        config = AstrBotConfig(
+            config_path=temp_config_path, default_config=minimal_default_config
+        )
+        original_text = '{\n  "config_version": 2,\n  "sentinel": "old"\n}\n'
+        with open(temp_config_path, "w", encoding="utf-8-sig") as f:
+            f.write(original_text)
+
+        def fail_replace(src, dst):
+            assert src != dst
+            assert os.path.dirname(src) == os.path.dirname(dst)
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr(os, "replace", fail_replace)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            config.save_config({"sentinel": "new"})
+
+        with open(temp_config_path, encoding="utf-8-sig") as f:
+            assert f.read() == original_text
+
     def test_modification_persists_after_reload(
         self, temp_config_path, minimal_default_config
     ):

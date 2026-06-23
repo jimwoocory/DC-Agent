@@ -15,7 +15,30 @@ content.
 
 from __future__ import annotations
 
-from dc_engines.card_system import _dedupe_consecutive_failures, build_sample_card
+import pytest
+from dc_engines.card_runtime import finalize_card_via_runtime, send_card_via_runtime
+from dc_engines.card_system import (
+    CardHealthReport,
+    _dedupe_consecutive_failures,
+    _deduped_production_card_failures,
+    _production_card_runtime_events,
+    build_sample_card,
+    card_system_next_step,
+)
+
+
+class _FakeStreamer:
+    def __init__(self) -> None:
+        self.start_called = False
+        self.finalize_called = False
+
+    async def start(self, **_kwargs):
+        self.start_called = True
+        raise AssertionError("unregistered card_type must not call streamer.start")
+
+    async def finalize(self, *_args, **_kwargs):
+        self.finalize_called = True
+        raise AssertionError("unregistered card_type must not call streamer.finalize")
 
 
 def _ev(
@@ -24,17 +47,55 @@ def _ev(
     event: str,
     *,
     card_type: str = "daily_response",
+    platform_id: str = "巅池-Agent小助手",
+    chat_id: str = "oc_test",
+    receive_id_type: str = "chat_id",
     ts: str = "2026-06-11T00:00:00Z",
+    detail: str = "",
 ) -> dict[str, object]:
     return {
         "ts": ts,
         "event": event,
         "card_type": card_type,
         "ok": ok,
+        "platform_id": platform_id,
+        "chat_id": chat_id,
+        "receive_id_type": receive_id_type,
         "message_id": message_id,
-        "detail": "",
+        "detail": detail,
         "fallback": "" if ok else "plain_text",
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_send_rejects_unregistered_card_before_streamer_call() -> None:
+    streamer = _FakeStreamer()
+
+    with pytest.raises(KeyError, match="unknown card_type"):
+        await send_card_via_runtime(
+            streamer,
+            card_type="not_registered_card",
+            chat_id="oc_test",
+            receive_id_type="chat_id",
+            card={"elements": []},
+        )
+
+    assert streamer.start_called is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_finalize_rejects_unregistered_card_before_streamer_call() -> None:
+    streamer = _FakeStreamer()
+
+    with pytest.raises(KeyError, match="unknown card_type"):
+        await finalize_card_via_runtime(
+            streamer,
+            card_type="not_registered_card",
+            message_id="om_test",
+            card={"elements": []},
+        )
+
+    assert streamer.finalize_called is False
 
 
 class TestDedupeConsecutiveFailures:
@@ -102,18 +163,25 @@ class TestDedupeConsecutiveFailures:
         """``start`` events sometimes have empty message_id (the
         Feishu streamer hasn't received the message_id back from
         Feishu yet). Empty-message_id failures must not all fold
-        into a single bucket — that would hide ``start`` races."""
+        into a single bucket — that would hide independent create failures."""
         events = [
-            _ev(False, "", "start", ts="2026-06-11T00:00:00Z"),
-            _ev(False, "", "start", ts="2026-06-11T00:00:05Z"),
+            _ev(
+                False,
+                "",
+                "start",
+                chat_id="oc_first",
+                ts="2026-06-11T00:00:00Z",
+            ),
+            _ev(
+                False,
+                "",
+                "start",
+                chat_id="oc_second",
+                ts="2026-06-11T00:00:05Z",
+            ),
         ]
         deduped = _dedupe_consecutive_failures(events)
-        # Empty message_id is a real key — both events are "same key"
-        # (("", "start")), so we DO fold them. The streamer retry
-        # pattern is the same regardless of whether message_id was
-        # captured. This is the safer behavior because if we did NOT
-        # fold, empty-message-id events would always trip the threshold.
-        assert len(deduped) == 1
+        assert len(deduped) == 2
 
     def test_mixed_ok_and_failure_pattern_preserves_order(self) -> None:
         """Order is preserved (it's not a set). Useful for debugging
@@ -188,6 +256,135 @@ class TestDedupeConsecutiveFailures:
         assert len(distinct_failures) == 2
         # Verify it stays under the <= 3 threshold
         assert len(distinct_failures) <= 3
+
+
+def test_webchat_card_events_are_not_production_runtime_failures() -> None:
+    events = [
+        _ev(
+            False,
+            "",
+            "start",
+            platform_id="webchat",
+            chat_id="ou_smoke_user_1",
+            receive_id_type="open_id",
+        ),
+        _ev(
+            True,
+            "om_real",
+            "start",
+            platform_id="巅池-Agent小助手",
+            chat_id="oc_real",
+        ),
+    ]
+
+    assert _production_card_runtime_events(events) == [events[1]]
+    assert _deduped_production_card_failures(events) == []
+
+
+def test_retried_grey_push_failure_is_cleared_by_later_success() -> None:
+    events = [
+        _ev(
+            False,
+            "",
+            "grey_push",
+            card_type="daily_response",
+            chat_id="on_operator",
+            receive_id_type="union_id",
+            ts="2026-06-20T18:56:37Z",
+            detail="font size heading_3 grey validation",
+        ),
+        _ev(
+            True,
+            "om_success",
+            "grey_push",
+            card_type="daily_response",
+            chat_id="on_operator",
+            receive_id_type="union_id",
+            ts="2026-06-20T18:57:04Z",
+            detail="font size heading_3 grey validation",
+        ),
+    ]
+
+    assert _deduped_production_card_failures(events) == []
+
+
+def test_regular_runtime_failure_is_not_cleared_by_later_success() -> None:
+    events = [
+        _ev(
+            False,
+            "",
+            "start",
+            card_type="daily_response",
+            chat_id="oc_real",
+            ts="2026-06-20T18:56:37Z",
+            detail="daily renderer long response",
+        ),
+        _ev(
+            True,
+            "om_success",
+            "start",
+            card_type="daily_response",
+            chat_id="oc_real",
+            ts="2026-06-20T18:57:04Z",
+            detail="daily renderer long response",
+        ),
+    ]
+
+    assert _deduped_production_card_failures(events) == [events[0]]
+
+
+def test_card_system_next_step_treats_retried_grey_push_as_green(monkeypatch) -> None:
+    report = CardHealthReport(ok=True)
+    report.add("runtime_events_recent", True, "ok")
+    monkeypatch.setattr(
+        "dc_engines.card_system.recent_card_runtime_events",
+        lambda limit=30: [
+            _ev(
+                False,
+                "",
+                "grey_push",
+                card_type="daily_response",
+                chat_id="on_operator",
+                receive_id_type="union_id",
+                ts="2026-06-20T18:56:37Z",
+                detail="font size heading_3 grey validation",
+            ),
+            _ev(
+                True,
+                "om_success",
+                "grey_push",
+                card_type="daily_response",
+                chat_id="on_operator",
+                receive_id_type="union_id",
+                ts="2026-06-20T18:57:04Z",
+                detail="font size heading_3 grey validation",
+            ),
+        ],
+    )
+
+    assert "runtime events are green" in card_system_next_step(report)
+
+
+def test_card_system_next_step_ignores_non_production_webchat_failures(
+    monkeypatch,
+) -> None:
+    report = CardHealthReport(ok=True)
+    report.add("runtime_events_recent", True, "ok")
+    monkeypatch.setattr(
+        "dc_engines.card_system.recent_card_runtime_events",
+        lambda limit=30: [
+            _ev(
+                False,
+                "",
+                "start",
+                platform_id="webchat",
+                chat_id="ou_smoke_user_1",
+                receive_id_type="open_id",
+            )
+        ],
+    )
+
+    assert "fresh Feishu grey validation" in card_system_next_step(report)
 
 
 def test_employee_insight_welcome_card_has_beginner_actions() -> None:

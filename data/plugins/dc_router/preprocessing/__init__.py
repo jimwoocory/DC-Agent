@@ -7,6 +7,7 @@
 - ``chitchat``: 短确认 / 寒暄 / 自我介绍 — 命中后直接 reply
 - ``card_action``: antigravity 排队卡 / department_memory 卡片回调
 - ``department_memory``: 部门记忆激活提示 (suggest / confirm / dismiss)
+- ``sop_signal``: 员工处理习惯低打扰确认并进入记忆治理
 - ``assistant_tone``: 业务请求注入 tone template (set_extra only)
 - ``media_route``: 图片/视频生成走 media SOP
 - ``feishu_channel``: 飞书 channel agent 固定 provider 路由
@@ -22,10 +23,12 @@ from .department_memory import (
 )
 from .feishu_channel import try_apply_feishu_channel_route
 from .media_route import try_handle_media_route
+from .sop_signal import try_capture_sop_signal
 
 __all__ = [
     "DepartmentMemoryDecision",
     "try_apply_feishu_channel_route",
+    "try_capture_sop_signal",
     "try_handle_card_action",
     "try_handle_chitchat",
     "try_handle_department_memory",

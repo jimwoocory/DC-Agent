@@ -13,6 +13,10 @@ import urllib.request
 from pathlib import Path
 
 from dc_engines.card_runtime import finalize_card_via_runtime
+from dc_engines.dreamina_cli import (
+    dreamina_command_not_found_message,
+    resolve_dreamina_executable,
+)
 from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
     build_media_generation_card,
@@ -44,10 +48,14 @@ class DreaminaPlugin(Star):
     async def initialize(self) -> None:
         """插件初始化"""
         # 验证 dreamina CLI 是否可用
+        dreamina_bin = resolve_dreamina_executable()
+        if dreamina_bin is None:
+            logger.error(f"❌ {dreamina_command_not_found_message()}")
+            return
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
-                ["dreamina", "-h"],
+                [dreamina_bin, "-h"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -149,17 +157,19 @@ class DreaminaPlugin(Star):
         Returns:
             (success, output)
         """
+        dreamina_bin = resolve_dreamina_executable()
+        if dreamina_bin is None:
+            return False, dreamina_command_not_found_message()
+
         for attempt in range(1, _retry + 1):
             try:
-                full_command = ["dreamina"] + command
-                logger.info(f"执行命令（第 {attempt} 次）：{' '.join(full_command)}")
-
-                shell_command = " ".join(shlex.quote(arg) for arg in full_command)
+                full_command = [dreamina_bin] + command
+                command_display = " ".join(shlex.quote(arg) for arg in full_command)
+                logger.info(f"执行命令（第 {attempt} 次）：{command_display}")
 
                 result = await asyncio.to_thread(
                     subprocess.run,
-                    shell_command,
-                    shell=True,
+                    full_command,
                     capture_output=True,
                     text=True,
                     timeout=timeout,
@@ -692,12 +702,12 @@ class DreaminaPlugin(Star):
 
     @filter.llm_tool(name="dreamina_generate_image_fallback")
     async def tool_text2image(self, event: AstrMessageEvent, prompt: str):
-        """【备用】Dreamina 即梦生图（备选工具）。优先使用 generate_image (GPT Image 2)。
+        """【备用】Dreamina 即梦生图。普通生图、海报、插画必须优先调用 generate_image (GPT Image 2)。
 
         只在以下情况调用本工具:
-        - 用户明确说"用 dreamina / 即梦 / 国风 / 中文海报"
-        - GPT Image 2 (generate_image) 失败时降级
-        - 中文文字海报、国潮节日（端午 / 中秋 / 春节）等中文场景
+        - 用户明确说"用 dreamina / 即梦"
+        - generate_image 内部已经确认 GPT Image 2 失败，需要兜底
+        - 需要 Dreamina 专属能力且用户明确接受使用即梦
 
         Args:
             prompt(string): 图片内容描述。优先使用内容 SOP 生成的结构化 prompt；若传入原始描述，工具会先包装为结构化媒体 prompt。

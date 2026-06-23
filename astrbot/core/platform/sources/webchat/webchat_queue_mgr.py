@@ -83,6 +83,22 @@ class WebChatQueueMgr:
         """Check if a queue exists for the given conversation ID"""
         return conversation_id in self.queues
 
+    def health_snapshot(self) -> dict[str, int | bool]:
+        """Return queue runtime metadata for health probes without message content."""
+        active_listener_tasks = sum(
+            1 for task in self._listener_tasks.values() if not task.done()
+        )
+        return {
+            "queues": len(self.queues),
+            "back_queues": len(self.back_queues),
+            "pending_requests": sum(
+                len(request_ids)
+                for request_ids in self._conversation_back_requests.values()
+            ),
+            "listener_registered": self._listener_callback is not None,
+            "listener_tasks": active_listener_tasks,
+        }
+
     def set_listener(
         self,
         callback: Callable[[tuple], Awaitable[None]],

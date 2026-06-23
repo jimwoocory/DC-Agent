@@ -10,6 +10,7 @@ from harness.evaluator.kb_import_contract import load_contract, validate_contrac
 CONTRACT = Path("harness/contracts/watchdog_disabled_probe_state.json")
 WATCHDOG_SCRIPT = Path("scripts-watchdog/dc-watchdog.sh")
 WATCHDOGCTL = Path("scripts-watchdog/watchdogctl.py")
+WATCHDOG_ENGINE = Path("scripts-watchdog/watchdog_engine.py")
 WATCHDOG_STATE = Path("scripts-watchdog/watchdog_state.py")
 
 
@@ -33,6 +34,16 @@ def _load_watchdog_state_module():
     return module
 
 
+def _load_watchdog_engine_module():
+    spec = importlib.util.spec_from_file_location("watchdog_engine", WATCHDOG_ENGINE)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_watchdog_disabled_probe_contract_is_valid() -> None:
     contract = load_contract(CONTRACT)
 
@@ -41,10 +52,12 @@ def test_watchdog_disabled_probe_contract_is_valid() -> None:
 
 def test_dc_watchdog_marks_disabled_heartbeat_probes() -> None:
     source = WATCHDOG_SCRIPT.read_text(encoding="utf-8")
+    engine = _load_watchdog_engine_module()
 
-    assert "DISABLED_SERVICES=(" in source
-    assert "nas_watchdog_heartbeat|NAS/Feishu sync jobs paused" in source
-    assert "feishu_sync_heartbeat|NAS/Feishu sync jobs paused" in source
+    disabled = {probe.name: probe.reason for probe in engine.DISABLED_PROBES}
+    assert disabled["nas_watchdog_heartbeat"].startswith("NAS/Feishu sync jobs paused")
+    assert disabled["feishu_sync_heartbeat"].startswith("NAS/Feishu sync jobs paused")
+    assert 'watchdog_engine.py" list-disabled' in source
     assert "state_set_disabled" in source
     assert "watchdog_state.py" in source
     assert "disabled_reason" in WATCHDOG_STATE.read_text(encoding="utf-8")
@@ -59,18 +72,22 @@ def test_watchdogctl_uses_active_service_entries_for_probe_enabled() -> None:
 
 def test_watchdogctl_ignores_probe_names_in_service_comments(tmp_path) -> None:
     module = _load_watchdogctl_module()
-    script = tmp_path / "scripts-watchdog" / "dc-watchdog.sh"
+    script = tmp_path / "scripts-watchdog" / "watchdog_engine.py"
     script.parent.mkdir()
     script.write_text(
         """
-SERVICES=(
-    # "feishu_sync_heartbeat|file_age|/tmp/old.heartbeat:4000"
-    # feishu_sync_heartbeat remains disabled while sync jobs are paused.
-    "astrbot_api|http|http://127.0.0.1:6185/api/stat/start-time"
-)
-DISABLED_SERVICES=(
-    "feishu_sync_heartbeat|paused"
-)
+from __future__ import annotations
+
+class Probe:
+    def __init__(self, name, groups=()):
+        self.name = name
+        self.groups = groups
+
+ACTIVE_PROBES = (Probe("astrbot_api", ("watchdog",)),)
+DISABLED_PROBES = (Probe("feishu_sync_heartbeat", ("watchdog",)),)
+
+def probe_enabled(name):
+    return name == "astrbot_api"
 """,
         encoding="utf-8",
     )

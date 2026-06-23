@@ -1,0 +1,64 @@
+{
+  "contract_id": "multi_user_first_message_reliability",
+  "version": "1.0.0",
+  "status": "active",
+  "goal": "The assistant must behave as a company-level shared service: multiple employees can start independent first-message chats concurrently without one user's route, plugin side effect, or session state breaking another user's reply path.",
+  "rules": [
+    {
+      "id": "first-message-001",
+      "title": "Concurrent first messages must complete",
+      "text": "A local runtime smoke test with multiple distinct users and sessions must return HTTP 200 and a completed SSE response for every first message."
+    },
+    {
+      "id": "first-message-002",
+      "title": "Reliability gates precede feature activation",
+      "text": "New router, workflow, memory, and skill frameworks must pass the first-message smoke before being enabled beyond observe-only mode."
+    },
+    {
+      "id": "first-message-003",
+      "title": "No shared-session contamination",
+      "text": "Smoke traffic must use distinct usernames and session IDs. Failures include cross-user session reuse, database lock failures, dropped streams, and incomplete responses."
+    },
+    {
+      "id": "first-message-004",
+      "title": "Side-effect plugins must fail open",
+      "text": "Inbox, employee insight, onboarding, memory, and knowledge-base enrichment plugins may annotate or persist side effects, but slow or failing side-effect work must time out or degrade without blocking the primary chat response path."
+    },
+    {
+      "id": "first-message-005",
+      "title": "Grey features must not auto-enroll normal chat",
+      "text": "Employee-facing grey features may accept explicit self-registration or pre-approved pilot profiles, but ordinary first messages from unknown users must remain observe-only by default."
+    }
+  ],
+  "acceptance_tests": [
+    {
+      "id": "A1",
+      "title": "Five concurrent local first messages complete through the real OpenAPI path",
+      "command": "uv run python scripts-tools/multi_user_first_message_smoke.py --users 5 --timeout 120"
+    },
+    {
+      "id": "A2",
+      "title": "AI Inbox side effects time out without blocking message handling",
+      "command": "uv run pytest dc_engines/tests/test_ai_inbox.py::test_plugin_on_message_side_effect_timeout_does_not_block_reply_path -q"
+    },
+    {
+      "id": "A3",
+      "title": "Employee insight defaults to pilot-only observe mode and times out fail-open",
+      "command": "uv run pytest tests/test_employee_insight_plugin.py::test_employee_insight_plugin_pilot_only_skips_unknown_private_message tests/test_employee_insight_plugin.py::test_employee_insight_plugin_side_effect_timeout_does_not_block_chat -q"
+    },
+    {
+      "id": "A4",
+      "title": "Concierge KB enrichment times out without blocking LLM request preparation",
+      "command": "uv run pytest dc_engines/tests/test_concierge_identity.py::test_employee_kb_context_timeout_fails_open -q"
+    },
+    {
+      "id": "A5",
+      "title": "Employee onboarding times out without blocking business first messages",
+      "command": "uv run pytest tests/test_employee_onboarding_maintenance.py::test_onboarding_timeout_fails_open_for_business_first_message -q"
+    }
+  ],
+  "operator_notes": [
+    "This smoke test calls the live local API server on http://127.0.0.1:6185 and may trigger the configured LLM provider.",
+    "It does not send Feishu messages and creates only a temporary local OpenAPI key when ASTRBOT_API_KEY is not already configured."
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "feature": "assistant_chat_health",
+  "goal": "Expose a backend health probe for assistant chat sessions and side threads without sending real LLM traffic or reading message content.",
+  "acceptance_criteria": [
+    {
+      "id": "assistant-health-001",
+      "description": "The backend exposes /api/chat/health as an unauthenticated watchdog-safe probe that returns only runtime metadata such as counts, timestamps, and check status.",
+      "verification": "uv run pytest tests/test_assistant_chat_health.py -q"
+    },
+    {
+      "id": "assistant-health-002",
+      "description": "Stale running assistant chat sessions or side threads return HTTP 503 so scheduled watchdog checks can alert on blocked chat runtime.",
+      "verification": "uv run pytest tests/test_assistant_chat_health.py -q"
+    },
+    {
+      "id": "assistant-health-003",
+      "description": "The watchdog registry includes an assistant_chat_health strict HTTP probe so dashboard authentication failures are not mistaken for healthy chat runtime.",
+      "verification": "uv run pytest tests/test_assistant_chat_health.py tests/test_watchdog_engineering.py -q"
+    },
+    {
+      "id": "assistant-health-004",
+      "description": "Operators can open the assistant chat health panel from both the AstrBot system entries quick panel and the dashboard sidebar.",
+      "verification": "uv run pytest tests/test_assistant_chat_health.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "assistant-health-005",
+      "description": "The health response includes anonymous recent chat activity windows for dashboard WebChat and platform pipeline runs so operators can see fresh hits after completed chats without exposing message content or session identifiers.",
+      "verification": "uv run pytest tests/test_assistant_chat_health.py -q"
+    },
+    {
+      "id": "assistant-health-006",
+      "description": "The health response includes a persisted collection summary counted from local-day midnight using provider stats, so today's hits survive backend restarts without exposing UMO, message content, or session identifiers.",
+      "verification": "uv run pytest tests/test_assistant_chat_health.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "endpoint": "/api/chat/health",
+    "watchdog_probe": "assistant_chat_health",
+    "stale_after_sec_default": 900,
+    "privacy": {
+      "forbid_message_content": true,
+      "forbid_session_id_details_in_unauthenticated_response": true,
+      "allowed_metadata": [
+        "counts",
+        "timestamps",
+        "durations",
+        "recent activity counters",
+        "local-day collection counters",
+        "check names",
+        "status codes",
+        "queue sizes"
+      ]
+    }
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "manual": [
+      "uv run pytest tests/test_assistant_chat_health.py tests/test_watchdog_engineering.py -q",
+      "uv run pytest tests/test_assistant_chat_health.py tests/test_system_entries_quick_entries.py -q",
+      "bash -n scripts-watchdog/dc-watchdog.sh"
+    ]
+  }
+}

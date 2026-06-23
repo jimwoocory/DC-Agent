@@ -7,6 +7,7 @@
 
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/dianchi/.local/bin"
+export PYTHONPATH="/Users/dianchi/DC-Agent/dc_engines:/Users/dianchi/DC-Agent:${PYTHONPATH:-}"
 
 INCIDENT_ID="${1:-}"
 SERVICE="${2:-unknown}"

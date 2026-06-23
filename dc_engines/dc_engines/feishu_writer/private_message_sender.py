@@ -53,6 +53,8 @@ class FeishuPrivateMessageSender:
         self,
         employee_id: str,
         card: dict[str, Any],
+        *,
+        card_type: str = "employee_insight_welcome",
     ) -> TextSendResult:
         """Send an interactive card message to one Feishu open_id."""
         open_id = (employee_id or "").strip()
@@ -70,10 +72,51 @@ class FeishuPrivateMessageSender:
                 error="card is required",
                 raw={"employee_id": open_id, "msg_type": "interactive"},
             )
-        return await self._send_message(
-            open_id=open_id,
-            msg_type="interactive",
-            content=json.dumps(card, ensure_ascii=False),
+
+        raw = {
+            "employee_id": open_id,
+            "msg_type": "interactive",
+            "card_type": card_type,
+        }
+        try:
+            from dc_engines.card_runtime import send_card_via_runtime
+            from dc_engines.feishu_card_streamer import FeishuCardStreamer
+
+            stream = await send_card_via_runtime(
+                FeishuCardStreamer(self._client),
+                card_type=card_type,
+                chat_id=open_id,
+                receive_id_type="open_id",
+                card=card,
+                platform_id="巅池-Agent小助手",
+                event="employee_insight_outreach",
+                detail="employee insight welcome card",
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_hub().record_call("im.message.create", error=exc)
+            logger.warning("[feishu_writer] send private card exception: %s", exc)
+            return TextSendResult(
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+                raw=raw,
+            )
+
+        if stream is None:
+            get_hub().record_call(
+                "im.message.create",
+                error=RuntimeError("card runtime send failed"),
+            )
+            return TextSendResult(
+                success=False,
+                error="Feishu card runtime send failed",
+                raw=raw,
+            )
+
+        get_hub().record_call("im.message.create")
+        return TextSendResult(
+            success=True,
+            provider_message_id=stream.message_id,
+            raw=raw,
         )
 
     async def _send_message(

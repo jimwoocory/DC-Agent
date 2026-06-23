@@ -3,5 +3,10 @@
     "type": "bool",
     "description": "启用后，workflow_intent_plugin 不再自动建任务，交由 department_workflow_plugin 处理。",
     "default": false
+  },
+  "implicit_create_tasks": {
+    "type": "bool",
+    "description": "是否允许关键词命中的私聊/群聊自动创建 Harness task；默认关闭，普通聊天只记录候选，避免升级影响首句稳定性",
+    "default": false
   }
 }

@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import ClassVar, Protocol
 
@@ -36,6 +38,15 @@ from dc_router_core.taxonomy import (
     RouteDepth,
     RouterIntent,
 )
+
+_log = logging.getLogger(__name__)
+
+# Maximum seconds to wait for the LLM classifier before falling back to rules-only.
+CLASSIFIER_TIMEOUT_SECONDS: float = 12.0
+
+# Minimum confidence for classifier to accept a routing decision.
+# Below this threshold, the message stays as FALLBACK (rules-only).
+CLASSIFIER_CONFIDENCE_THRESHOLD: float = 0.65
 
 
 @dataclass(slots=True)
@@ -184,14 +195,40 @@ class DCRouter:
             return primary
         if primary.intent != RouterIntent.FALLBACK:
             return primary
-        classifier_result = await self.classifier.classify(envelope.combined_text)
+        try:
+            classifier_result = await asyncio.wait_for(
+                self.classifier.classify(envelope.combined_text),
+                timeout=CLASSIFIER_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            _log.warning(
+                "[dc_router] classifier timed out after %.1fs, falling back to rules",
+                CLASSIFIER_TIMEOUT_SECONDS,
+            )
+            return primary
+        except Exception:  # noqa: BLE001
+            _log.warning(
+                "[dc_router] classifier raised unexpected error, falling back to rules",
+                exc_info=True,
+            )
+            return primary
         if classifier_result is None:
+            return primary
+        confidence = float(getattr(classifier_result, "confidence", 0) or 0)
+        if confidence < CLASSIFIER_CONFIDENCE_THRESHOLD:
+            _log.info(
+                "[dc_router] classifier confidence %.2f below threshold %.2f, "
+                "keeping FALLBACK (intent=%s)",
+                confidence,
+                CLASSIFIER_CONFIDENCE_THRESHOLD,
+                classifier_result.intent.value,
+            )
             return primary
         return RuleMatch(
             intent=classifier_result.intent,
             reason=classifier_result.reason,
             source="classifier",
-            confidence=str(getattr(classifier_result, "confidence", "") or ""),
+            confidence=str(confidence),
         )
 
     # ───────────────── L2 路由解析 ─────────────────

@@ -174,6 +174,25 @@ def _extract_title(text: str) -> str | None:
     return None
 
 
+def _is_lark_event(event: AstrMessageEvent) -> bool:
+    """Return True only for Feishu/Lark message events.
+
+    The renderer sends Feishu interactive cards. Webchat/OpenAPI smoke events can
+    carry synthetic sender ids such as ``ou_smoke_user_*``; treating those as
+    Feishu ``open_id`` values creates noisy 99992351 failures and hides real
+    card-delivery defects.
+    """
+    platform_name = ""
+    try:
+        platform_name = str(event.get_platform_name() or "").lower()
+    except Exception:
+        platform_name = ""
+    if platform_name in {"lark", "feishu"}:
+        return True
+    platform_id = str(event.get_platform_id() or "").lower()
+    return platform_id in {"lark", "feishu"} or "飞书" in platform_id
+
+
 def _should_use_waiting_card(event: AstrMessageEvent) -> bool:
     intent = str(event.get_extra("dc_router_intent") or "").strip()
     return should_start_waiting_card(
@@ -233,6 +252,8 @@ class DailyCardRendererPlugin(Star):
 
     async def _start_thinking_card_if_needed(self, event: AstrMessageEvent) -> None:
         """Create one waiting card for a lark LLM request if it does not exist yet."""
+        if not _is_lark_event(event):
+            return
         if event.get_extra(_STREAM_KEY):
             return
 
@@ -317,6 +338,13 @@ class DailyCardRendererPlugin(Star):
     ) -> None:
         """Finalize waiting cards or render a fallback card for the LLM result."""
         platform_id = event.get_platform_id() or ""
+        if not _is_lark_event(event):
+            logger.debug(
+                "[daily_card_renderer] skip non-lark platform=%s name=%s",
+                platform_id,
+                getattr(event, "get_platform_name", lambda: "")(),
+            )
+            return
         if not platform_id:
             logger.warning("[daily_card_renderer] 无法获取 platform_id，跳过卡片渲染")
             return

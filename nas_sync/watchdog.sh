@@ -51,6 +51,13 @@ ensure_credentials() {
 
     log "WARN  Keychain 中缺失 $KEYCHAIN_KEY"
 
+    # cron/launchd 的非交互会话可能无法读取或写入登录 Keychain。
+    # mount.sh 会在这种情况下直接读取本机备份密码兜底。
+    if [ -r "$PASSWORD_BACKUP" ] && [ -s "$PASSWORD_BACKUP" ]; then
+        log "WARN  Keychain 不可读，挂载阶段将使用备份密码兜底"
+        return 0
+    fi
+
     # 尝试从备份恢复
     if [ -r "$PASSWORD_BACKUP" ]; then
         local pwd
@@ -144,7 +151,7 @@ fi
 if ! ensure_credentials; then
     touch_heartbeat
     record_failure "凭据缺失：Keychain 无密码且备份文件不可用"
-    exit 0
+    exit 1
 fi
 
 # ── 4. 执行挂载 ───────────────────────────────────────────────
@@ -173,3 +180,4 @@ elif echo "$MOUNT_OUTPUT" | grep -qi "Permission denied"; then
 fi
 
 record_failure "$REASON"
+exit 1

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import importlib.util
 import json
 import os
 import plistlib
@@ -137,10 +138,23 @@ CODEX_AUTOMATIONS: tuple[CodexAutomation, ...] = (
 )
 
 
-WATCHDOG_PROBES: dict[str, tuple[str, ...]] = {
-    "nas_watchdog_heartbeat": ("nas", "sync", "watchdog"),
-    "feishu_sync_heartbeat": ("nas", "sync", "watchdog"),
-}
+def _load_watchdog_engine():
+    module_path = DC_ROOT / "scripts-watchdog" / "watchdog_engine.py"
+    spec = importlib.util.spec_from_file_location("watchdog_engine", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load watchdog engine: {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def watchdog_probe_groups() -> dict[str, tuple[str, ...]]:
+    engine = _load_watchdog_engine()
+    return {
+        probe.name: probe.groups
+        for probe in (*engine.ACTIVE_PROBES, *engine.DISABLED_PROBES)
+    }
 
 
 def run(args: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -267,25 +281,7 @@ def set_codex_status(job: CodexAutomation, status: str) -> bool:
 
 
 def probe_enabled(name: str) -> bool:
-    script = DC_ROOT / "scripts-watchdog/dc-watchdog.sh"
-    if not script.exists():
-        return False
-    text = script.read_text(errors="ignore")
-    active_services = re.search(r"SERVICES=\((.*?)\n\)", text, flags=re.DOTALL)
-    if not active_services:
-        return False
-    for line in active_services.group(1).splitlines():
-        stripped = line.strip()
-        if not stripped.startswith('"'):
-            continue
-        match = re.match(r'"([^"\n]+)"', stripped)
-        if not match:
-            continue
-        entry = match.group(1)
-        service_name = entry.split("|", 1)[0]
-        if service_name == name:
-            return True
-    return False
+    return bool(_load_watchdog_engine().probe_enabled(name))
 
 
 def in_group(groups: tuple[str, ...], selected: str) -> bool:
@@ -397,7 +393,7 @@ def collect_status(group: str) -> dict:
             "groups": list(groups),
             "state": "enabled" if probe_enabled(name) else "disabled",
         }
-        for name, groups in WATCHDOG_PROBES.items()
+        for name, groups in watchdog_probe_groups().items()
         if in_group(groups, group)
     ]
 

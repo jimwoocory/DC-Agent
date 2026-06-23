@@ -7,6 +7,10 @@ adapter and does not call Feishu APIs directly; API calls stay centralized in
 
 from __future__ import annotations
 
+import json
+import sqlite3
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +28,16 @@ from astrbot.api.event.filter import EventMessageType
 from astrbot.api.star import Context, Star, register
 
 PLUGIN_ID = "feishu_channel_control"
+
+
+def _call_event_getter(event: AstrMessageEvent, name: str) -> str:
+    getter = getattr(event, name, None)
+    if not callable(getter):
+        return ""
+    try:
+        return str(getter() or "")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 @register(
@@ -51,6 +65,7 @@ class FeishuChannelControlPlugin(Star):
 
     async def initialize(self) -> None:
         self.context.feishu_channel_control = self
+        self._ensure_ingress_audit_schema()
         logger.info(
             "[feishu_channel_control] enabled=%s dm=%s group=%s state=%s",
             self.config.enabled,
@@ -120,6 +135,7 @@ class FeishuChannelControlPlugin(Star):
             return
         peer = self._peer_from_event(event)
         decision = self.controller.decide(peer)
+        self._record_ingress_audit(event, peer, decision)
         for key, value in decision.metadata().items():
             event.set_extra(key, value)
         if decision.allowed:
@@ -135,10 +151,9 @@ class FeishuChannelControlPlugin(Star):
         raw_msg = getattr(event, "message_obj", None)
         chat_id = str(getattr(raw_msg, "chat_id", "") or "")
         group_id = event.get_group_id() or ""
-        is_group = bool(group_id or chat_id.startswith("oc_")) or "Group" in str(
-            getattr(raw_msg, "type", "")
-        )
-        peer_id = group_id or chat_id or sender_id
+        raw_type = str(getattr(raw_msg, "type", "") or "")
+        is_group = bool(group_id) or "GROUP" in raw_type.upper()
+        peer_id = (group_id or chat_id) if is_group else sender_id
         return FeishuPeer(
             kind="group" if is_group else "direct",
             peer_id=peer_id,
@@ -149,10 +164,155 @@ class FeishuChannelControlPlugin(Star):
             trusted_card_action=self._is_trusted_card_action(event),
         )
 
+    def _record_ingress_audit(
+        self,
+        event: AstrMessageEvent,
+        peer: FeishuPeer,
+        decision: Any,
+    ) -> None:
+        if not hasattr(self, "project_root"):
+            return
+        try:
+            db_path = self._audit_db_path()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            audit_id = uuid.uuid4().hex
+            now = datetime.now(timezone.utc).isoformat()
+            raw_msg = getattr(event, "message_obj", None)
+            chat_id = str(getattr(raw_msg, "chat_id", "") or "")
+            raw_type = str(getattr(raw_msg, "type", "") or "")
+            message_id = str(
+                getattr(raw_msg, "message_id", "")
+                or getattr(raw_msg, "id", "")
+                or getattr(raw_msg, "msg_id", "")
+                or ""
+            )
+            sender_name = _call_event_getter(event, "get_sender_name")
+            payload = {
+                "message_id": message_id,
+                "raw_type": raw_type,
+                "chat_id": chat_id,
+                "group_id": event.get_group_id() or "",
+            }
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS feishu_ingress_audit (
+                        audit_id TEXT PRIMARY KEY,
+                        received_at TEXT NOT NULL,
+                        platform_id TEXT NOT NULL,
+                        sender_id TEXT NOT NULL,
+                        sender_name TEXT NOT NULL,
+                        peer_kind TEXT NOT NULL,
+                        peer_id TEXT NOT NULL,
+                        text TEXT NOT NULL,
+                        allowed INTEGER NOT NULL,
+                        policy_reason TEXT NOT NULL,
+                        agent_id TEXT NOT NULL,
+                        workspace TEXT NOT NULL,
+                        mentioned INTEGER NOT NULL,
+                        trusted_card_action INTEGER NOT NULL,
+                        payload_json TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO feishu_ingress_audit (
+                        audit_id, received_at, platform_id, sender_id, sender_name,
+                        peer_kind, peer_id, text, allowed, policy_reason, agent_id,
+                        workspace, mentioned, trusted_card_action, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        audit_id,
+                        now,
+                        event.get_platform_id() or "",
+                        peer.sender_id,
+                        sender_name,
+                        peer.kind,
+                        peer.peer_id,
+                        peer.message_text,
+                        1 if decision.allowed else 0,
+                        decision.reason,
+                        decision.agent_id,
+                        decision.workspace,
+                        1 if peer.mentioned else 0,
+                        1 if peer.trusted_card_action else 0,
+                        json.dumps(payload, ensure_ascii=False),
+                    ),
+                )
+                conn.commit()
+            event.set_extra("feishu_ingress_audit_id", audit_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[feishu_channel_control] 写入入口审计失败：%s", exc)
+
+    def _ensure_ingress_audit_schema(self) -> None:
+        """Create the lossless Feishu ingress audit table at plugin startup."""
+        try:
+            db_path = self._audit_db_path()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS feishu_ingress_audit (
+                        audit_id TEXT PRIMARY KEY,
+                        received_at TEXT NOT NULL,
+                        platform_id TEXT NOT NULL,
+                        sender_id TEXT NOT NULL,
+                        sender_name TEXT NOT NULL,
+                        peer_kind TEXT NOT NULL,
+                        peer_id TEXT NOT NULL,
+                        text TEXT NOT NULL,
+                        allowed INTEGER NOT NULL,
+                        policy_reason TEXT NOT NULL,
+                        agent_id TEXT NOT NULL,
+                        workspace TEXT NOT NULL,
+                        mentioned INTEGER NOT NULL,
+                        trusted_card_action INTEGER NOT NULL,
+                        payload_json TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_feishu_ingress_audit_time
+                    ON feishu_ingress_audit(received_at DESC)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_feishu_ingress_audit_sender
+                    ON feishu_ingress_audit(sender_id, received_at DESC)
+                    """
+                )
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[feishu_channel_control] 初始化入口审计表失败：%s", exc)
+
+    def _audit_db_path(self) -> Path:
+        project_root = getattr(self, "project_root", Path.cwd())
+        return Path(project_root) / "data" / "ai_inbox.db"
+
     @staticmethod
     def _is_lark_event(event: AstrMessageEvent) -> bool:
         name = (event.get_platform_name() or "").lower()
-        return name in {"lark", "feishu"}
+        if name in {"lark", "feishu"}:
+            return True
+        platform_id = (event.get_platform_id() or "").lower()
+        if any(token in platform_id for token in ("lark", "feishu", "飞书", "小助手")):
+            return True
+        sender_id = event.get_sender_id() or ""
+        group_id = event.get_group_id() or ""
+        msg = getattr(event, "message_obj", None)
+        chat_id = str(getattr(msg, "chat_id", "") or "")
+        raw_type = str(getattr(msg, "type", "") or "")
+        return (
+            sender_id.startswith("ou_")
+            or group_id.startswith("oc_")
+            or chat_id.startswith("oc_")
+            or "FriendMessage" in raw_type
+            or "GroupMessage" in raw_type
+        )
 
     @staticmethod
     def _is_trusted_card_action(event: AstrMessageEvent) -> bool:

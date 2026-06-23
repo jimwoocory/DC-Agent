@@ -11,6 +11,7 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
     GetMessageRequest,
     GetMessageResourceRequest,
+    ListMessageRequest,
 )
 from lark_oapi.api.im.v1.processor import (
     P2ImChatAccessEventBotP2pChatEnteredV1Processor,
@@ -40,6 +41,8 @@ from .server import LarkWebhookServer
     "lark", "飞书机器人官方 API 适配器", support_streaming_message=True
 )
 class LarkPlatformAdapter(Platform):
+    MESSAGE_ID_DEDUPE_TTL_SECONDS = 1800
+
     def __init__(
         self,
         platform_config: dict,
@@ -100,6 +103,10 @@ class LarkPlatformAdapter(Platform):
             domain=self.domain,
             event_handler=self.event_handler,
         )
+        self._socket_connected_at: float | None = None
+        self._socket_reconnect_attempts = 0
+        self._last_event_at: float | None = None
+        self._install_socket_observers()
 
         self.lark_api = (
             lark.Client.builder()
@@ -116,6 +123,84 @@ class LarkPlatformAdapter(Platform):
             self.webhook_server.set_callback(self.handle_webhook_event)
 
         self.event_id_timestamps: dict[str, float] = {}
+        self.message_id_timestamps: dict[str, float] = {}
+        self.message_id_store_path = self._default_message_id_store_path()
+        self._message_id_store_loaded = False
+        self._load_persisted_message_ids()
+        self.polling_fallback_enabled = bool(
+            platform_config.get("lark_polling_fallback_enabled", False)
+        )
+        polling_chat_ids = platform_config.get("lark_polling_fallback_chat_ids", [])
+        self.polling_fallback_chat_ids = [
+            str(chat_id).strip() for chat_id in polling_chat_ids if str(chat_id).strip()
+        ]
+        self.polling_chat_store_path = self._default_polling_chat_store_path()
+        self._load_persisted_polling_chat_ids()
+        self.polling_fallback_interval = max(
+            3,
+            int(platform_config.get("lark_polling_fallback_interval_sec", 8) or 8),
+        )
+        self.polling_fallback_backfill_seconds = max(
+            60,
+            int(platform_config.get("lark_polling_fallback_backfill_minutes", 10) or 10)
+            * 60,
+        )
+        self.polling_fallback_page_size = min(
+            50,
+            max(
+                5, int(platform_config.get("lark_polling_fallback_page_size", 20) or 20)
+            ),
+        )
+        self._polling_fallback_task: asyncio.Task | None = None
+        self._polling_next_start_time = self._initial_polling_start_time(
+            has_persisted_seen_messages=bool(self.message_id_timestamps)
+        )
+
+    def _install_socket_observers(self) -> None:
+        if self.connection_mode == "webhook":
+            return
+
+        previous_reconnecting = getattr(self.client, "on_reconnecting", None)
+        previous_reconnected = getattr(self.client, "on_reconnected", None)
+
+        def on_reconnecting() -> None:
+            self._socket_reconnect_attempts += 1
+            logger.warning(
+                "[Lark.Socket] reconnecting platform=%s attempts=%s last_event_age=%.1fs",
+                self.meta().id,
+                self._socket_reconnect_attempts,
+                self._seconds_since(self._last_event_at),
+            )
+            if callable(previous_reconnecting):
+                previous_reconnecting()
+
+        def on_reconnected() -> None:
+            self._mark_socket_connected(source="reconnect")
+            if callable(previous_reconnected):
+                previous_reconnected()
+
+        if hasattr(self.client, "on_reconnecting"):
+            self.client.on_reconnecting = on_reconnecting
+        if hasattr(self.client, "on_reconnected"):
+            self.client.on_reconnected = on_reconnected
+
+    @staticmethod
+    def _seconds_since(ts: float | None) -> float:
+        if ts is None:
+            return -1.0
+        return max(0.0, time.time() - ts)
+
+    def _mark_socket_connected(self, *, source: str) -> None:
+        self._socket_connected_at = time.time()
+        conn_id = getattr(self.client, "_conn_id", "") or ""
+        service_id = getattr(self.client, "_service_id", "") or ""
+        logger.info(
+            "[Lark.Socket] connected platform=%s source=%s conn_id=%s service_id=%s",
+            self.meta().id,
+            source,
+            str(conn_id)[:12],
+            str(service_id)[:12],
+        )
 
     async def _download_message_resource(
         self,
@@ -484,6 +569,348 @@ class LarkPlatformAdapter(Platform):
         self.event_id_timestamps[event_id] = time.time()
         return False
 
+    def _clean_expired_message_ids(self) -> None:
+        current_time = time.time()
+        expired_keys = [
+            message_id
+            for message_id, timestamp in self.message_id_timestamps.items()
+            if current_time - timestamp > self.MESSAGE_ID_DEDUPE_TTL_SECONDS
+        ]
+        for message_id in expired_keys:
+            del self.message_id_timestamps[message_id]
+
+    def _mark_message_id_seen(self, message_id: str) -> bool:
+        self._load_persisted_message_ids()
+        self._clean_expired_message_ids()
+        if message_id in self.message_id_timestamps:
+            return False
+        self.message_id_timestamps[message_id] = time.time()
+        self._persist_message_ids()
+        return True
+
+    def _default_message_id_store_path(self) -> Path:
+        platform_id = str(self.config.get("id") or self.appid or "lark")
+        safe_platform_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", platform_id).strip("_")
+        if not safe_platform_id:
+            safe_platform_id = "lark"
+        return (
+            Path(get_astrbot_temp_path())
+            / "lark_seen_messages"
+            / (f"{safe_platform_id}.json")
+        )
+
+    def _default_polling_chat_store_path(self) -> Path:
+        platform_id = str(self.config.get("id") or self.appid or "lark")
+        safe_platform_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", platform_id).strip("_")
+        if not safe_platform_id:
+            safe_platform_id = "lark"
+        return (
+            Path(get_astrbot_temp_path())
+            / "lark_polling_chats"
+            / (f"{safe_platform_id}.json")
+        )
+
+    def _load_persisted_polling_chat_ids(self) -> None:
+        store_path = getattr(self, "polling_chat_store_path", None)
+        if store_path is None:
+            return
+        try:
+            if not store_path.exists():
+                return
+            payload = json.loads(store_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Lark.Polling] 读取已学习 chat 缓存失败: %s", exc)
+            return
+        loaded_chat_ids = (
+            payload.get("chat_ids", []) if isinstance(payload, dict) else payload
+        )
+        if not isinstance(loaded_chat_ids, list):
+            return
+
+        chat_ids = getattr(self, "polling_fallback_chat_ids", None)
+        if chat_ids is None:
+            self.polling_fallback_chat_ids = []
+            chat_ids = self.polling_fallback_chat_ids
+        for chat_id in loaded_chat_ids:
+            normalized = str(chat_id or "").strip()
+            if (
+                normalized
+                and normalized.startswith("oc_")
+                and normalized not in chat_ids
+            ):
+                chat_ids.append(normalized)
+
+    def _persist_polling_chat_ids(self) -> None:
+        store_path = getattr(self, "polling_chat_store_path", None)
+        if store_path is None:
+            return
+        chat_ids = [
+            str(chat_id).strip()
+            for chat_id in getattr(self, "polling_fallback_chat_ids", [])
+            if str(chat_id).strip()
+        ]
+        try:
+            platform_id = self.meta().id
+        except Exception:  # noqa: BLE001
+            platform_id = str(getattr(self, "appid", "") or "lark")
+        try:
+            store_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = store_path.with_suffix(store_path.suffix + ".tmp")
+            tmp_path.write_text(
+                json.dumps(
+                    {
+                        "platform_id": platform_id,
+                        "chat_ids": chat_ids,
+                        "updated_at": int(time.time()),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            tmp_path.replace(store_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Lark.Polling] 写入已学习 chat 缓存失败: %s", exc)
+
+    def _load_persisted_message_ids(self) -> None:
+        if getattr(self, "_message_id_store_loaded", False):
+            return
+        self._message_id_store_loaded = True
+        store_path = getattr(self, "message_id_store_path", None)
+        if store_path is None:
+            return
+        try:
+            if not store_path.exists():
+                return
+            payload = json.loads(store_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Lark] 读取消息去重缓存失败: %s", exc)
+            return
+        if not isinstance(payload, dict):
+            return
+        now = time.time()
+        for message_id, timestamp in payload.items():
+            if not isinstance(message_id, str):
+                continue
+            try:
+                seen_at = float(timestamp)
+            except (TypeError, ValueError):
+                continue
+            if now - seen_at <= self.MESSAGE_ID_DEDUPE_TTL_SECONDS:
+                self.message_id_timestamps[message_id] = seen_at
+
+    def _persist_message_ids(self) -> None:
+        store_path = getattr(self, "message_id_store_path", None)
+        if store_path is None:
+            return
+        try:
+            store_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = store_path.with_suffix(store_path.suffix + ".tmp")
+            tmp_path.write_text(
+                json.dumps(self.message_id_timestamps, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            tmp_path.replace(store_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Lark] 写入消息去重缓存失败: %s", exc)
+
+    def _initial_polling_start_time(self, *, has_persisted_seen_messages: bool) -> int:
+        if has_persisted_seen_messages:
+            return int(time.time() - self.polling_fallback_backfill_seconds)
+        return int(time.time())
+
+    @staticmethod
+    def _timestamp_to_seconds(value: Any) -> int:
+        if value is None:
+            return int(time.time())
+        try:
+            timestamp = int(value)
+        except (TypeError, ValueError):
+            return int(time.time())
+        if timestamp > 10**11:
+            return timestamp // 1000
+        return timestamp
+
+    @staticmethod
+    def _message_body_content(message_item: Any) -> dict[str, Any] | None:
+        body = getattr(message_item, "body", None)
+        content_raw = getattr(body, "content", "") if body else ""
+        if not content_raw:
+            content_raw = getattr(message_item, "content", "")
+        if isinstance(content_raw, dict):
+            return content_raw
+        try:
+            parsed = json.loads(str(content_raw))
+        except json.JSONDecodeError:
+            logger.warning("[Lark.Polling] 解析消息内容失败: %s", content_raw)
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _message_sender_id(self, message_item: Any) -> str:
+        sender = getattr(message_item, "sender", None)
+        sender_id = str(getattr(sender, "id", "") or "") if sender else ""
+        if not sender_id:
+            return ""
+        if sender_id == self.appid:
+            return ""
+        return sender_id
+
+    def _remember_polling_chat_id(self, chat_id: str, *, reason: str) -> bool:
+        chat_id = str(chat_id or "").strip()
+        if not chat_id or not getattr(self, "polling_fallback_enabled", False):
+            return False
+
+        chat_ids = getattr(self, "polling_fallback_chat_ids", None)
+        if chat_ids is None:
+            self.polling_fallback_chat_ids = []
+            chat_ids = self.polling_fallback_chat_ids
+        if chat_id in chat_ids:
+            return False
+
+        chat_ids.append(chat_id)
+        try:
+            platform_id = self.meta().id
+        except Exception:  # noqa: BLE001
+            platform_id = ""
+        logger.info(
+            "[Lark.Polling] learned chat platform=%s chat=%s reason=%s total=%s",
+            platform_id,
+            chat_id,
+            reason,
+            len(chat_ids),
+        )
+        self._persist_polling_chat_ids()
+        return True
+
+    async def _build_polled_message(self, message_item: Any) -> AstrBotMessage | None:
+        message_id = str(getattr(message_item, "message_id", "") or "")
+        if not message_id:
+            logger.warning("[Lark.Polling] 跳过缺少 message_id 的消息")
+            return None
+
+        sender_id = self._message_sender_id(message_item)
+        if not sender_id:
+            return None
+
+        content_json = self._message_body_content(message_item)
+        if content_json is None:
+            return None
+
+        msg_type = str(getattr(message_item, "msg_type", "") or "unknown")
+        parsed_components = await self._parse_message_components(
+            message_id=message_id,
+            message_type=msg_type,
+            content=content_json,
+            at_map=self._build_at_map(getattr(message_item, "mentions", None)),
+        )
+        message_str = self._build_message_str_from_components(parsed_components)
+        if not message_str:
+            return None
+
+        chat_id = str(getattr(message_item, "chat_id", "") or "")
+        chat_type = str(getattr(message_item, "chat_type", "") or "")
+        abm = AstrBotMessage()
+        abm.timestamp = self._timestamp_to_seconds(
+            getattr(message_item, "create_time", None)
+        )
+        abm.message = parsed_components
+        abm.type = (
+            MessageType.GROUP_MESSAGE
+            if chat_type == "group"
+            else MessageType.FRIEND_MESSAGE
+        )
+        if abm.type == MessageType.GROUP_MESSAGE:
+            abm.group_id = chat_id
+        abm.self_id = self.bot_name
+        abm.message_str = message_str
+        abm.message_id = message_id
+        abm.raw_message = message_item
+        abm.sender = MessageMember(user_id=sender_id, nickname=sender_id[:8])
+        abm.session_id = chat_id if abm.type == MessageType.GROUP_MESSAGE else sender_id
+        return abm
+
+    async def _poll_lark_chat_messages(self, chat_id: str) -> None:
+        if self.lark_api.im is None:
+            logger.error("[Lark.Polling] API Client im 模块未初始化")
+            return
+
+        end_time = int(time.time())
+        start_time = max(0, self._polling_next_start_time)
+        page_token = ""
+        fetched_pages = 0
+        max_create_time = start_time
+
+        while True:
+            builder = (
+                ListMessageRequest.builder()
+                .container_id_type("chat")
+                .container_id(chat_id)
+                .start_time(str(start_time))
+                .end_time(str(end_time))
+                .sort_type("ByCreateTimeAsc")
+                .page_size(self.polling_fallback_page_size)
+            )
+            if page_token:
+                builder = builder.page_token(page_token)
+            response = await self.lark_api.im.v1.message.alist(builder.build())
+            if not response.success():
+                logger.warning(
+                    "[Lark.Polling] 拉取消息失败 platform=%s chat=%s code=%s msg=%s",
+                    self.meta().id,
+                    chat_id,
+                    response.code,
+                    response.msg,
+                )
+                return
+
+            data = getattr(response, "data", None)
+            items = list(getattr(data, "items", None) or [])
+            for item in items:
+                message_id = str(getattr(item, "message_id", "") or "")
+                create_time = self._timestamp_to_seconds(
+                    getattr(item, "create_time", None)
+                )
+                max_create_time = max(max_create_time, create_time)
+                if not message_id or not self._mark_message_id_seen(message_id):
+                    continue
+                abm = await self._build_polled_message(item)
+                if abm is None:
+                    continue
+                logger.info(
+                    "[Lark.Polling] event queued platform=%s message_id=%s session=%s chat=%s",
+                    self.meta().id,
+                    message_id,
+                    str(abm.session_id)[:24],
+                    chat_id,
+                )
+                await self.handle_msg(abm)
+
+            fetched_pages += 1
+            page_token = str(getattr(data, "page_token", "") or "")
+            has_more = bool(getattr(data, "has_more", False))
+            if not has_more or not page_token or fetched_pages >= 5:
+                break
+
+        self._polling_next_start_time = max(start_time, max_create_time - 5)
+
+    async def _polling_fallback_loop(self) -> None:
+        logger.info(
+            "[Lark.Polling] starting platform=%s chats=%s interval=%ss backfill=%ss",
+            self.meta().id,
+            len(self.polling_fallback_chat_ids),
+            self.polling_fallback_interval,
+            self.polling_fallback_backfill_seconds,
+        )
+        while True:
+            try:
+                for chat_id in self.polling_fallback_chat_ids:
+                    await self._poll_lark_chat_messages(chat_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[Lark.Polling] 轮询兜底异常: %s", exc, exc_info=True)
+            await asyncio.sleep(self.polling_fallback_interval)
+
     async def send_by_session(
         self,
         session: MessageSesion,
@@ -542,6 +969,11 @@ class LarkPlatformAdapter(Platform):
             abm.timestamp = int(message.create_time) // 1000
         else:
             abm.timestamp = int(time.time())
+        if message.chat_id:
+            self._remember_polling_chat_id(
+                message.chat_id,
+                reason=f"socket_{message.chat_type or 'unknown'}",
+            )
         abm.message = []
         abm.type = (
             MessageType.GROUP_MESSAGE
@@ -599,6 +1031,14 @@ class LarkPlatformAdapter(Platform):
             logger.error("[Lark] 消息缺少 message_id")
             return
 
+        if not self._mark_message_id_seen(message.message_id):
+            logger.info(
+                "[Lark.Socket] 跳过重复消息 platform=%s message_id=%s",
+                self.meta().id,
+                message.message_id,
+            )
+            return
+
         if (
             event.event.sender is None
             or event.event.sender.sender_id is None
@@ -630,6 +1070,19 @@ class LarkPlatformAdapter(Platform):
         )
 
         self._event_queue.put_nowait(event)
+        self._last_event_at = time.time()
+        try:
+            queue_size = self._event_queue.qsize()
+        except NotImplementedError:
+            queue_size = -1
+        logger.info(
+            "[Lark.Socket] event queued platform=%s message_type=%s message_id=%s session=%s queue_size=%s",
+            self.meta().id,
+            abm.type.name if hasattr(abm.type, "name") else str(abm.type),
+            abm.message_id,
+            str(abm.session_id)[:24],
+            queue_size,
+        )
 
     async def convert_card_action(self, event) -> None:
         """卡片按钮回调 → 转 AstrBotMessage 投到事件队列。
@@ -748,6 +1201,10 @@ class LarkPlatformAdapter(Platform):
                 open_id[:12],
                 getattr(data, "chat_id", ""),
             )
+            self._remember_polling_chat_id(
+                str(getattr(data, "chat_id", "") or ""),
+                reason="p2p_entered",
+            )
             await self.handle_msg(abm)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[Lark] convert_p2p_chat_entered 异常：%s", exc)
@@ -797,7 +1254,13 @@ class LarkPlatformAdapter(Platform):
                 logger.warning("[Lark] Webhook 模式已启用，但未配置 webhook_uuid")
         else:
             # 长连接模式
+            logger.info("[Lark.Socket] starting platform=%s", self.meta().id)
             await self.client._connect()
+            self._mark_socket_connected(source="initial")
+            if self.polling_fallback_enabled and self.polling_fallback_chat_ids:
+                self._polling_fallback_task = asyncio.create_task(
+                    self._polling_fallback_loop()
+                )
 
     async def webhook_callback(self, request: Any) -> Any:
         """统一 Webhook 回调入口"""
@@ -807,6 +1270,13 @@ class LarkPlatformAdapter(Platform):
         return await self.webhook_server.handle_callback(request)
 
     async def terminate(self) -> None:
+        if self._polling_fallback_task is not None:
+            self._polling_fallback_task.cancel()
+            try:
+                await self._polling_fallback_task
+            except asyncio.CancelledError:
+                pass
+            self._polling_fallback_task = None
         if self.connection_mode == "socket":
             await self.client._disconnect()
         logger.info("飞书(Lark) 适配器已关闭")

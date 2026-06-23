@@ -21,13 +21,16 @@ import datetime
 import json
 import os
 import re
-import shlex
 import subprocess
 import urllib.request
 import uuid
 from pathlib import Path
 
 from dc_engines.card_runtime import finalize_card_via_runtime
+from dc_engines.dreamina_cli import (
+    dreamina_command_not_found_message,
+    resolve_dreamina_executable,
+)
 from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
     build_media_generation_card,
@@ -217,9 +220,13 @@ def _dreamina_text2image_sync(prompt: str, aspect_ratio: str) -> tuple[bool, str
 
     用 subprocess 直接调，不依赖 dreamina_plugin（避免插件耦合）。
     """
+    dreamina_bin = resolve_dreamina_executable()
+    if dreamina_bin is None:
+        return False, dreamina_command_not_found_message()
+
     ratio = DREAMINA_RATIOS.get(aspect_ratio, "1:1")
     command = [
-        "dreamina",
+        dreamina_bin,
         "text2image",
         "--prompt",
         prompt,
@@ -230,12 +237,10 @@ def _dreamina_text2image_sync(prompt: str, aspect_ratio: str) -> tuple[bool, str
         "--poll",
         "600",
     ]
-    shell_command = " ".join(shlex.quote(arg) for arg in command)
 
     try:
         result = subprocess.run(
-            shell_command,
-            shell=True,
+            command,
             capture_output=True,
             text=True,
             timeout=600,
@@ -245,7 +250,7 @@ def _dreamina_text2image_sync(prompt: str, aspect_ratio: str) -> tuple[bool, str
     except subprocess.TimeoutExpired:
         return False, "Dreamina 执行超时（600s）"
     except FileNotFoundError:
-        return False, "未找到 dreamina CLI（npm i -g @ai-tools/dreamina）"
+        return False, dreamina_command_not_found_message()
     except Exception as exc:
         return False, f"Dreamina 执行异常: {exc}"
 

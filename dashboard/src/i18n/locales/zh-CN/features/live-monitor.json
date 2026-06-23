@@ -1,0 +1,148 @@
+{
+  "header": {
+    "title": "小助手实时看板",
+    "subtitle": "查看桌面会话、事件流和小助手当前状态。"
+  },
+  "actions": {
+    "refresh": "刷新"
+  },
+  "filters": {
+    "presets": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "week": "本周",
+      "month": "本月",
+      "custom": "自定义"
+    },
+    "startDate": "开始日期",
+    "endDate": "结束日期",
+    "now": "现在",
+    "summary": "{from} 至 {to}"
+  },
+  "connection": {
+    "connected": "实时连接正常",
+    "system": "系统看板",
+    "degraded": "连接降级",
+    "disconnected": "未连接"
+  },
+  "common": {
+    "unknown": "未知",
+    "notUpdated": "尚未更新"
+  },
+  "pet": {
+    "unknownName": "小助手",
+    "unbound": "未绑定桌面会话",
+    "level": "Lv.{level}"
+  },
+  "time": {
+    "justNow": "刚刚",
+    "minutesAgo": "{minutes} 分钟前",
+    "hoursAgo": "{hours} 小时前"
+  },
+  "metrics": {
+    "energy": {
+      "label": "能量",
+      "note": "来自最新宠物状态快照"
+    },
+    "xp": {
+      "label": "经验",
+      "note": "{coins} 金币"
+    },
+    "streak": {
+      "label": "连续活跃",
+      "value": "{days} 天",
+      "note": "按助手互动任务累计"
+    },
+    "lastActive": {
+      "label": "最近活跃",
+      "note": "页面更新于 {time}"
+    }
+  },
+  "events": {
+    "title": "实时事件流",
+    "subtitle": "展示路由、任务、桌面心跳等事件，不展示完整消息正文。",
+    "count": "{count} 条缓存事件",
+    "empty": "还没有新的实时事件。",
+    "action": "动作：{action}",
+    "refs": {
+      "conversation": "会话 {id}",
+      "trace": "Trace {id}",
+      "task": "任务 {id}",
+      "job": "Job {id}",
+      "desktop": "桌面 {id}"
+    }
+  },
+  "health": {
+    "title": "连接健康",
+    "subtitle": "当前桌面会话和事件游标。",
+    "petId": "Pet ID",
+    "lastEvent": "最新事件",
+    "cachedEvents": "本地缓存",
+    "updatedAt": "状态更新时间"
+  },
+  "sources": {
+    "title": "事件来源",
+    "empty": "暂无来源统计",
+    "names": {
+      "feishu": "飞书",
+      "astrbot": "AstrBot",
+      "router": "路由",
+      "harness": "Harness",
+      "hermes": "Hermes",
+      "obsidian": "Obsidian",
+      "desktop": "桌面",
+      "unknown": "未知"
+    }
+  },
+  "states": {
+    "idle": "空闲",
+    "waiting": "等待中",
+    "thinking": "思考中",
+    "working": "工作中",
+    "success": "已完成",
+    "failed": "需要处理",
+    "review": "待审核",
+    "happy": "开心",
+    "focused": "专注",
+    "sleeping": "休息中",
+    "unknown": "未知状态"
+  },
+  "emotions": {
+    "calm": "平静",
+    "happy": "开心",
+    "focused": "专注",
+    "tired": "疲惫",
+    "curious": "好奇",
+    "unknown": "未知情绪"
+  },
+  "scenes": {
+    "desk": "桌面",
+    "meeting": "会议",
+    "coding": "编码",
+    "review": "审核",
+    "unknown": "未知场景"
+  },
+  "eventTypes": {
+    "desktop_session_bound": "桌面会话绑定",
+    "desktop_heartbeat": "桌面心跳",
+    "feishu_message_received": "收到飞书消息",
+    "pet_card_viewed": "卡片被查看",
+    "pet_card_action": "卡片操作",
+    "pet_fed": "投喂小助手",
+    "router_decision_made": "路由决策完成",
+    "memory_context_injected": "记忆上下文注入",
+    "harness_task_created": "任务已创建",
+    "harness_task_in_progress": "任务进行中",
+    "harness_task_completed": "任务已完成",
+    "harness_task_review_required": "任务待审核",
+    "harness_task_failed": "任务失败",
+    "hermes_task_running": "Hermes 任务运行中",
+    "hermes_task_completed": "Hermes 任务完成",
+    "hermes_task_failed": "Hermes 任务失败",
+    "obsidian_note_linked": "Obsidian 笔记已关联",
+    "memory_promoted": "记忆已提升"
+  },
+  "errors": {
+    "loadFailed": "加载实时看板失败"
+  }
+}

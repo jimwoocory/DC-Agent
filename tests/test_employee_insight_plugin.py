@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,13 +41,19 @@ def _load_plugin_module():
 
 
 class _FakeContext:
-    def __init__(self, data_dir: Path, employee_store=None) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        employee_store=None,
+        config: dict | None = None,
+    ) -> None:
         self.employee_insight_data_dir = data_dir
         self.cron_job_manager = None
         self.employee_store = employee_store
+        self._config = config or {}
 
     def get_config(self):
-        return {}
+        return self._config
 
 
 class _FakeCronJobManager:
@@ -59,7 +67,7 @@ class _FakeCronJobManager:
 
 class _FakeConfiguredContext(_FakeContext):
     def __init__(self, data_dir: Path, config: dict) -> None:
-        super().__init__(data_dir)
+        super().__init__(data_dir, config=config)
         self._config = config
         self.cron_job_manager = _FakeCronJobManager()
 
@@ -159,7 +167,9 @@ async def test_employee_insight_plugin_auto_observes_new_private_message_sender(
     tmp_path: Path,
 ):
     module = _load_plugin_module()
-    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    plugin = module.EmployeeInsightPlugin(
+        _FakeContext(tmp_path, config={"auto_observe_private_dm": True})
+    )
     await plugin.initialize()
     event = _FakeEvent("我不知道这个系统怎么用", sender_id="ou_new_employee")
 
@@ -191,7 +201,13 @@ async def test_employee_insight_plugin_enriches_profile_and_session_from_directo
             )
         }
     )
-    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path, employee_store))
+    plugin = module.EmployeeInsightPlugin(
+        _FakeContext(
+            tmp_path,
+            employee_store,
+            config={"auto_observe_private_dm": True},
+        )
+    )
     await plugin.initialize()
     event = _FakeEvent("我想整理一下这次活动执行的需求", sender_id="ou_activity")
 
@@ -216,16 +232,68 @@ async def test_employee_insight_plugin_handles_pause_as_muted(tmp_path: Path):
     module = _load_plugin_module()
     plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
     await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
     event = _FakeEvent("暂停")
 
     await plugin.on_private_message(event)
 
-    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
     session_id = event.extras["employee_insight_session_id"]
     session = await store.get_session(session_id)
     assert session.status == EmployeeInsightSessionStatus.MUTED
     events = await store.list_events(session_id)
     assert events[-1].event_type == "opt_out"
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_pilot_only_skips_unknown_private_message(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    event = _FakeEvent("帮我写一个培训通知", sender_id="ou_not_in_pilot")
+
+    await plugin.on_private_message(event)
+
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    assert await store.get_profile("ou_not_in_pilot") is None
+    assert "employee_insight_session_id" not in event.extras
+    assert event.extras["employee_insight_candidate"] == {
+        "mode": "observe_only",
+        "reason": "pilot_only",
+    }
+    assert event.result is None
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_side_effect_timeout_does_not_block_chat(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(
+        _FakeContext(tmp_path, config={"side_effect_timeout_seconds": 0.01})
+    )
+    await plugin.initialize()
+    event = _FakeEvent("帮我写一个培训通知", sender_id="ou_timeout")
+
+    async def slow_handle(*args, **kwargs):
+        await asyncio.sleep(1)
+
+    plugin._handle_private_message = slow_handle
+    start = time.monotonic()
+
+    await plugin.on_private_message(event)
+
+    assert time.monotonic() - start < 0.5
+    assert event.extras == {}
+    assert event.result is None
 
 
 @pytest.mark.asyncio

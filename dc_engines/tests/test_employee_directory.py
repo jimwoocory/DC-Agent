@@ -97,8 +97,52 @@ async def test_requester_meta_includes_business_department_context(
     meta = requester_meta_from_employee(emp)
 
     assert meta["requester_department"] == "活动统筹部"
+    assert meta["requester_canonical_department"] == "活动统筹部"
     assert meta["requester_business_department"] == "执行部门"
     assert meta["requester_department_path"] == ["总经办", "执行部门", "活动统筹部"]
+    assert meta["requester_canonical_department_path"] == [
+        "总经办",
+        "执行部门",
+        "活动统筹部",
+    ]
+
+
+async def test_requester_meta_exposes_scoped_org_permissions(
+    employee_store: EmployeeStore,
+) -> None:
+    await employee_store.get_or_create(
+        "ou_zhoufang", platform_id="lark", display_name="周芳"
+    )
+    await employee_store.update_profile(
+        "ou_zhoufang",
+        department="综合部",
+        role="部门经理/负责人",
+        relation_type="manager",
+        preferences={
+            "business_parent_department": "执行部门",
+            "business_responsibilities": ["招聘", "办公室内务管理", "综合部管理"],
+            "feishu_is_app_admin": True,
+            "feishu_admin_source": "manual_confirmed_by_user",
+            "is_department_manager": True,
+            "management_scope": "综合部",
+        },
+    )
+
+    emp = await employee_store.get_employee("ou_zhoufang")
+    assert emp is not None
+
+    meta = requester_meta_from_employee(emp, admins_id=("ou_caiting",))
+
+    permissions = {
+        (item["permission"], item["scope"]) for item in meta["requester_dc_permissions"]
+    }
+    assert meta["requester_canonical_department"] == "综合部"
+    assert meta["requester_managed_departments"] == ["综合部"]
+    assert ("department_manager", "综合部") in permissions
+    assert ("hr_ops", "*") in permissions
+    assert ("office_ops", "*") in permissions
+    assert ("feishu_admin_observed", "feishu") in permissions
+    assert ("dc_admin", "*") not in permissions
 
 
 async def test_update_profile_identity_fields(employee_store: EmployeeStore) -> None:

@@ -32,6 +32,15 @@
         "on_demand_kick": "http://localhost:9120/kick"
       },
       {
+        "name": "小助手实时看板",
+        "url": "/#/live-monitor",
+        "probe_host": null,
+        "probe_port": null,
+        "hint": "小助手桌面会话、事件流和状态监控看板",
+        "icon": "📡",
+        "pinned": true
+      },
+      {
         "name": "记忆治理",
         "url": "/#/memory-governance",
         "probe_host": null,

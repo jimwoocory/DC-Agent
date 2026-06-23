@@ -75,6 +75,10 @@ _RESOURCE_QUERY_RE = re.compile(
     r"(资料库|知识库|白名单).{0,12}(查|找|搜索)",
     re.IGNORECASE,
 )
+_RESOURCE_TARGET_RE = re.compile(
+    r"(资料|文档|表格|文件|手册|白名单|知识库|飞书|wiki|Wiki|客户资料|员工手册)",
+    re.IGNORECASE,
+)
 _FEISHU_URL_RE = re.compile(r"(?:feishu\.cn|larksuite\.com)", re.IGNORECASE)
 _ANALYSIS_INTENT_RE = re.compile(
     r"(解读|总结|分析|提炼|梳理|输出|生成|写|案例|方案|文案|海报|报告)"
@@ -142,8 +146,18 @@ def _should_handle_resource_query(text: str) -> bool:
         return False
     if _FEISHU_URL_RE.search(t) and _ANALYSIS_INTENT_RE.search(t):
         return False
-    if any(lowered.startswith(kw.lower()) for kw in _QUERY_KEYWORDS):
-        return True
+    for keyword in _QUERY_KEYWORDS:
+        keyword_lower = keyword.lower()
+        if not lowered.startswith(keyword_lower):
+            continue
+        if _RESOURCE_TARGET_RE.search(t[:30]):
+            return True
+        remainder = t[len(keyword) :].strip()
+        if keyword_lower in {"查", "找", "翻", "搜索", "search", "look up"}:
+            return bool(remainder and len(remainder) <= 40)
+        return False
+    if _RESOURCE_TARGET_RE.search(t) and _RESOURCE_QUERY_RE.search(t):
+        return bool(_RESOURCE_TARGET_RE.search(t[:30]))
     return bool(_RESOURCE_QUERY_RE.search(t))
 
 

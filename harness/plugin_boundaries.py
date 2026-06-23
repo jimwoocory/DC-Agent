@@ -70,7 +70,11 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
         role="core_adapter",
         path="data/plugins/hermes_bridge",
         boundary_status="runtime_service",
-        responsibility="AstrBot-to-Hermes task dispatch, callback handling, and card finalization.",
+        responsibility=(
+            "AstrBot-to-Hermes adapter for task dispatch, callback handling, "
+            "and card finalization. Shared Harness runtime context is owned by "
+            "harness_runtime_plugin."
+        ),
         adapter_entrypoints=(
             "filter.event_message_type:ALL",
             "response_server:/hermes/callback",
@@ -88,6 +92,50 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
             "data/hermes_sessions.db",
             "data/card_runtime/",
         ),
+    ),
+    PluginBoundary(
+        name="harness_runtime_plugin",
+        role="runtime_gateway",
+        path="data/plugins/harness_runtime_plugin",
+        boundary_status="thin_adapter",
+        responsibility=(
+            "Shared Harness runtime bootstrap for AstrBot plugins, including "
+            "harness_engine, harness_store, harness memory promotion, and the "
+            "legacy dispatch_task_to_hermes compatibility shim."
+        ),
+        adapter_entrypoints=("star.initialize:harness_runtime",),
+        engine_modules=("dc_engines.harness",),
+        runtime_data_patterns=(
+            "data/harness.db",
+            "data/harness_memory.db",
+        ),
+    ),
+    PluginBoundary(
+        name="harness_state_injector",
+        role="core_adapter",
+        path="data/plugins/harness_state_injector",
+        boundary_status="thin_adapter",
+        responsibility=(
+            "AstrBot LLM-request hook adapter for Harness active-task and "
+            "truth-guard prompt injection."
+        ),
+        adapter_entrypoints=("filter.on_llm_request:harness_state_injection",),
+        engine_modules=("dc_engines.harness.runtime_hooks",),
+    ),
+    PluginBoundary(
+        name="harness_sensor_plugin",
+        role="core_adapter",
+        path="data/plugins/harness_sensor_plugin",
+        boundary_status="thin_adapter",
+        responsibility=(
+            "AstrBot LLM-response/decorating-result hook adapter for Harness "
+            "task settlement and auto-completion gates."
+        ),
+        adapter_entrypoints=(
+            "filter.on_llm_response:harness_sensor",
+            "filter.on_decorating_result:harness_sensor",
+        ),
+        engine_modules=("dc_engines.harness.runtime_hooks",),
     ),
     PluginBoundary(
         name="dc_router",
@@ -159,6 +207,24 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
         runtime_data_patterns=("data/content_sop_rule_proposals.db",),
     ),
     PluginBoundary(
+        name="god_mode_plugin",
+        role="ops_plugin",
+        path="data/plugins/god_mode_plugin",
+        boundary_status="thin_adapter",
+        responsibility=(
+            "Feishu /god administrator approval entrypoint for DC-Agent tool "
+            "server actions. Planning, approval state, idempotency, and audit "
+            "persistence are owned by dc_engines.god_mode."
+        ),
+        adapter_entrypoints=(
+            "filter.command:god",
+            "feishu_card_action:god_mode_approval",
+        ),
+        engine_modules=("dc_engines.god_mode",),
+        config_paths=("data/config/god_mode_plugin_config.json",),
+        runtime_data_patterns=("data/god_mode_audit.db",),
+    ),
+    PluginBoundary(
         name="dc_hub",
         role="ops_plugin",
         path="data/plugins/dc_hub",
@@ -167,15 +233,18 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
         adapter_entrypoints=(
             "dashboard:dc_hub",
             "filter.command:dc-hub",
+            "filter.command:persona",
         ),
         engine_modules=(
             "dc_engines",
+            "dc_engines.persona_factory",
             "harness",
         ),
         config_paths=("data/config/dc_hub_config.json",),
         runtime_data_patterns=(
             "data/dc_harness.db",
             "data/harness_tasks.db",
+            "data/persona_factory/",
         ),
     ),
     PluginBoundary(

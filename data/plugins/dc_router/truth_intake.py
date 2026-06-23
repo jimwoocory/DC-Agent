@@ -644,6 +644,26 @@ async def maybe_handle_truth_intake(
     has_source = _has_source_text(text) or _has_attachment(event)
     needs_evidence = _needs_truth_evidence(text)
 
+    if dry_run:
+        if blocked_task is not None and has_source:
+            logger.info(
+                "[truth_intake] dry-run would resume blocked task=%s",
+                blocked_task.task_id[:8],
+            )
+            return False
+        if needs_evidence:
+            action = (
+                "archive source materials" if has_source else "block missing materials"
+            )
+            logger.info(
+                "[truth_intake] dry-run would %s platform=%s task=%s text=%r",
+                action,
+                platform_id,
+                "-",
+                text[:80],
+            )
+            return False
+
     if blocked_task is not None and has_source:
         original_text = str((blocked_task.payload or {}).get("original_text") or "")
         intake_id = uuid.uuid4().hex
@@ -735,6 +755,14 @@ async def maybe_handle_truth_intake(
         return False
 
     if not has_source:
+        if dry_run:
+            logger.info(
+                "[truth_intake] dry-run would block missing materials platform=%s task=%s text=%r",
+                platform_id,
+                "-",
+                text[:80],
+            )
+            return False
         intake_id = uuid.uuid4().hex
         task = await _create_intake_task(
             context,
@@ -746,14 +774,6 @@ async def maybe_handle_truth_intake(
         task_id = getattr(task, "task_id", None)
         if task is None:
             logger.debug("[truth_intake] intake task unavailable; continue")
-            return False
-        if dry_run:
-            logger.info(
-                "[truth_intake] dry-run would block missing materials platform=%s task=%s text=%r",
-                platform_id,
-                (task_id or "-")[:8],
-                text[:80],
-            )
             return False
         event.should_call_llm(False)
         event.set_result(
@@ -769,6 +789,15 @@ async def maybe_handle_truth_intake(
             text[:80],
         )
         return True
+
+    if dry_run:
+        logger.info(
+            "[truth_intake] dry-run would archive source materials platform=%s task=%s text=%r",
+            platform_id,
+            "-",
+            text[:80],
+        )
+        return False
 
     intake_id = uuid.uuid4().hex
     archive = await _archive_source_materials(
@@ -790,14 +819,6 @@ async def maybe_handle_truth_intake(
         logger.debug("[truth_intake] intake task unavailable; continue")
         return False
     _schedule_kb_sync(context, archive, text)
-    if dry_run:
-        logger.info(
-            "[truth_intake] dry-run archived source materials intake=%s task=%s attachments=%d",
-            intake_id,
-            (task_id or "-")[:8],
-            len(archive.attachments),
-        )
-        return False
     _augment_event_with_source(
         event,
         original_text=text,

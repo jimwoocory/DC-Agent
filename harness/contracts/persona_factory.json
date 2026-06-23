@@ -1,0 +1,53 @@
+{
+    "feature": "persona_factory",
+    "goal": "Split Nuwa-style persona distillation into a reusable Hermes/core engine and a thin AstrBot command adapter.",
+    "acceptance_criteria": [
+        {
+            "id": "persona-factory-001",
+            "description": "Persona Factory core builds a Nuwa-style distillation request with source mode, output targets, safety boundaries, and a six-lane research plan without depending on AstrBot.",
+            "verification": "uv run pytest dc_engines/tests/test_persona_factory.py::test_build_research_plan_has_nuwa_lanes_and_boundaries -q"
+        },
+        {
+            "id": "persona-factory-002",
+            "description": "Persona Factory core persists submitted requests outside plugin source trees and exposes status changes for human review before registration.",
+            "verification": "uv run pytest dc_engines/tests/test_persona_factory.py::test_store_persists_request_and_review_status -q"
+        },
+        {
+            "id": "persona-factory-003",
+            "description": "Hermes task payloads require source manifests, public-information disclaimers, evidence paths, review checkpoints, and bounded export targets.",
+            "verification": "uv run pytest dc_engines/tests/test_persona_factory.py::test_hermes_payload_requires_manifest_review_and_exports dc_engines/tests/test_persona_factory.py::test_persona_factory_trigger_rejects_missing_safety_gates dc_engines/tests/test_persona_factory.py::test_persona_factory_trigger_requires_local_only_for_non_public_target dc_engines/tests/test_persona_factory.py::test_write_persona_artifacts_from_hermes_payload dc_engines/tests/test_hermes_task_dispatcher.py::test_hermes_task_dispatcher_includes_extra_payload -q"
+        },
+        {
+            "id": "persona-factory-004",
+            "description": "Persona Factory is exposed through DC-HUB instead of a standalone AstrBot plugin; runtime data remains under data/ and reusable logic lives in dc_engines.persona_factory.",
+            "verification": "uv run pytest tests/test_plugin_boundaries.py::test_persona_factory_boundary_is_owned_by_dc_hub -q"
+        },
+        {
+            "id": "persona-factory-005",
+            "description": "Contract coverage stays executable through a focused harness contract test.",
+            "verification": "uv run pytest tests/harness/test_persona_factory_contract.py -q"
+        },
+        {
+            "id": "persona-factory-006",
+            "description": "Hermes-side Persona Factory worker callbacks evaluate the structured trigger, write review artifacts, bypass the generic agent on astrbot_task webhooks, and let the AstrBot bridge advance requests to awaiting_review before registration.",
+            "verification": "uv run pytest dc_engines/tests/test_persona_factory.py::test_build_persona_factory_worker_callback_writes_review_artifacts tests/harness/test_hermes_bridge.py::test_persona_factory_callback_advances_review_status -q && cd hermes-agent && uv run pytest tests/gateway/test_webhook_persona_factory.py -q"
+        }
+    ],
+    "architecture": {
+        "core_module": "dc_engines.persona_factory",
+        "astrbot_entrypoint": "data/plugins/dc_hub",
+        "runtime_data_root": "data/persona_factory",
+        "default_exports": ["astrbot_persona", "codex_skill", "hermes_skill"],
+        "required_boundaries": [
+            "based_on_public_or_user_provided_sources",
+            "not_the_real_person",
+            "human_review_required_before_registration",
+            "source_manifest_required",
+            "cost_and_timeout_limits_required"
+        ]
+    },
+    "verification": {
+        "focused": "uv run pytest dc_engines/tests/test_persona_factory.py tests/harness/test_persona_factory_contract.py tests/test_persona_factory_dc_hub.py tests/test_plugin_boundaries.py::test_persona_factory_boundary_is_owned_by_dc_hub -q",
+        "targeted": "scripts/agent-check.sh --profile targeted"
+    }
+}

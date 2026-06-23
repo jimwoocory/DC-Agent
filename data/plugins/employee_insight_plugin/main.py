@@ -7,6 +7,7 @@ session/event 写入 employee insight 引擎。主动触达调度与真实发送
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 from typing import Any
@@ -96,8 +97,28 @@ class EmployeeInsightPlugin(Star):
                 )
             return
 
-        await self._ensure_observed_profile(event)
+        timeout = float(self.config.get("side_effect_timeout_seconds", 1.5) or 0)
+        try:
+            if timeout > 0:
+                await asyncio.wait_for(
+                    self._handle_private_message(event, text),
+                    timeout=timeout,
+                )
+            else:
+                await self._handle_private_message(event, text)
+        except TimeoutError:
+            logger.warning(
+                "[employee_insight] 私聊旁路处理超时，已放行主聊天：origin=%s",
+                getattr(event, "unified_msg_origin", "") or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[employee_insight] 私聊旁路处理失败，已放行主聊天：%s",
+                exc,
+            )
 
+    async def _handle_private_message(self, event: AstrMessageEvent, text: str) -> None:
+        assert self.store is not None
         if self._is_verification_join_text(text):
             await self._register_verification_profile(event)
             self._reply(
@@ -105,6 +126,11 @@ class EmployeeInsightPlugin(Star):
                 "已把你加入灰度验证测试名单。现在后台可以直接用你这个测试账号跑一键灰度验证，不需要手填 open_id。",
             )
             return
+
+        if not await self._message_tracking_allowed(event):
+            return
+
+        await self._ensure_observed_profile(event)
 
         if self._is_pause_text(text):
             session = await self._create_session(
@@ -158,6 +184,39 @@ class EmployeeInsightPlugin(Star):
                 },
             )
         )
+
+    async def _message_tracking_allowed(self, event: AstrMessageEvent) -> bool:
+        assert self.store is not None
+        if not bool(self.config.get("pilot_only", True)):
+            return True
+
+        employee_id = str(event.get_sender_id() or "").strip()
+        if not employee_id:
+            return False
+        profile = await self.store.get_profile(employee_id)
+        if profile is None and bool(self.config.get("auto_observe_private_dm", False)):
+            await self._ensure_observed_profile(event)
+            profile = await self.store.get_profile(employee_id)
+        if profile is None:
+            event.set_extra(
+                "employee_insight_candidate",
+                {"mode": "observe_only", "reason": "pilot_only"},
+            )
+            logger.info(
+                "[employee_insight] pilot_only 跳过非灰度私聊：employee_id=%s",
+                employee_id[:12],
+            )
+            return False
+        if profile.pilot_status != PilotStatus.ACTIVE:
+            event.set_extra(
+                "employee_insight_candidate",
+                {
+                    "mode": "observe_only",
+                    "reason": f"pilot_status:{profile.pilot_status.value}",
+                },
+            )
+            return False
+        return True
 
     async def _create_session(
         self,

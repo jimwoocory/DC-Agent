@@ -30,6 +30,7 @@ ALERTS_LOG="$WD_ROOT/alerts.jsonl"
 INCIDENT_DIR="$WD_ROOT/incidents"
 COOLDOWN_SEC=1800  # 30 分钟内同一 service 失败只诊断一次
 AGENT_MAINTENANCE_GRACE_SEC=900  # Codex / Claude Code 维护窗口：15 分钟内不触发诊断推送
+RESTART_GRACE_SEC=900  # 人为/launchd 重启抖动：15 分钟内不触发诊断推送
 
 mkdir -p "$INCIDENT_DIR"
 touch "$ALERTS_LOG"
@@ -76,6 +77,20 @@ probe_http() {
         code="000"
     fi
     if [[ "$code" =~ ^[23] ]] || [ "$code" = "401" ]; then
+        echo "ok"
+    else
+        echo "fail:$code"
+    fi
+}
+
+# 探一个必须 2xx 的 HTTP endpoint；401/403 不能算健康。
+probe_http_strict() {
+    local url="$1"
+    local code
+    if ! code=$(curl --noproxy "*" -s -o /dev/null -w "%{http_code}" --max-time 3 "$url" 2>/dev/null); then
+        code="000"
+    fi
+    if [[ "$code" =~ ^2 ]]; then
         echo "ok"
     else
         echo "fail:$code"
@@ -185,6 +200,28 @@ if changed:
 PY
 }
 
+state_get_maintenance_deferred_ts() {
+    python3 -c "import json,sys; d=json.load(open('$STATE_FILE')); print(d.get('$1', {}).get('maintenance_deferred_ts', 0))"
+}
+
+state_get_maintenance_reason() {
+    python3 -c "import json,sys; d=json.load(open('$STATE_FILE')); print(d.get('$1', {}).get('maintenance_reason', ''))"
+}
+
+trigger_diagnose() {
+    local name="$1" kind="$2" target="$3" cur="$4"
+    if in_cooldown "$name"; then
+        emit_event "$name" "$kind:$target" "$cur" "$cur" "cooldown_skipped_diagnose"
+    else
+        incident_id=$(date +%s)
+        write_incident "$name" "$kind:$target" "$cur" "$incident_id"
+        mark_diag_done "$name"
+        # 异步跑 diagnose（不阻塞下次 cron）
+        nohup "$DC_ROOT/scripts-watchdog/diagnose.sh" "$incident_id" "$name" >/dev/null 2>&1 &
+        disown $! 2>/dev/null || true
+    fi
+}
+
 # 写一条 alert 进 jsonl
 emit_event() {
     local service="$1" probe="$2" prev="$3" cur="$4" extra="$5"
@@ -206,76 +243,28 @@ open('$ALERTS_LOG','a').write(json.dumps(entry, ensure_ascii=False) + '\n')
 # 这类 ok→fail 是预期维护窗口，不应再触发 watchdog 的 Codex 诊断和飞书告警。
 is_agent_maintenance_service() {
     local service="$1"
-    case "$service" in
-        astrbot_dashboard|astrbot_response|astrbot_api|system_entries_plugin|dashboard_quick_entries|\
-        hermes_gateway|hermes_webui|hermes_webui_thirdparty|\
-        openclaw_watchdog|openclaw_watchdog_status)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+    "$DC_ROOT/.venv/bin/python" - "$service" "$DC_ROOT" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+service = sys.argv[1]
+root = Path(sys.argv[2])
+module_path = root / "scripts-watchdog" / "watchdog_engine.py"
+spec = importlib.util.spec_from_file_location("watchdog_engine", module_path)
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+raise SystemExit(0 if module.should_suppress_for_agent_maintenance(service) else 1)
+PY
 }
 
 agent_maintenance_reason() {
-    python3 - "$AGENT_MAINTENANCE_GRACE_SEC" "$DC_ROOT" <<'PY'
-import re
-import subprocess
-import sys
-
-grace = int(sys.argv[1])
-dc_root = sys.argv[2]
-try:
-    rows = subprocess.check_output(
-        ["ps", "-Ao", "pid=,etime=,command="],
-        text=True,
-        stderr=subprocess.DEVNULL,
-        timeout=3,
-    ).splitlines()
-except Exception:
-    sys.exit(1)
-
-def elapsed_seconds(etime: str) -> int:
-    days = 0
-    rest = etime.strip()
-    if "-" in rest:
-        day_part, rest = rest.split("-", 1)
-        days = int(day_part or 0)
-    parts = [int(p) for p in rest.split(":")]
-    if len(parts) == 3:
-        hours, minutes, seconds = parts
-    elif len(parts) == 2:
-        hours = 0
-        minutes, seconds = parts
-    else:
-        return days * 86400
-    return days * 86400 + hours * 3600 + minutes * 60 + seconds
-
-matches: list[str] = []
-for row in rows:
-    row = row.strip()
-    match = re.match(r"(\d+)\s+(\S+)\s+(.+)", row)
-    if not match:
-        continue
-    pid, etime, command = match.groups()
-    if "dc-watchdog.sh" in command or "diagnose.sh" in command:
-        continue
-    if "/data/watchdog/incidents/" in command:
-        continue
-    is_recent = elapsed_seconds(etime) <= grace
-    is_workspace_agent = dc_root in command
-    is_codex_app = "/Applications/Codex.app/" in command
-    if not (is_recent or is_workspace_agent or is_codex_app):
-        continue
-    if re.search(r"(^|[/\s])(codex|claude)(\s|$)", command):
-        matches.append(f"{pid}:{command[:160]}")
-
-if not matches:
-    sys.exit(1)
-
-print("agent_maintenance_cli_active:" + " | ".join(matches[:3]))
-PY
+    "$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" \
+        maintenance-reason \
+        --grace-sec "$AGENT_MAINTENANCE_GRACE_SEC" \
+        --dc-root "$DC_ROOT"
 }
 
 # 写一条 incident snapshot（codex 诊断的输入）
@@ -339,34 +328,17 @@ json.dump(d, open(p, 'w'), indent=2)
 
 # ────────────────── 主流程 ──────────────────
 
-# service 清单: name | probe_type | target
-# probe_type: tcp / http / file_age（target 格式 "<path>:<max_age_seconds>"）
-SERVICES=(
-    "astrbot_dashboard|tcp|6185"
-    "hermes_gateway|tcp|8644"
-    "astrbot_response|tcp|8645"
-    "hermes_webui_thirdparty|tcp|8787"
-    "hermes_webui|tcp|9119"
-    "openclaw_watchdog|tcp|9120"
-    "astrbot_api|http|http://127.0.0.1:6185/api/stat/start-time"
-    "openclaw_watchdog_status|http|http://127.0.0.1:9120/status"
-    # NAS/Feishu sync heartbeats intentionally disabled on 2026-06-04.
-    # The related scheduled jobs were paused by user request; keeping these
-    # probes enabled makes the global watchdog report stale-heartbeat errors
-    # for jobs that are no longer supposed to run.
-    # system_entries plugin —— dashboard 升级时如果被 disable / 丢失会探不到
-    # 它没了 → "系统入口"页面消失 → 老板找不到 Hermes WebUI / OpenClaw 入口
-    "system_entries_plugin|http|http://127.0.0.1:6185/api/plug/system_entries/health"
-    # dashboard 顶栏快捷入口注入脚本。它丢了 → 第一屏入口丢失。
-    "dashboard_quick_entries|dashboard_quick_entries|data/dist/index.html"
-    # NAS/飞书/知识库统一知识循环：由总 watchdog tick 调度，具体任务后台运行。
-    "knowledge_cycle|knowledge_cycle|cron_tick"
-)
+# service 清单由 watchdog_engine.py 统一维护，避免 dc-watchdog.sh 和
+# watchdogctl.py 各自硬编码一套探针规则。
+SERVICES=()
+while IFS= read -r entry; do
+    [ -n "$entry" ] && SERVICES+=("$entry")
+done < <("$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" list-active)
 
-DISABLED_SERVICES=(
-    "nas_watchdog_heartbeat|NAS/Feishu sync jobs paused by operator request on 2026-06-04"
-    "feishu_sync_heartbeat|NAS/Feishu sync jobs paused by operator request on 2026-06-04"
-)
+DISABLED_SERVICES=()
+while IFS= read -r entry; do
+    [ -n "$entry" ] && DISABLED_SERVICES+=("$entry")
+done < <("$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" list-disabled)
 
 for entry in "${DISABLED_SERVICES[@]}"; do
     IFS='|' read -r name reason <<< "$entry"
@@ -378,6 +350,7 @@ for entry in "${SERVICES[@]}"; do
     case "$kind" in
         tcp) cur=$(probe_tcp "$target") ;;
         http) cur=$(probe_http "$target") ;;
+        http_strict) cur=$(probe_http_strict "$target") ;;
         file_age) cur=$(probe_file_age "$target") ;;
         dashboard_quick_entries) cur=$(probe_dashboard_quick_entries) ;;
         knowledge_cycle) cur=$(probe_knowledge_cycle) ;;
@@ -395,11 +368,38 @@ for entry in "${SERVICES[@]}"; do
         state_clear_maintenance_deferred "$name"
     fi
 
+    if [ "$cur_simple" = "fail" ] && [ "$prev_simple" = "fail" ] && is_agent_maintenance_service "$name"; then
+        deferred_ts=$(state_get_maintenance_deferred_ts "$name")
+        maintenance_reason=$(state_get_maintenance_reason "$name")
+        if [ "$deferred_ts" != "0" ] && [[ "$maintenance_reason" == restart_grace:* ]]; then
+            now_sec=$(now_ts)
+            deferred_age=$((now_sec - deferred_ts))
+            if [ "$deferred_age" -lt "$RESTART_GRACE_SEC" ]; then
+                emit_event "$name" "$kind:$target" "$prev_status" "$cur" "restart_grace_skipped_diagnose:${deferred_age}s"
+                state_set_maintenance_deferred "$name" "$cur" "$(now_iso)" "$deferred_ts" "$maintenance_reason"
+                continue
+            fi
+            emit_event "$name" "$kind:$target" "$prev_status" "$cur" "restart_grace_expired:${deferred_age}s"
+            state_clear_maintenance_deferred "$name"
+            trigger_diagnose "$name" "$kind" "$target" "$cur"
+        fi
+    fi
+
     if [ "$cur_simple" != "$prev_simple" ]; then
         emit_event "$name" "$kind:$target" "$prev_status" "$cur" ""
         state_set "$name" "$cur" "$(now_iso)"
 
         if [ "$cur_simple" = "fail" ]; then
+            # Normal restarts briefly drop multiple ports/endpoints. Do not alert
+            # immediately for restart-prone services; diagnose only if the
+            # failure survives the grace window above.
+            if is_agent_maintenance_service "$name"; then
+                now_sec=$(now_ts)
+                reason="restart_grace:${RESTART_GRACE_SEC}s"
+                emit_event "$name" "$kind:$target" "$prev_status" "$cur" "restart_grace_deferred_diagnose:$reason"
+                state_set_maintenance_deferred "$name" "$cur" "$(now_iso)" "$now_sec" "$reason"
+                continue
+            fi
             # ok → fail：触发诊断（带 cooldown）
             if is_agent_maintenance_service "$name" && reason=$(agent_maintenance_reason); then
                 deferred_ts=$(echo "$prev_state" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('maintenance_deferred_ts', 0))")

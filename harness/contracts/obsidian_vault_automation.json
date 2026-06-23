@@ -1,0 +1,89 @@
+{
+  "feature": "obsidian_vault_automation",
+  "goal": "Provide a controlled Obsidian vault automation boundary that can safely expose read-only vault operations before any write-back, obsidian-cli, or ingestion pipeline is allowed to touch a local vault.",
+  "acceptance_criteria": [
+    {
+      "id": "ova-001",
+      "description": "Vault access is restricted to configured vault roots only; absolute paths, traversal, and symlinks that resolve outside the vault are rejected before file IO.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_wrapper.py::test_rejects_path_traversal_and_symlink_escape -q"
+    },
+    {
+      "id": "ova-002",
+      "description": "The Phase 1 wrapper is read-only and exposes list directory, read note, literal search, frontmatter parsing, and backlink reads without invoking shell commands or obsidian-cli.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_wrapper.py::test_read_only_wrapper_lists_reads_searches_frontmatter_and_backlinks -q"
+    },
+    {
+      "id": "ova-003",
+      "description": "Write requests default to denied; dry-run write planning records an audit log, never mutates files, and requires configured allowlisted write paths before future execution can be enabled.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_vault_wrapper.py::test_write_requests_are_dry_run_audited_and_do_not_mutate_vault -q"
+    },
+    {
+      "id": "ova-004",
+      "description": "The contract keeps obsidian-cli behind the controlled wrapper, keeps defuddle-style capture and cleaning in an isolated queue, and separates authoring skills from execution skills.",
+      "verification": "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py::test_contract_records_agent_skill_execution_boundaries -q"
+    },
+    {
+      "id": "ova-005",
+      "description": "The Phase 1 scope documents the later sync surfaces for company knowledge maps, RawRefs, and review workbench notes while explicitly excluding live write-back and bulk delete or move operations.",
+      "verification": "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py::test_contract_records_phase1_scope_and_non_goals -q"
+    }
+  ],
+  "permission_model": {
+    "vault_roots": "Configured paths only; callers pass vault-relative paths to the wrapper.",
+    "default_mode": "read_only",
+    "write_policy": "Writes require an allowlisted vault-relative prefix, dry-run planning, audit logging, and later explicit approval before execution.",
+    "forbidden_operations": [
+      "arbitrary shell execution",
+      "arbitrary absolute paths",
+      "path traversal outside the vault",
+      "bulk delete",
+      "bulk move",
+      "moving vault files outside configured vault roots",
+      "direct obsidian-cli invocation by skills"
+    ],
+    "audit": "All write planning and denied write attempts must append JSONL audit records with actor, action, target_path, dry_run, allowed, result, and timestamp."
+  },
+  "phase1_interfaces": {
+    "read": [
+      "list_directory",
+      "read_note",
+      "search_notes",
+      "parse_frontmatter",
+      "read_backlinks"
+    ],
+    "write_dry_run_only": [
+      "create_note"
+    ],
+    "future_write": [
+      "update_frontmatter",
+      "append_section",
+      "generate_canvas",
+      "generate_mermaid_note",
+      "sync_company_knowledge_map",
+      "sync_rawrefs",
+      "sync_review_workbench"
+    ]
+  },
+  "agent_skill_boundaries": {
+    "obsidian_cli": "May be enabled only through the controlled wrapper; skills must not execute obsidian-cli directly.",
+    "capture_cleaning": "defuddle-style capture and cleaning goes to an isolated staging queue and cannot write the vault directly.",
+    "skill_types": {
+      "authoring_skill": "May propose note content or metadata.",
+      "execution_skill": "May request wrapper operations and must receive policy decisions, dry-run plans, and audit ids."
+    }
+  },
+  "non_goals": [
+    "Do not enable live write-back in Phase 1.",
+    "Do not invoke obsidian-cli directly from agent skills.",
+    "Do not allow arbitrary shell commands.",
+    "Do not support bulk delete or bulk move operations.",
+    "Do not let capture or cleaning queues write directly to the vault.",
+    "Do not move files outside configured vault roots."
+  ],
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py -q",
+    "wrapper": "uv run pytest dc_engines/tests/test_obsidian_vault_wrapper.py -q",
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

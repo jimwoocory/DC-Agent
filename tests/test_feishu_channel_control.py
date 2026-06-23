@@ -1,3 +1,5 @@
+import importlib
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +15,7 @@ from dc_engines.feishu_channel_control import (  # noqa: E402
 
 from data.plugins.dc_hub.main import DEFAULT_MODULES  # noqa: E402
 from data.plugins.dc_router import main as _dc_router_plugin  # noqa: E402, F401
+from data.plugins.feishu_channel_control import main as _feishu_channel_control_plugin
 from data.plugins.feishu_channel_control.main import (  # noqa: E402
     FeishuChannelControlPlugin,
 )
@@ -24,6 +27,7 @@ class FakeEvent:
         *,
         text: str = "hello",
         platform_name: str = "lark",
+        platform_id: str = "巅池-Agent小助手",
         sender_id: str = "ou_user",
         group_id: str = "",
         chat_id: str = "",
@@ -42,6 +46,7 @@ class FakeEvent:
         self.result = None
         self.stopped = False
         self._platform_name = platform_name
+        self._platform_id = platform_id
         self._sender_id = sender_id
         self._group_id = group_id
 
@@ -49,10 +54,13 @@ class FakeEvent:
         return self._platform_name
 
     def get_platform_id(self):
-        return "巅池-Agent小助手"
+        return self._platform_id
 
     def get_sender_id(self):
         return self._sender_id
+
+    def get_sender_name(self):
+        return "测试同事"
 
     def get_group_id(self):
         return self._group_id
@@ -117,6 +125,54 @@ def test_dynamic_dm_metadata_is_written_by_plugin(tmp_path: Path) -> None:
     )
 
 
+def test_lark_p2p_oc_chat_id_is_still_direct(tmp_path: Path) -> None:
+    plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
+    plugin.config = FeishuChannelConfig.from_dict({"dm_policy": "open"})
+    plugin.state = FeishuChannelState(tmp_path / "state.json")
+    plugin.controller = FeishuChannelController(plugin.config, plugin.state)
+    event = FakeEvent(sender_id="ou_colleague", chat_id="oc_p2p_chat")
+
+    import asyncio
+
+    asyncio.run(plugin.on_message(event))
+
+    assert event.result is None
+    assert event.extras["feishu_channel_allowed"] is True
+    assert event.extras["feishu_channel_peer_kind"] == "direct"
+    assert event.extras["feishu_channel_peer_id"] == "ou_colleague"
+
+
+def test_plugin_recognizes_branded_feishu_platform_id(tmp_path: Path) -> None:
+    plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
+    plugin.project_root = tmp_path
+    plugin.config = FeishuChannelConfig.from_dict({"dm_policy": "open"})
+    plugin.state = FeishuChannelState(tmp_path / "state.json")
+    plugin.controller = FeishuChannelController(plugin.config, plugin.state)
+    event = FakeEvent(
+        text="小助手，帮我看一下今天执行物料的问题。",
+        platform_name="",
+        sender_id="ou_execution_colleague",
+        chat_id="oc_private_chat",
+    )
+
+    import asyncio
+
+    asyncio.run(plugin.on_message(event))
+
+    assert event.result is None
+    assert event.extras["feishu_channel_allowed"] is True
+    assert event.extras["feishu_ingress_audit_id"]
+    with sqlite3.connect(tmp_path / "data" / "ai_inbox.db") as conn:
+        row = conn.execute(
+            "SELECT sender_id, text, allowed FROM feishu_ingress_audit"
+        ).fetchone()
+    assert row == (
+        "ou_execution_colleague",
+        "小助手，帮我看一下今天执行物料的问题。",
+        1,
+    )
+
+
 def test_group_requires_allowlist_and_mention(tmp_path: Path) -> None:
     state = FeishuChannelState(tmp_path / "state.json")
     config = FeishuChannelConfig.from_dict(
@@ -152,6 +208,7 @@ def test_group_requires_allowlist_and_mention(tmp_path: Path) -> None:
 
 def test_plugin_stops_unallowlisted_group_event(tmp_path: Path) -> None:
     plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
+    plugin.project_root = tmp_path
     plugin.config = FeishuChannelConfig.from_dict(
         {
             "group_policy": "allowlist",
@@ -171,6 +228,21 @@ def test_plugin_stops_unallowlisted_group_event(tmp_path: Path) -> None:
     assert event.stopped is True
     assert event.extras["feishu_channel_allowed"] is False
     assert event.extras["feishu_channel_policy_reason"] == "group_not_allowlisted"
+    assert event.extras["feishu_ingress_audit_id"]
+    with sqlite3.connect(tmp_path / "data" / "ai_inbox.db") as conn:
+        row = conn.execute(
+            """
+            SELECT sender_id, sender_name, text, allowed, policy_reason
+            FROM feishu_ingress_audit
+            """
+        ).fetchone()
+    assert row == (
+        "ou_user",
+        "测试同事",
+        "hello",
+        0,
+        "group_not_allowlisted",
+    )
 
 
 def test_forged_card_action_is_blocked(tmp_path: Path) -> None:
@@ -197,7 +269,9 @@ def test_non_lark_event_is_ignored(tmp_path: Path) -> None:
     plugin.config = FeishuChannelConfig.from_dict({"dm_policy": "open"})
     plugin.state = FeishuChannelState(tmp_path / "state.json")
     plugin.controller = FeishuChannelController(plugin.config, plugin.state)
-    event = FakeEvent(platform_name="webchat")
+    event = FakeEvent(
+        platform_name="webchat", platform_id="webchat", sender_id="web_user"
+    )
 
     import asyncio
 
@@ -221,6 +295,15 @@ def test_feishu_channel_control_runs_before_dc_router() -> None:
     router = star_handlers_registry.get_handler_by_full_name(
         "data.plugins.dc_router.main_route"
     )
+    if control is None or router is None:
+        importlib.reload(_feishu_channel_control_plugin)
+        importlib.reload(_dc_router_plugin)
+        control = star_handlers_registry.get_handler_by_full_name(
+            "data.plugins.feishu_channel_control.main_on_message"
+        )
+        router = star_handlers_registry.get_handler_by_full_name(
+            "data.plugins.dc_router.main_route"
+        )
 
     assert control is not None
     assert router is not None

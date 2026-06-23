@@ -24,3 +24,13 @@ def test_loop_engineering_mvp_contract_is_targeted_check_referenced() -> None:
     assert "harness.evaluator.loop_engineering_mvp" in script
     assert "tests/harness/test_loop_engineering_mvp_contract.py" in script
     assert "tests/test_harness_loop_route.py" in script
+
+
+def test_agent_check_uses_workspace_uv_cache_for_sandbox() -> None:
+    script = Path("scripts/agent-check.sh").read_text(encoding="utf-8")
+    gitignore = Path(".gitignore").read_text(encoding="utf-8")
+
+    assert 'UV_CACHE_DIR="${UV_CACHE_DIR:-$ROOT_DIR/.uv-cache}"' in script
+    assert 'mkdir -p "$UV_CACHE_DIR"' in script
+    assert "/Users/dianchi/.cache/uv" not in script
+    assert ".uv-cache/" in gitignore

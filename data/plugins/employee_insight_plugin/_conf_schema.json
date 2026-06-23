@@ -9,6 +9,16 @@
     "type": "bool",
     "default": true
   },
+  "auto_observe_private_dm": {
+    "description": "是否将普通飞书私聊自动纳入员工洞察；默认关闭，避免影响正常聊天",
+    "type": "bool",
+    "default": false
+  },
+  "side_effect_timeout_seconds": {
+    "description": "员工洞察旁路处理的超时时间；超时后放行主聊天",
+    "type": "float",
+    "default": 1.5
+  },
   "daily_outreach_limit": {
     "description": "每日自动触达最多处理的试点员工数量",
     "type": "int",

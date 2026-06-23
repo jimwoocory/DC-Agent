@@ -567,12 +567,24 @@ class LarkMessageEvent(AstrMessageEvent):
                 media_comp, lark_client, reply_message_id, receive_id, receive_id_type
             )
 
+    def _reply_or_direct_args(self) -> tuple[str | None, str | None, str | None]:
+        message_id = str(getattr(self.message_obj, "message_id", "") or "")
+        if message_id.startswith("om_"):
+            return message_id, None, None
+        session_id = str(getattr(self, "session_id", "") or "")
+        if session_id:
+            return None, session_id, "open_id"
+        return None, None, None
+
     async def send(self, message: MessageChain) -> None:
-        """发送消息链到飞书，然后交给父类做框架级发送/记录"""
+        """Send a message chain to Lark, then let the base event record it."""
+        reply_message_id, receive_id, receive_id_type = self._reply_or_direct_args()
         await LarkMessageEvent.send_message_chain(
             message,
             self.bot,
-            reply_message_id=self.message_obj.message_id,
+            reply_message_id=reply_message_id,
+            receive_id=receive_id,
+            receive_id_type=receive_id_type,
         )
         await super().send(message)
 
@@ -1055,9 +1067,16 @@ class LarkMessageEvent(AstrMessageEvent):
                                 await _consume_rest_and_fallback(generator, delta)
                                 return
 
+                            (
+                                reply_message_id,
+                                receive_id,
+                                receive_id_type,
+                            ) = self._reply_or_direct_args()
                             sent = await self._send_card_message(
                                 card_id,
-                                reply_message_id=self.message_obj.message_id,
+                                reply_message_id=reply_message_id,
+                                receive_id=receive_id,
+                                receive_id_type=receive_id_type,
                             )
                             if not sent:
                                 logger.error(

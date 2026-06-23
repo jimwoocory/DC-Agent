@@ -32,6 +32,12 @@ class DCRouterConfig:
     fallback_on_error: bool = True
     arbiter_enabled: bool = False
     """Enable L3 arbitration; false keeps PassThroughArbiter behavior."""
+    classifier_enabled: bool = False
+    """Enable LLM classifier for uncertain routing cases (fallback → classifier).
+    Default False: unconfigured messages go straight to FALLBACK intent without
+    the extra LLM call + latency. Enable only in staging/fallback config for
+    manual verification before production rollout.
+    """
     feishu_channel_routes: dict[str, Any] = field(default_factory=dict)
     queue_recovery_interval_seconds: int = 60
     config_path: Path = field(default_factory=lambda: CONFIG_PATH)
@@ -120,6 +126,7 @@ def load_config(path: Path | None = None) -> DCRouterConfig:
         dry_run=bool(data.get("dry_run", True)),
         fallback_on_error=bool(data.get("fallback_on_error", True)),
         arbiter_enabled=bool(data.get("arbiter_enabled", False)),
+        classifier_enabled=bool(data.get("classifier_enabled", False)),
         feishu_channel_routes=feishu_routes,
         queue_recovery_interval_seconds=queue_interval,
         config_path=config_path,

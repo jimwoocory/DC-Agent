@@ -1270,18 +1270,20 @@ class PluginRoute(Route):
         This only affects the display list. Detail, lifecycle, and actual plugin
         loading remain unchanged so DC-HUB can still manage every module.
         """
-        dc_hub_main = (
-            Path(__file__).resolve().parents[3]
-            / "data"
-            / "plugins"
-            / "dc_hub"
-            / "main.py"
-        )
+        plugin_root = Path(__file__).resolve().parents[3] / "data" / "plugins"
+        dc_hub_main = plugin_root / "dc_hub" / "main.py"
+        names = {
+            path.name
+            for path in plugin_root.iterdir()
+            if path.is_dir()
+            and path.name != _DC_HUB_PLUGIN_ID
+            and ((path / "main.py").is_file() or (path / f"{path.name}.py").is_file())
+        }
         try:
             source = dc_hub_main.read_text(encoding="utf-8")
         except OSError:
-            return set()
-        names = set(_DC_HUB_MANAGED_PLUGIN_RE.findall(source))
+            return names
+        names.update(_DC_HUB_MANAGED_PLUGIN_RE.findall(source))
         names.discard(_DC_HUB_PLUGIN_ID)
         return names
 

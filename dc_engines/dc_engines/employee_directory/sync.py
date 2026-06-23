@@ -151,7 +151,9 @@ def _sync_preferences(
     }
     if department_name:
         preferences["feishu_department"] = department_name
-    org_info = org_index.lookup(department_name) if org_index and department_name else None
+    org_info = (
+        org_index.lookup(department_name) if org_index and department_name else None
+    )
     if org_info is not None:
         preferences["business_parent_department"] = org_info.parent
         preferences["department_path"] = list(org_info.path)

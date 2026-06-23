@@ -43,13 +43,19 @@ def test_obsidian_vault_automation_contract_points_to_verifiers() -> None:
         "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_creates_audited_write_plan_without_modifying_vault -q",
         "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_plans_new_file_creation_without_creating_file -q",
         "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_rejects_write_plan_over_size_limit -q",
+        "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_denies_write_plan_execution_by_default -q",
+        "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_executes_approved_write_plan -q",
+        "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_rejects_write_plan_execution_with_invalid_token -q",
+        "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_rejects_write_plan_execution_after_file_drift -q",
+        "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_rejects_expired_write_plan_execution -q",
+        "uv run pytest dc_engines/tests/test_obsidian_vault_automation.py::test_wrapper_rejects_write_plan_execution_with_content_hash_mismatch -q",
     ]
 
 
 def test_contract_records_read_only_operations_and_denied_execution() -> None:
     contract = _contract()
 
-    assert contract["phase"] == "phase_3_write_plan_contract"
+    assert contract["phase"] == "phase_4_approved_write_plan_execution"
     assert set(contract["allowed_operations"]) == {
         "list",
         "read",
@@ -57,6 +63,7 @@ def test_contract_records_read_only_operations_and_denied_execution() -> None:
         "metadata",
         "frontmatter",
         "plan_write",
+        "execute_write_plan",
     }
     assert {"write", "delete", "shell", "obsidian_cli", "defuddle"} <= set(
         contract["denied_operations"]
@@ -72,7 +79,10 @@ def test_contract_requires_vault_allowlist_and_append_only_audit() -> None:
     assert boundaries["symlink_escape_blocking"] is True
     assert boundaries["arbitrary_shell"] == "forbidden"
     assert boundaries["default_write_mode"] == "dry_run_only"
-    assert boundaries["write_plan_execution"] == "not_enabled"
+    assert (
+        boundaries["write_plan_execution"]
+        == "explicit_wrapper_config_and_approval_token_required"
+    )
     assert {
         "plan_id",
         "action",
@@ -95,6 +105,10 @@ def test_contract_defers_obsidian_cli_and_defuddle() -> None:
     )
     assert strategy["defuddle"] == "deferred_until_controlled_wrapper_adapter_exists"
     assert strategy["phase_3_write_plan"] == "dry_run_plan_only_without_execution"
+    assert (
+        strategy["phase_4_write_execution"]
+        == "wrapper_only_explicit_config_plan_hash_expiry_and_approval_token_required"
+    )
     assert "raw obsidian-cli" in non_goals
     assert "defuddle" in non_goals
 
@@ -107,9 +121,12 @@ def test_contract_records_runtime_tool_boundary() -> None:
     assert runtime_tool["config_key"] == "provider_settings.obsidian_vault_automation"
     assert runtime_tool["default_enabled"] is False
     assert runtime_tool["required_config"] == ["enabled", "vault_roots"]
-    assert {"max_plan_bytes", "plan_ttl_seconds"} <= set(
-        runtime_tool["optional_config"]
-    )
+    assert {
+        "max_plan_bytes",
+        "plan_ttl_seconds",
+        "write_execution_enabled",
+        "write_approval_token",
+    } <= set(runtime_tool["optional_config"])
     assert set(runtime_tool["exposed_operations"]) == {
         "list",
         "read",
@@ -117,6 +134,11 @@ def test_contract_records_runtime_tool_boundary() -> None:
         "metadata",
         "frontmatter",
     }
-    assert {"write", "delete", "shell", "obsidian_cli", "defuddle"} <= set(
-        runtime_tool["not_exposed_operations"]
-    )
+    assert {
+        "execute_write_plan",
+        "write",
+        "delete",
+        "shell",
+        "obsidian_cli",
+        "defuddle",
+    } <= set(runtime_tool["not_exposed_operations"])

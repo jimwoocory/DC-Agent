@@ -1,8 +1,9 @@
-"""Controlled read-only automation boundary for Obsidian vaults."""
+"""Controlled automation boundary for Obsidian vaults."""
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -63,6 +64,8 @@ class VaultAutomationConfig:
     max_read_bytes: int = 256 * 1024
     max_plan_bytes: int = 256 * 1024
     plan_ttl_seconds: int = 3600
+    write_execution_enabled: bool = False
+    write_approval_token: str | None = None
 
     def resolved_roots(self) -> tuple[Path, ...]:
         roots = tuple(
@@ -74,7 +77,7 @@ class VaultAutomationConfig:
 
 
 class ObsidianVaultAutomation:
-    """Read-only operations over allowlisted Obsidian vault roots."""
+    """Controlled operations over allowlisted Obsidian vault roots."""
 
     def __init__(self, config: VaultAutomationConfig) -> None:
         self._config = config
@@ -353,6 +356,76 @@ class ObsidianVaultAutomation:
         _ = content
         self._deny_operation("write", path, actor=actor)
 
+    def execute_write_plan(
+        self,
+        plan: dict[str, Any],
+        content: str,
+        *,
+        approval_token: str,
+        actor: str | None = None,
+    ) -> dict[str, Any]:
+        path = str(plan.get("path", ""))
+        plan_id = str(plan.get("plan_id", ""))
+        try:
+            self._validate_write_execution_plan(
+                plan,
+                content,
+                approval_token=approval_token,
+                actor=actor,
+            )
+            resolved = self._resolve_candidate_path(
+                path, operation="execute_write_plan", actor=actor
+            )
+            action = str(plan["action"])
+            if action == "create" and resolved.exists():
+                raise VaultAccessError("Planned create target already exists.")
+            if action == "update" and not resolved.exists():
+                raise VaultAccessError("Planned update target is missing.")
+            if not resolved.parent.exists() or not resolved.parent.is_dir():
+                raise VaultAccessError("Planned target parent directory is missing.")
+            if resolved.exists():
+                self._ensure_readable_text_file(
+                    resolved,
+                    path,
+                    "execute_write_plan",
+                    actor,
+                )
+                expected_existing_sha256 = plan.get("existing_sha256")
+                current_sha256 = _sha256(resolved)
+                if current_sha256 != expected_existing_sha256:
+                    raise VaultAccessError("Vault file changed after write plan.")
+
+            resolved.write_text(content, encoding="utf-8")
+            result = {
+                "plan_id": plan_id,
+                "path": self._relative_path(resolved),
+                "action": action,
+                "bytes": len(content.encode("utf-8")),
+                "content_sha256": str(plan["content_sha256"]),
+                "executed": True,
+            }
+            self._audit(
+                "execute_write_plan",
+                path,
+                allowed=True,
+                dry_run=False,
+                actor=actor,
+                reason="approved write plan executed",
+                payload=result,
+            )
+            return result
+        except VaultAccessError as exc:
+            self._audit(
+                "execute_write_plan",
+                path or "<unknown>",
+                allowed=False,
+                dry_run=False,
+                actor=actor,
+                reason=str(exc),
+                payload={"plan_id": plan_id},
+            )
+            raise
+
     def delete(self, path: Path | str, *, actor: str | None = None) -> None:
         self._deny_operation("delete", path, actor=actor)
 
@@ -384,6 +457,53 @@ class ObsidianVaultAutomation:
             reason="vault write execution is not enabled",
         )
         raise VaultAccessError(f"Vault {operation} is not enabled.")
+
+    def _validate_write_execution_plan(
+        self,
+        plan: dict[str, Any],
+        content: str,
+        *,
+        approval_token: str,
+        actor: str | None,
+    ) -> None:
+        _ = actor
+        if self._config.write_execution_enabled is not True:
+            raise VaultAccessError("Vault write execution is disabled.")
+        configured_token = self._config.write_approval_token
+        if not configured_token or not approval_token:
+            raise VaultAccessError("Vault write approval token is required.")
+        if not hmac.compare_digest(str(configured_token), str(approval_token)):
+            raise VaultAccessError("Vault write approval token is invalid.")
+
+        required_fields = {
+            "plan_id",
+            "path",
+            "action",
+            "expires_at",
+            "content_sha256",
+            "existing_sha256",
+        }
+        missing_fields = sorted(required_fields - set(plan))
+        if missing_fields:
+            raise VaultAccessError(
+                f"Write plan is missing required fields: {', '.join(missing_fields)}."
+            )
+        if not str(plan["plan_id"]).startswith("ova-plan-"):
+            raise VaultAccessError("Write plan id is invalid.")
+        if plan["action"] not in {"create", "update"}:
+            raise VaultAccessError("Write plan action is invalid.")
+        try:
+            expires_at = datetime.fromisoformat(str(plan["expires_at"]))
+        except ValueError as exc:
+            raise VaultAccessError("Write plan expiry is invalid.") from exc
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at <= datetime.now(UTC):
+            raise VaultAccessError("Write plan has expired.")
+
+        content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if content_sha256 != plan["content_sha256"]:
+            raise VaultAccessError("Write plan content hash does not match.")
 
     def _resolve_path(
         self,

@@ -16,6 +16,9 @@ def _make_wrapper(
     *,
     audit_log_path: Path | None = None,
     max_plan_bytes: int = 256 * 1024,
+    plan_ttl_seconds: int = 3600,
+    write_execution_enabled: bool = False,
+    write_approval_token: str | None = None,
 ) -> ObsidianVaultAutomation:
     return ObsidianVaultAutomation(
         VaultAutomationConfig(
@@ -23,6 +26,9 @@ def _make_wrapper(
             audit_log_path=audit_log_path,
             actor="test-agent",
             max_plan_bytes=max_plan_bytes,
+            plan_ttl_seconds=plan_ttl_seconds,
+            write_execution_enabled=write_execution_enabled,
+            write_approval_token=write_approval_token,
         )
     )
 
@@ -216,6 +222,145 @@ def test_wrapper_rejects_write_plan_over_size_limit(tmp_path: Path) -> None:
     assert denied.allowed is False
     assert denied.dry_run is True
     assert denied.payload["max_plan_bytes"] == 4
+
+
+def test_wrapper_denies_write_plan_execution_by_default(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    _seed_vault(vault_root)
+    wrapper = _make_wrapper(vault_root)
+    content = "# New\n"
+    plan = wrapper.plan_write("Notes/New.md", content)
+
+    with pytest.raises(VaultAccessError, match="write execution is disabled"):
+        wrapper.execute_write_plan(plan, content, approval_token="token")
+
+    assert not (vault_root / "Notes" / "New.md").exists()
+    denied = wrapper.audit_records[-1]
+    assert denied.operation == "execute_write_plan"
+    assert denied.allowed is False
+
+
+def test_wrapper_executes_approved_write_plan(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    note_path = _seed_vault(vault_root)
+    original_content = note_path.read_text(encoding="utf-8")
+    content = original_content.replace("customer approval", "signed approval")
+    wrapper = _make_wrapper(
+        vault_root,
+        write_execution_enabled=True,
+        write_approval_token="approved-token",
+    )
+    plan = wrapper.plan_write("Notes/Launch.md", content)
+
+    result = wrapper.execute_write_plan(
+        plan,
+        content,
+        approval_token="approved-token",
+    )
+
+    assert result["executed"] is True
+    assert result["plan_id"] == plan["plan_id"]
+    assert result["action"] == "update"
+    assert "signed approval" in note_path.read_text(encoding="utf-8")
+    executed = wrapper.audit_records[-1]
+    assert executed.operation == "execute_write_plan"
+    assert executed.allowed is True
+    assert executed.dry_run is False
+    assert executed.payload["content_sha256"] == plan["content_sha256"]
+
+
+def test_wrapper_rejects_write_plan_execution_with_invalid_token(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    _seed_vault(vault_root)
+    wrapper = _make_wrapper(
+        vault_root,
+        write_execution_enabled=True,
+        write_approval_token="approved-token",
+    )
+    content = "# New\n"
+    plan = wrapper.plan_write("Notes/New.md", content)
+
+    with pytest.raises(VaultAccessError, match="approval token is invalid"):
+        wrapper.execute_write_plan(plan, content, approval_token="wrong-token")
+
+    assert not (vault_root / "Notes" / "New.md").exists()
+
+
+def test_wrapper_rejects_write_plan_execution_after_file_drift(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    note_path = _seed_vault(vault_root)
+    original_content = note_path.read_text(encoding="utf-8")
+    content = original_content.replace("customer approval", "signed approval")
+    wrapper = _make_wrapper(
+        vault_root,
+        write_execution_enabled=True,
+        write_approval_token="approved-token",
+    )
+    plan = wrapper.plan_write("Notes/Launch.md", content)
+    note_path.write_text(original_content + "\nDrift\n", encoding="utf-8")
+
+    with pytest.raises(VaultAccessError, match="changed after write plan"):
+        wrapper.execute_write_plan(
+            plan,
+            content,
+            approval_token="approved-token",
+        )
+
+    assert "signed approval" not in note_path.read_text(encoding="utf-8")
+
+
+def test_wrapper_rejects_write_plan_execution_with_content_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    _seed_vault(vault_root)
+    wrapper = _make_wrapper(
+        vault_root,
+        write_execution_enabled=True,
+        write_approval_token="approved-token",
+    )
+    plan = wrapper.plan_write("Notes/New.md", "# Planned\n")
+
+    with pytest.raises(VaultAccessError, match="content hash does not match"):
+        wrapper.execute_write_plan(
+            plan,
+            "# Different\n",
+            approval_token="approved-token",
+        )
+
+    assert not (vault_root / "Notes" / "New.md").exists()
+
+
+def test_wrapper_rejects_expired_write_plan_execution(tmp_path: Path) -> None:
+    vault_root = tmp_path / "vault"
+    vault_root.mkdir()
+    _seed_vault(vault_root)
+    wrapper = _make_wrapper(
+        vault_root,
+        plan_ttl_seconds=-1,
+        write_execution_enabled=True,
+        write_approval_token="approved-token",
+    )
+    content = "# New\n"
+    plan = wrapper.plan_write("Notes/New.md", content)
+
+    with pytest.raises(VaultAccessError, match="Write plan has expired"):
+        wrapper.execute_write_plan(
+            plan,
+            content,
+            approval_token="approved-token",
+        )
+
+    assert not (vault_root / "Notes" / "New.md").exists()
 
 
 def test_wrapper_writes_append_only_audit_records(tmp_path: Path) -> None:

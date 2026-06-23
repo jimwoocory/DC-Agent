@@ -170,6 +170,7 @@ async def test_obsidian_vault_tool_rejects_non_read_only_operations(
 
     for operation in (
         "plan_write",
+        "execute_write_plan",
         "write",
         "delete",
         "shell",

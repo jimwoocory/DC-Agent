@@ -95,6 +95,8 @@ def _build_wrapper(
     max_read_bytes = int(settings.get("max_read_bytes") or 256 * 1024)
     max_plan_bytes = int(settings.get("max_plan_bytes") or 256 * 1024)
     plan_ttl_seconds = int(settings.get("plan_ttl_seconds") or 3600)
+    write_execution_enabled = settings.get("write_execution_enabled") is True
+    write_approval_token = settings.get("write_approval_token")
     vault_module = _load_vault_module()
     return vault_module.ObsidianVaultAutomation(
         vault_module.VaultAutomationConfig(
@@ -104,6 +106,8 @@ def _build_wrapper(
             max_read_bytes=max_read_bytes,
             max_plan_bytes=max_plan_bytes,
             plan_ttl_seconds=plan_ttl_seconds,
+            write_execution_enabled=write_execution_enabled,
+            write_approval_token=write_approval_token,
         )
     )
 

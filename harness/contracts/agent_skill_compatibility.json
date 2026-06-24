@@ -1,0 +1,70 @@
+{
+  "feature": "agent_skill_compatibility",
+  "goal": "Keep DC-Agent skill preloading compatible with Agent Skills-style SKILL.md packages while bounding referenced context and preventing path escape reads.",
+  "acceptance_criteria": [
+    {
+      "id": "agent-skill-compat-001",
+      "description": "DC-Agent discovers skill directories that contain SKILL.md, parses their frontmatter, and preloads matched SKILL.md content into the skill prompt block.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_list_skills_skips_dirs_without_skill_md tests/test_skill_loader.py::test_read_skill_card_basic tests/test_skill_loader.py::test_build_block_includes_header_and_skill -q"
+    },
+    {
+      "id": "agent-skill-compat-002",
+      "description": "Agent Skills-style optional references/*.md files linked from the same skill's SKILL.md are preloaded with the skill card.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_read_skill_card_preloads_agent_skill_references -q"
+    },
+    {
+      "id": "agent-skill-compat-003",
+      "description": "Preloaded SKILL.md and references/*.md content remains bounded by the skill-card and prompt byte budgets.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_build_block_truncates_real_long_skill tests/test_skill_loader.py::test_build_block_enforces_byte_budget_for_chinese_skill tests/test_skill_loader.py::test_read_skill_card_respects_max_chars_across_cache_hits tests/test_skill_loader.py::test_read_skill_card_preloads_agent_skill_references -q"
+    },
+    {
+      "id": "agent-skill-compat-004",
+      "description": "Reference links that resolve outside the current skill directory are blocked and never injected into the preloaded skill card.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_read_skill_card_rejects_references_outside_skill_dir tests/test_skill_loader.py::test_read_skill_card_rejects_parent_traversal_inside_skill_dir -q"
+    },
+    {
+      "id": "agent-skill-compat-005",
+      "description": "Contract coverage stays executable through this harness contract test and the focused tests/test_skill_loader.py checks.",
+      "verification": "uv run pytest tests/harness/test_agent_skill_compatibility_contract.py -q"
+    },
+    {
+      "id": "agent-skill-compat-006",
+      "description": "DC-Agent installs the pure Obsidian and visual authoring Agent Skills obsidian-markdown, obsidian-bases, json-canvas, and mermaid-visualizer, while leaving execution-oriented obsidian-cli and defuddle out of the runtime skill set until explicit execution policy exists.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_list_skills_finds_bundled_obsidian_skills tests/test_skill_loader.py::test_real_obsidian_authoring_skills_include_upstream_license tests/test_skill_loader.py::test_execution_oriented_obsidian_skills_do_not_bypass_allowlist -q"
+    },
+    {
+      "id": "agent-skill-compat-007",
+      "description": "Pure Obsidian and visual authoring skills bypass business intent allowlists only through the bounded global authoring-skill policy when their own skill matcher succeeds.",
+      "verification": "uv run pytest tests/test_skill_loader.py::test_match_obsidian_markdown_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_obsidian_bases_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_json_canvas_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_match_mermaid_visualizer_bypasses_business_intent_allowlist tests/test_skill_loader.py::test_global_obsidian_skills_ignore_generic_business_text tests/test_skill_loader.py::test_global_obsidian_skills_ignore_execution_style_obsidian_text tests/test_skill_preloader.py::test_inject_obsidian_skill_under_business_intent -q"
+    },
+    {
+      "id": "agent-skill-compat-008",
+      "description": "Bundled Obsidian skills are versioned under bundled/skills and installed into ignored runtime data/skills by scripts/sync_bundled_skills.py without deleting unrelated runtime skills.",
+      "verification": "uv run pytest tests/test_sync_bundled_skills.py -q"
+    }
+  ],
+  "compatibility_rules": {
+    "package_root": "Each skill package is a directory containing SKILL.md.",
+    "bundled_source_root": "bundled/skills",
+    "runtime_install_root": "data/skills",
+    "runtime_installer": "scripts/sync_bundled_skills.py",
+    "optional_references": "SKILL.md may link to markdown files under the same skill directory, including references/*.md.",
+    "bounded_references": "Only a bounded subset of same-skill markdown references may be preloaded, and prompt assembly must still obey the configured byte budget.",
+    "path_boundary": "Resolved reference paths must remain inside the current skill directory; parent traversal, absolute escapes, remote URLs, and self-links are ignored.",
+    "installed_obsidian_authoring_skills": [
+      "obsidian-markdown",
+      "obsidian-bases",
+      "json-canvas",
+      "mermaid-visualizer"
+    ],
+    "deferred_execution_skills": [
+      "obsidian-cli",
+      "defuddle"
+    ]
+  },
+  "verification": {
+    "focused_all": "uv run pytest tests/test_sync_bundled_skills.py tests/test_skill_loader.py tests/test_skill_preloader.py tests/harness/test_agent_skill_compatibility_contract.py -q",
+    "contract": "uv run pytest tests/harness/test_agent_skill_compatibility_contract.py -q",
+    "focused": "uv run pytest tests/test_skill_loader.py::test_read_skill_card_preloads_agent_skill_references tests/test_skill_loader.py::test_read_skill_card_rejects_references_outside_skill_dir tests/test_skill_loader.py::test_read_skill_card_rejects_parent_traversal_inside_skill_dir tests/test_skill_loader.py::test_build_block_truncates_real_long_skill -q"
+  }
+}

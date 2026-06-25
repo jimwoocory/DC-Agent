@@ -16,7 +16,9 @@ from dc_engines.media_prompt_catalog import (
 MediaKind = Literal["image", "video", "image2video"]
 MediaGenerationStatus = Literal["running", "succeeded", "failed"]
 MediaPromptTarget = Literal["generic", "gpt-image-2", "dreamina"]
-MediaPromptChannel = Literal["generic_media", "image_marketing_visual", "video_storyboard"]
+MediaPromptChannel = Literal[
+    "generic_media", "image_marketing_visual", "video_storyboard"
+]
 MediaPromptLanguage = Literal["en", "zh"]
 MediaPromptRecipeId = Literal[
     "image2_premium_key_visual",
@@ -89,7 +91,9 @@ class MediaBrandVisualProfile:
         )
 
 
-MEDIA_PROVIDER_PROMPT_COMPILERS: dict[MediaPromptTarget, MediaProviderPromptCompiler] = {
+MEDIA_PROVIDER_PROMPT_COMPILERS: dict[
+    MediaPromptTarget, MediaProviderPromptCompiler
+] = {
     "generic": MediaProviderPromptCompiler(
         target_engine="generic",
         channel="generic_media",
@@ -431,7 +435,9 @@ def list_media_prompt_recipes(
     if channel is not None:
         recipes = (recipe for recipe in recipes if recipe.channel == channel)
     if target_engine is not None:
-        recipes = (recipe for recipe in recipes if recipe.target_engine == target_engine)
+        recipes = (
+            recipe for recipe in recipes if recipe.target_engine == target_engine
+        )
     return tuple(recipes)
 
 
@@ -795,7 +801,9 @@ def _format_brand_profile_zh(brand_profile: MediaBrandVisualProfile) -> str:
             "source_note": "来源说明",
         },
     )
-    lines.append("以上为有来源的视觉上下文；缺失素材不得臆造官方 Logo、车型细节、权益或认证。")
+    lines.append(
+        "以上为有来源的视觉上下文；缺失素材不得臆造官方 Logo、车型细节、权益或认证。"
+    )
     return " | ".join(lines)
 
 

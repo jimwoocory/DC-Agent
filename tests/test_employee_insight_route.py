@@ -159,7 +159,7 @@ def test_employee_insight_frontend_entry_is_registered() -> None:
     assert "path: '/employee-insight'" in route_source
     assert "core.navigation.employeeInsight" in sidebar_source
     assert sidebar_source.index("core.navigation.employeeInsight") < sidebar_source.index(
-        "core.navigation.groups.more"
+        "title: 'core.navigation.groups.more'"
     )
     assert "chip: '灰度'" in sidebar_source
     assert '"employeeInsight": "员工需求洞察"' in zh_navigation

@@ -23,7 +23,9 @@ FOLLOWUP_RE = re.compile(
     r"这个报告|这个任务|这张图|这份材料|沿用|复用)",
     re.IGNORECASE,
 )
-NEW_TASK_RE = re.compile(r"^\s*(这是|作为|按|当成)?\s*(新任务|新需求|新话题)\s*[:：,，]?", re.I)
+NEW_TASK_RE = re.compile(
+    r"^\s*(这是|作为|按|当成)?\s*(新任务|新需求|新话题)\s*[:：,，]?", re.I
+)
 NEW_SESSION_RE = re.compile(r"^\s*/?(new\s+session|新会话|开启新话题)\s*$", re.I)
 
 CONTEXT_ALIGNMENT_PROMPT = (

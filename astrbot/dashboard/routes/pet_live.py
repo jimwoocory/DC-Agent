@@ -19,7 +19,8 @@ from dc_engines.pet_live.event_bus import publish_pet_event
 from dc_engines.pet_live.identity import get_or_create_identity
 from dc_engines.pet_live.integrations import pet_live_enabled
 from dc_engines.pet_live.store import PetLiveStore
-from quart import request, send_file
+
+from astrbot.dashboard.asgi_runtime import request, send_file
 
 from .route import Response, Route, RouteContext
 

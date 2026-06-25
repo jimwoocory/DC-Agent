@@ -10,14 +10,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from quart import Quart
+from fastapi import FastAPI
 
 from astrbot.core.assistant_chat_health import assistant_chat_health_tracker
 from astrbot.core.event_bus import EventBus
 from astrbot.core.platform.sources.webchat.webchat_queue_mgr import webchat_queue_mgr
-from astrbot.dashboard.routes import chat as chat_module
-from astrbot.dashboard.routes.chat import ChatRoute
-from astrbot.dashboard.routes.route import RouteContext
+from astrbot.dashboard.api.chat import legacy_router
+from astrbot.dashboard.asgi_runtime import FastAPIAppAdapter
+from astrbot.dashboard.services import chat_service as chat_service_module
+from astrbot.dashboard.services.chat_service import ChatService
 from harness.evaluator.kb_import_contract import load_contract, validate_contract
 
 CONTRACT = Path("harness/contracts/assistant_chat_health.json")
@@ -100,21 +101,32 @@ def _build_route(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     db: FakeDB | None = None,
-) -> tuple[Quart, ChatRoute]:
+) -> tuple[FastAPIAppAdapter, ChatService]:
     data_dir = tmp_path / "data"
-    monkeypatch.setattr(chat_module, "get_astrbot_data_path", lambda: str(data_dir))
-    app = Quart(__name__)
+    monkeypatch.setattr(
+        chat_service_module,
+        "get_astrbot_data_path",
+        lambda: str(data_dir),
+    )
+    fastapi_app = FastAPI()
+    fastapi_app.include_router(legacy_router)
+    app = FastAPIAppAdapter(fastapi_app)
     lifecycle = SimpleNamespace(
         conversation_manager=SimpleNamespace(session_conversations={}),
         platform_message_history_manager=SimpleNamespace(),
         umop_config_router=SimpleNamespace(),
     )
-    route = ChatRoute(
-        RouteContext(config={}, app=app),  # type: ignore[arg-type]
+    service = ChatService(
         db or FakeDB(),  # type: ignore[arg-type]
         lifecycle,  # type: ignore[arg-type]
     )
-    return app, route
+    fastapi_app.state.services = SimpleNamespace(chat=service)
+    return app, service
+
+
+async def _get_json(app: FastAPIAppAdapter, path: str):
+    response = await app.test_client().get(path)
+    return response, await response.get_json()
 
 
 def _load_watchdog_engine():
@@ -141,9 +153,7 @@ async def test_assistant_chat_health_returns_metadata_only(
     _clear_webchat_queues()
     app, _route = _build_route(tmp_path, monkeypatch)
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health")
 
     assert response.status_code == 200
     assert payload["status"] == "ok"
@@ -171,9 +181,7 @@ async def test_assistant_chat_health_counts_platform_pipeline_runs_without_ids(
 
     await bus._execute_with_health(FakeScheduler(), FakePlatformEvent())
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health")
 
     assert response.status_code == 200
     activity = payload["data"]["activity"]
@@ -203,9 +211,7 @@ async def test_assistant_chat_health_collects_provider_stats_since_today_midnigh
         FakeProviderStatDB(records),
     )
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health")
 
     assert response.status_code == 200
     collection = payload["data"]["collection"]
@@ -236,9 +242,7 @@ async def test_assistant_chat_health_does_not_double_count_webchat_event_bus(
 
     await bus._execute_with_health(FakeScheduler(), FakePlatformEvent("webchat"))
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health")
 
     assert response.status_code == 200
     assert payload["data"]["activity"]["started_15m"] == 0
@@ -271,9 +275,7 @@ async def test_assistant_chat_health_reports_recent_activity_without_ids(
         "last_seen_at": time.time() - 2,
     }
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health")
 
     assert response.status_code == 200
     activity = payload["data"]["activity"]
@@ -305,9 +307,7 @@ async def test_assistant_chat_health_reports_stale_threads_without_ids(
         "last_seen_at": time.time() - 120,
     }
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health?stale_after_sec=60")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health?stale_after_sec=60")
 
     assert response.status_code == 503
     assert payload["status"] == "error"
@@ -324,9 +324,7 @@ async def test_assistant_chat_health_masks_storage_errors(
     _clear_webchat_queues()
     app, _route = _build_route(tmp_path, monkeypatch, BrokenDB())
 
-    async with app.test_client() as client:
-        response = await client.get("/api/chat/health")
-        payload = await response.get_json()
+    response, payload = await _get_json(app, "/api/chat/health")
 
     assert response.status_code == 503
     assert payload["data"]["checks"][2] == {

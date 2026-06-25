@@ -84,7 +84,10 @@ _DEFAULT_SPEC = PlanningWritingModeSpec(
 
 def build_planning_langgpt_prompt(metadata: Mapping[str, object]) -> str:
     """Build a bounded LangGPT-style system prompt for planning writing tasks."""
-    if str(metadata.get("department_workflow") or "").strip() != "planning_creative_fast":
+    if (
+        str(metadata.get("department_workflow") or "").strip()
+        != "planning_creative_fast"
+    ):
         return ""
 
     mode = str(metadata.get("planning_writing_mode") or "").strip()

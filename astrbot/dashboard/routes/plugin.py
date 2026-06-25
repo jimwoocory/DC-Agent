@@ -18,8 +18,6 @@ import aiohttp
 import certifi
 import jwt
 from aiofiles import ospath as aio_ospath
-from quart import Response as QuartResponse
-from quart import g, make_response, request
 
 from astrbot.api import sp
 from astrbot.core import DEMO_MODE, file_token_service, logger
@@ -34,12 +32,16 @@ from astrbot.core.star.star import StarMetadata
 from astrbot.core.star.star_handler import EventType, star_handlers_registry
 from astrbot.core.star.star_manager import (
     PluginManager,
-    PluginVersionIncompatibleError,
+)
+from astrbot.core.star.star_manager import (
+    PluginVersionUnsupportedError as PluginVersionIncompatibleError,
 )
 from astrbot.core.utils.astrbot_path import (
     get_astrbot_data_path,
     get_astrbot_temp_path,
 )
+from astrbot.dashboard.asgi_runtime import Response as QuartResponse
+from astrbot.dashboard.asgi_runtime import g, make_response, request
 
 from .route import Response, Route, RouteContext
 

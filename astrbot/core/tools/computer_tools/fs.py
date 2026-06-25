@@ -34,6 +34,7 @@ Local path resolution rule:
 """
 
 import os
+import stat
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,6 +72,12 @@ _SANDBOX_RUNTIME_TOOL_CONFIG = {
 _IMAGE_FILE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 _TRUTH_INTAKE_SOURCE = "llm_router_truth_intake"
 _ACTIVE_INTAKE_STATUSES = ("pending", "in_progress", "blocked", "review_required")
+
+
+def _remote_basename(path: str) -> str:
+    # Sandbox paths may come from POSIX or Windows runtimes; normalize separators
+    # without interpreting the path against the host filesystem.
+    return path.replace("\\", "/").rstrip("/").split("/")[-1]
 
 
 def _restricted_env_path_labels(umo: str, *, include_plugin_skills: bool) -> list[str]:
@@ -235,6 +242,25 @@ def _is_path_within_allowed_roots(
     )
 
 
+def _reject_multi_link_file(path: str) -> None:
+    try:
+        path_stat = os.stat(path)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise PermissionError(
+            "Access denied: unable to inspect restricted path link count. "
+            f"Blocked path: {path}."
+        ) from exc
+
+    if stat.S_ISREG(path_stat.st_mode) and path_stat.st_nlink > 1:
+        raise PermissionError(
+            "Access denied: file has multiple hard links and may alias content "
+            "outside allowed directories. "
+            f"Link count: {path_stat.st_nlink}. Blocked path: {path}."
+        )
+
+
 def _normalize_rw_path(
     path: str,
     *,
@@ -261,6 +287,8 @@ def _normalize_rw_path(
             f"{access} access is restricted for this user. "
             f"Allowed directories: {allowed}. Blocked path: {normalized_path}."
         )
+    if restricted:
+        _reject_multi_link_file(normalized_path)
     return normalized_path
 
 
@@ -287,6 +315,8 @@ def _normalize_read_path(
             "Read access is restricted for this user. "
             f"Allowed directories: {allowed}. Blocked path: {normalized_path}."
         )
+    if restricted:
+        _reject_multi_link_file(normalized_path)
     return normalized_path
 
 
@@ -694,6 +724,8 @@ class GrepTool(FunctionTool):
                     "Read access is restricted for this user. "
                     f"Allowed directories: {allowed}. Blocked paths: {blocked}."
                 )
+            for path in normalized:
+                _reject_multi_link_file(path)
 
         return normalized
 
@@ -872,7 +904,7 @@ class FileDownloadTool(FunctionTool):
             context.context.event.unified_msg_origin,
         )
         try:
-            name = os.path.basename(remote_path)
+            name = _remote_basename(remote_path) or os.path.basename(remote_path)
 
             local_path = os.path.join(
                 get_astrbot_temp_path(), f"sandbox_{uuid.uuid4().hex[:4]}_{name}"
@@ -884,7 +916,7 @@ class FileDownloadTool(FunctionTool):
 
             if also_send_to_user:
                 try:
-                    name = os.path.basename(local_path)
+                    name = _remote_basename(remote_path) or os.path.basename(local_path)
                     if Path(local_path).suffix.lower() in _IMAGE_FILE_SUFFIXES:
                         message_component = Image.fromFileSystem(local_path)
                         sent_as = "image"

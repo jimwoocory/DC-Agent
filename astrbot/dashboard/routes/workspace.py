@@ -14,7 +14,8 @@ from dc_engines.employee_insight_loop import TextSendResult
 from dc_engines.pet_live.contracts import StoredPetEvent
 from dc_engines.pet_live.event_bus import publish_pet_event
 from dc_engines.pet_live.store import PetLiveStore
-from quart import request
+
+from astrbot.dashboard.asgi_runtime import request
 
 from .pet_live import PROJECT_ROOT, SESSION_COOKIE
 from .route import Response, Route, RouteContext

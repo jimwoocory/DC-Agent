@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from quart import request
+from astrbot.dashboard.asgi_runtime import request
 
 from .route import Response, Route, RouteContext
 

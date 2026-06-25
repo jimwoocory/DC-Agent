@@ -416,6 +416,13 @@ class FakeChatEvent:
         self.sent.append(message)
 
 
+def _sent_text(message: Any) -> str:
+    chain = getattr(message, "chain", None)
+    if isinstance(chain, list):
+        return "".join(str(getattr(part, "text", part)) for part in chain)
+    return str(message)
+
+
 def _plugin_for_distillation(base_dir: Path | None = None):
     module = _load_plugin_module()
     plugin = object.__new__(module.HermesBridgePlugin)
@@ -656,7 +663,7 @@ async def test_chat_create_colleague_rejects_protected_identity(tmp_path: Path):
         "/chat create-colleague 蔡挺",
     )
 
-    rendered = str(event.sent[-1])
+    rendered = _sent_text(event.sent[-1])
     assert handled is True
     assert "受保护身份" in rendered
     assert not (tmp_path / "colleagues" / "蔡挺").exists()
@@ -693,7 +700,7 @@ async def test_chat_list_generated_skill_bundles(tmp_path: Path):
     await plugin._handle_conversation_distill_command(event, "/chat create-boss 杨总")
     await plugin._handle_conversation_distill_command(event, "/chat list-bosses")
 
-    rendered = str(event.sent[-1])
+    rendered = _sent_text(event.sent[-1])
     assert "杨总" in rendered
     assert "v1" in rendered
 
@@ -714,7 +721,7 @@ async def test_chat_inspect_generated_boss_skill_bundle(tmp_path: Path):
         "/chat inspect-boss 杨总",
     )
 
-    rendered = str(event.sent[-1])
+    rendered = _sent_text(event.sent[-1])
     assert handled is True
     assert "老板 skill" in rendered
     assert "version: v1" in rendered
@@ -738,7 +745,7 @@ async def test_chat_review_generated_boss_skill_bundle(tmp_path: Path):
         "/chat review-boss 杨总",
     )
 
-    rendered = str(event.sent[-1])
+    rendered = _sent_text(event.sent[-1])
     assert handled is True
     assert "质量审阅" in rendered
     assert "score:" in rendered
@@ -832,7 +839,7 @@ async def test_chat_restore_deleted_colleague_skill_bundle(tmp_path: Path):
     )
 
     await plugin._handle_conversation_distill_command(event, "/chat deleted-colleagues")
-    listed = str(event.sent[-1])
+    listed = _sent_text(event.sent[-1])
     handled = await plugin._handle_conversation_distill_command(
         event,
         "/chat restore-colleague 市场同事",
@@ -870,7 +877,7 @@ async def test_chat_delete_skill_requires_admin_and_confirmation(tmp_path: Path)
         "/chat delete-colleague 市场同事 --confirm",
     )
 
-    rendered = str(event.sent[-1])
+    rendered = _sent_text(event.sent[-1])
     assert handled is True
     assert "只有管理员" in rendered
     assert (tmp_path / "colleagues" / "市场同事").exists()
@@ -899,7 +906,7 @@ async def test_chat_delete_skill_requires_confirmation(tmp_path: Path):
         "/chat delete-colleague 市场同事",
     )
 
-    rendered = str(event.sent[-1])
+    rendered = _sent_text(event.sent[-1])
     assert handled is True
     assert "--confirm" in rendered
     assert (tmp_path / "colleagues" / "市场同事").exists()
@@ -1050,7 +1057,7 @@ async def test_skill_card_delete_confirm_requires_admin(tmp_path: Path):
 
     assert handled is True
     assert (tmp_path / "colleagues" / "市场同事").exists()
-    assert "只有管理员" in str(click_event.sent[-1])
+    assert "只有管理员" in _sent_text(click_event.sent[-1])
 
 
 @pytest.mark.asyncio

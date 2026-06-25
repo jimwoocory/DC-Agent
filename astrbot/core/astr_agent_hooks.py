@@ -5,6 +5,7 @@ from typing import Any
 from mcp.types import CallToolResult
 
 from astrbot.core.agent.hooks import BaseAgentRunHooks
+from astrbot.core.agent.message import Message
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool
 from astrbot.core.astr_agent_context import AstrAgentContext

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from quart import request
+from astrbot.dashboard.asgi_runtime import request
 
 from .route import Response, Route, RouteContext
 

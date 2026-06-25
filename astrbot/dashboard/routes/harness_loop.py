@@ -6,7 +6,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from dc_engines.harness import HarnessTaskStatus, HarnessTaskStore
-from quart import request
+
+from astrbot.dashboard.asgi_runtime import request
 
 from .route import Response, Route, RouteContext
 

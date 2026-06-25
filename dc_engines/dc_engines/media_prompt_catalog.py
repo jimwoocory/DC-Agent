@@ -468,10 +468,7 @@ def _format_atoms_by_slot(
     grouped: dict[PromptCatalogSlot, list[str]] = {}
     for atom in atoms:
         grouped.setdefault(atom.slot, []).append(atom.prompt_for(language))
-    return [
-        f"- {slot}: {'; '.join(prompts)}"
-        for slot, prompts in grouped.items()
-    ]
+    return [f"- {slot}: {'; '.join(prompts)}" for slot, prompts in grouped.items()]
 
 
 def _dedupe_atom_ids(atom_ids: tuple[str, ...]) -> tuple[str, ...]:

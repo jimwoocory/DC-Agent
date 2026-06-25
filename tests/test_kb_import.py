@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from quart import Quart
 
 from astrbot.core import LogBroker
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
@@ -13,10 +12,11 @@ from astrbot.core.knowledge_base.kb_helper import KBHelper
 from astrbot.core.knowledge_base.models import KBDocument, KnowledgeBase
 from astrbot.core.utils.auth_password import (
     hash_dashboard_password,
-    hash_legacy_dashboard_password,
+    hash_md5_dashboard_password,
 )
-from astrbot.dashboard.routes.knowledge_base import KnowledgeBaseRoute
+from astrbot.dashboard.asgi_runtime import FastAPIAppAdapter
 from astrbot.dashboard.server import AstrBotDashboard
+from astrbot.dashboard.services.knowledge_base_service import KnowledgeBaseService
 
 _TEST_DASHBOARD_PASSWORD = "AstrbotTest123"
 
@@ -97,7 +97,7 @@ async def core_lifecycle_td(tmp_path_factory):
             hash_dashboard_password(dashboard_password)
         )
         core_lifecycle.astrbot_config["dashboard"]["password"] = (
-            hash_legacy_dashboard_password(dashboard_password)
+            hash_md5_dashboard_password(dashboard_password)
         )
     object.__setattr__(
         core_lifecycle,
@@ -118,7 +118,7 @@ async def core_lifecycle_td(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def app(core_lifecycle_td: AstrBotCoreLifecycle):
-    """Creates a Quart app instance for testing."""
+    """Creates a FastAPIAppAdapter app instance for testing."""
     shutdown_event = asyncio.Event()
     server = AstrBotDashboard(core_lifecycle_td, core_lifecycle_td.db, shutdown_event)
     return server.app
@@ -135,7 +135,9 @@ def _resolve_dashboard_password(core_lifecycle_td: AstrBotCoreLifecycle) -> str:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def authenticated_header(app: Quart, core_lifecycle_td: AstrBotCoreLifecycle):
+async def authenticated_header(
+    app: FastAPIAppAdapter, core_lifecycle_td: AstrBotCoreLifecycle
+):
     """Handles login and returns an authenticated header."""
     test_client = app.test_client()
     response = await test_client.post(
@@ -153,7 +155,9 @@ async def authenticated_header(app: Quart, core_lifecycle_td: AstrBotCoreLifecyc
 
 @pytest.mark.asyncio
 async def test_import_documents(
-    app: Quart, authenticated_header: dict, core_lifecycle_td: AstrBotCoreLifecycle
+    app: FastAPIAppAdapter,
+    authenticated_header: dict,
+    core_lifecycle_td: AstrBotCoreLifecycle,
 ):
     """Tests the import documents functionality."""
     test_client = app.test_client()
@@ -232,12 +236,12 @@ async def test_import_documents_returns_friendly_failure_message(
         details={"expected_contents": 2, "actual_vectors": 1},
     )
 
-    route = KnowledgeBaseRoute.__new__(KnowledgeBaseRoute)
-    route.upload_progress = {}
-    route.upload_tasks = {}
+    service = KnowledgeBaseService.__new__(KnowledgeBaseService)
+    service.upload_progress = {}
+    service.upload_tasks = {}
 
-    await KnowledgeBaseRoute._background_import_task(
-        route,
+    await KnowledgeBaseService.background_import_task(
+        service,
         task_id="task-1",
         kb_helper=kb_helper,
         documents=[{"file_name": "broken.txt", "chunks": ["chunk1", "chunk2"]}],
@@ -246,8 +250,8 @@ async def test_import_documents_returns_friendly_failure_message(
         max_retries=3,
     )
 
-    assert route.upload_tasks["task-1"]["status"] == "failed"
-    result = route.upload_tasks["task-1"]["result"]
+    assert service.upload_tasks["task-1"]["status"] == "failed"
+    result = service.upload_tasks["task-1"]["result"]
     assert result["success_count"] == 0
     assert result["failed_count"] == 1
     assert result["failed"][0]["file_name"] == "broken.txt"
@@ -284,12 +288,12 @@ async def test_import_documents_marks_mixed_result_as_partial(
         ),
     ]
 
-    route = KnowledgeBaseRoute.__new__(KnowledgeBaseRoute)
-    route.upload_progress = {}
-    route.upload_tasks = {}
+    service = KnowledgeBaseService.__new__(KnowledgeBaseService)
+    service.upload_progress = {}
+    service.upload_tasks = {}
 
-    await KnowledgeBaseRoute._background_import_task(
-        route,
+    await KnowledgeBaseService.background_import_task(
+        service,
         task_id="task-partial",
         kb_helper=kb_helper,
         documents=[
@@ -301,7 +305,7 @@ async def test_import_documents_marks_mixed_result_as_partial(
         max_retries=3,
     )
 
-    task_info = route.upload_tasks["task-partial"]
+    task_info = service.upload_tasks["task-partial"]
     assert task_info["status"] == "partial"
     assert task_info["error"] is None
     assert task_info["result"]["success_count"] == 1
@@ -322,12 +326,12 @@ async def test_upload_documents_marks_all_failed_uploads_as_failed(
         user_message="向量化失败：嵌入模型不可用。",
     )
 
-    route = KnowledgeBaseRoute.__new__(KnowledgeBaseRoute)
-    route.upload_progress = {}
-    route.upload_tasks = {}
+    service = KnowledgeBaseService.__new__(KnowledgeBaseService)
+    service.upload_progress = {}
+    service.upload_tasks = {}
 
-    await KnowledgeBaseRoute._background_upload_task(
-        route,
+    await KnowledgeBaseService.background_upload_task(
+        service,
         task_id="upload-failed",
         kb_helper=kb_helper,
         files_to_upload=[
@@ -344,7 +348,7 @@ async def test_upload_documents_marks_all_failed_uploads_as_failed(
         max_retries=3,
     )
 
-    task_info = route.upload_tasks["upload-failed"]
+    task_info = service.upload_tasks["upload-failed"]
     assert task_info["status"] == "failed"
     assert "broken.txt" in task_info["error"]
     assert task_info["result"]["success_count"] == 0
@@ -361,12 +365,12 @@ async def test_import_documents_passes_source_path_to_kb_helper(
     kb_helper.upload_document.reset_mock()
     kb_helper.upload_document.side_effect = None
 
-    route = KnowledgeBaseRoute.__new__(KnowledgeBaseRoute)
-    route.upload_progress = {}
-    route.upload_tasks = {}
+    service = KnowledgeBaseService.__new__(KnowledgeBaseService)
+    service.upload_progress = {}
+    service.upload_tasks = {}
 
-    await KnowledgeBaseRoute._background_import_task(
-        route,
+    await KnowledgeBaseService.background_import_task(
+        service,
         task_id="task-source-path",
         kb_helper=kb_helper,
         documents=[
@@ -381,8 +385,8 @@ async def test_import_documents_passes_source_path_to_kb_helper(
         max_retries=3,
     )
 
-    assert route.upload_tasks["task-source-path"]["status"] == "completed"
-    assert route.upload_tasks["task-source-path"]["result"]["success_count"] == 1
+    assert service.upload_tasks["task-source-path"]["status"] == "completed"
+    assert service.upload_tasks["task-source-path"]["result"]["success_count"] == 1
     _, kwargs = kb_helper.upload_document.call_args
     assert kwargs["source_path"] == "/NAS/FeishuDocs/客户A/交付方案.md"
 
@@ -418,7 +422,9 @@ async def test_upload_document_persists_source_path_as_file_path():
 
 
 @pytest.mark.asyncio
-async def test_import_documents_invalid_input(app: Quart, authenticated_header: dict):
+async def test_import_documents_invalid_input(
+    app: FastAPIAppAdapter, authenticated_header: dict
+):
     """Tests import documents with invalid input."""
     test_client = app.test_client()
 

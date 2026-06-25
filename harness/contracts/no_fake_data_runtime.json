@@ -36,11 +36,6 @@
       "id": "no-fake-data-007",
       "description": "Employee-facing /task done reports Harness lifecycle or source-provenance completion blocks instead of crashing, completing the task, or closing linked AI Inbox items.",
       "verification": "uv run pytest dc_engines/tests/test_task_cli_plugin.py -q"
-    },
-    {
-      "id": "no-fake-data-008",
-      "description": "Employee onboarding cannot mark employees completed or invited from placeholder invite links, failed/invalid invite API results, or undelivered result cards; only a delivered real invite link or confirmed auto-invite success completes the invite step.",
-      "verification": "uv run pytest tests/test_employee_onboarding_maintenance.py -q"
     }
   ],
   "verification": {
@@ -50,10 +45,9 @@
       "uv run pytest dc_engines/tests/test_harness_lifecycle.py -q",
       "uv run pytest tests/test_fake_data_guard.py tests/harness/test_no_fake_data_runtime_contract.py tests/test_feishu_pet_assistant.py tests/harness/test_hermes_bridge.py -q",
       "uv run pytest dc_engines/tests/test_task_cli_plugin.py -q",
-      "uv run pytest tests/test_employee_onboarding_maintenance.py -q",
       "uv run python scripts/check_fake_data_guard.py",
-      "uv run ruff check harness/source_provenance_guard.py dc_engines/dc_engines/harness/engine.py dc_engines/dc_engines/harness/source_provenance_guard.py dc_engines/tests/test_harness_lifecycle.py data/plugins/feishu_pet_assistant/main.py data/plugins/feishu_pet_assistant/service.py data/plugins/feishu_pet_assistant/store.py data/plugins/feishu_pet_assistant/cards.py data/plugins/task_cli_plugin/main.py data/plugins/employee_onboarding/main.py harness/hermes_bridge.py scripts/check_fake_data_guard.py tests/test_fake_data_guard.py tests/test_feishu_pet_assistant.py dc_engines/tests/test_task_cli_plugin.py tests/test_employee_onboarding_maintenance.py tests/harness/test_no_fake_data_runtime_contract.py tests/harness/test_hermes_bridge.py",
-      "uv run ruff format --check harness/source_provenance_guard.py dc_engines/dc_engines/harness/engine.py dc_engines/dc_engines/harness/source_provenance_guard.py dc_engines/tests/test_harness_lifecycle.py data/plugins/feishu_pet_assistant/main.py data/plugins/feishu_pet_assistant/service.py data/plugins/feishu_pet_assistant/store.py data/plugins/feishu_pet_assistant/cards.py data/plugins/task_cli_plugin/main.py data/plugins/employee_onboarding/main.py harness/hermes_bridge.py scripts/check_fake_data_guard.py tests/test_fake_data_guard.py tests/test_feishu_pet_assistant.py dc_engines/tests/test_task_cli_plugin.py tests/test_employee_onboarding_maintenance.py tests/harness/test_no_fake_data_runtime_contract.py tests/harness/test_hermes_bridge.py"
+      "uv run ruff check harness/source_provenance_guard.py dc_engines/dc_engines/harness/engine.py dc_engines/dc_engines/harness/source_provenance_guard.py dc_engines/tests/test_harness_lifecycle.py data/plugins/feishu_pet_assistant/main.py data/plugins/feishu_pet_assistant/service.py data/plugins/feishu_pet_assistant/store.py data/plugins/feishu_pet_assistant/cards.py data/plugins/task_cli_plugin/main.py harness/hermes_bridge.py scripts/check_fake_data_guard.py tests/test_fake_data_guard.py tests/test_feishu_pet_assistant.py dc_engines/tests/test_task_cli_plugin.py tests/harness/test_no_fake_data_runtime_contract.py tests/harness/test_hermes_bridge.py",
+      "uv run ruff format --check harness/source_provenance_guard.py dc_engines/dc_engines/harness/engine.py dc_engines/dc_engines/harness/source_provenance_guard.py dc_engines/tests/test_harness_lifecycle.py data/plugins/feishu_pet_assistant/main.py data/plugins/feishu_pet_assistant/service.py data/plugins/feishu_pet_assistant/store.py data/plugins/feishu_pet_assistant/cards.py data/plugins/task_cli_plugin/main.py harness/hermes_bridge.py scripts/check_fake_data_guard.py tests/test_fake_data_guard.py tests/test_feishu_pet_assistant.py dc_engines/tests/test_task_cli_plugin.py tests/harness/test_no_fake_data_runtime_contract.py tests/harness/test_hermes_bridge.py"
     ]
   }
 }

@@ -690,6 +690,38 @@ class TestBuiltinToolInjection:
         assert req.func_tool.get_tool("web_search_firecrawl") is search_tool
         assert req.func_tool.get_tool("firecrawl_extract_web_page") is extract_tool
 
+    @pytest.mark.asyncio
+    async def test_apply_web_search_tools_enforces_router_required_search(
+        self, mock_event, mock_context
+    ):
+        """Router-required retrieval must inject the configured search tool."""
+        module = ama
+        req = ProviderRequest(system_prompt="base prompt")
+        mock_context.get_config.return_value = {
+            "provider_settings": {
+                "web_search": False,
+                "websearch_provider": "brave",
+            }
+        }
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            "true" if key == "dc_router_meta_search_required" else default
+        )
+        builtin_tool = MagicMock(spec=FunctionTool)
+        builtin_tool.name = "web_search_brave"
+        tool_mgr = MagicMock()
+        tool_mgr.get_builtin_tool.return_value = builtin_tool
+        mock_context.get_llm_tool_manager.return_value = tool_mgr
+
+        await module._apply_web_search_tools(mock_event, req, mock_context)
+
+        tool_mgr.get_builtin_tool.assert_called_once_with(module.BraveWebSearchTool)
+        assert req.func_tool is not None
+        assert req.func_tool.get_tool("web_search_brave") is builtin_tool
+        assert "Mandatory Web Retrieval" in req.system_prompt
+        assert "Stop searching after 1-3 targeted queries" in req.system_prompt
+        mock_event.set_extra.assert_any_call("dc_web_search_enforcement", "required")
+        mock_event.set_extra.assert_any_call("dc_web_search_provider", "brave")
+
     def test_proactive_cron_job_tools_uses_builtin_tool_manager(self, mock_context):
         """Test cron tool injection through the builtin tool manager."""
         module = ama
@@ -706,6 +738,56 @@ class TestBuiltinToolInjection:
         tool_mgr.get_builtin_tool.assert_called_once_with(module.FutureTaskTool)
         assert req.func_tool is not None
         assert req.func_tool.get_tool("future_task") is future_task_tool
+
+
+class TestDepartmentWorkflowGuidance:
+    """Tests for router metadata-driven department workflow instructions."""
+
+    def test_planning_creative_fast_adds_answer_first_guidance(self, mock_event):
+        module = ama
+        req = ProviderRequest(system_prompt="base")
+        extras = {
+            "dc_router_meta_department_workflow": "planning_creative_fast",
+            "dc_router_meta_planning_writing_mode": "promotion_strategy",
+            "dc_router_meta_planning_structure_policy": "objective_audience_channels_content_calendar_kpi",
+        }
+        mock_event.get_extra.side_effect = lambda key, default=None: extras.get(
+            key, default
+        )
+
+        module._apply_department_workflow_guidance(mock_event, req)
+
+        assert "Planning Creative Fast Workflow" in req.system_prompt
+        assert "Give a usable first draft immediately" in req.system_prompt
+        assert "LangGPT Structured Planning Prompt" in req.system_prompt
+        assert "# Role: 推广策略专业写作助手" in req.system_prompt
+        mock_event.set_extra.assert_any_call(
+            "dc_department_workflow_guidance",
+            "planning_creative_fast",
+        )
+        mock_event.set_extra.assert_any_call("dc_planning_prompt_compiler", "langgpt")
+
+    def test_planning_direct_media_adds_no_prompt_coaching_guidance(
+        self,
+        mock_event,
+    ):
+        module = ama
+        req = ProviderRequest(system_prompt="base")
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            "planning_direct_media"
+            if key == "dc_router_meta_department_workflow"
+            else default
+        )
+
+        module._apply_department_workflow_guidance(mock_event, req)
+
+        assert "Planning Direct Media Generation" in req.system_prompt
+        assert "Do not teach the user how to write prompts" in req.system_prompt
+        assert "call it directly" in req.system_prompt
+        mock_event.set_extra.assert_called_once_with(
+            "dc_department_workflow_guidance",
+            "planning_direct_media",
+        )
 
 
 class TestApplyFileExtract:

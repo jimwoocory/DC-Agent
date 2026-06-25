@@ -2,9 +2,9 @@
 
 把 DC-Agent 变成自带"AI 系统维护员"。每天自动：
 
-1. **01:00 北京（= 美西 PT 10:00）** — `searcher.py` 优先调 agy / Antigravity
+1. **01:00 北京（= 美西 PT 10:00）** — `searcher.py` 调 aihubmix Gemini grounding
    抓硅谷四大 AI 实验室（OpenAI / Anthropic / Google Gemini / xAI Grok）当日动态 → `raw_news.md`
-2. **紧接着** — `analyzer.py` 调 agy / Antigravity 读 raw_news，做三件事：
+2. **紧接着** — `analyzer.py` 调 aihubmix 读 raw_news，做三件事：
    - 资讯解读（按对蔡挺/巅池的意义重排）
    - 当日学习笔记（挑一个 AstrBot / Hermes / dc_engines 模块深入读）
    - DC-Agent 只读巡检（git / watchdog / cron 日志）
@@ -22,9 +22,9 @@
 ```
                 ┌──────────────────────────┐
    01:00 BJT ─→ │ dianchi-tech-night       │
-                │   阶段A: searcher.py     │  → agy / Antigravity
+                │   阶段A: searcher.py     │  → aihubmix Gemini grounding
                 │           → raw_news.md  │
-                │   阶段B: analyzer.py     │  → agy / Antigravity → report.md
+                │   阶段B: analyzer.py     │  → aihubmix → report.md
                 └──────────────────────────┘
                                                            │
                                                            ▼
@@ -40,16 +40,15 @@
 ```
 
 调度走 LaunchAgent（不是 cron），用户级 launchd 跑在 GUI session 上下文，能 access keychain
-（agy / 飞书凭证都在 keychain 里）。
+（飞书凭证在 keychain 里）。
 
 ## 文件清单
 
 | 文件 | 用途 |
 |---|---|
-| `prompts/agy_analyze.md` | agy 的分析+学习+巡检 prompt |
-| `analyzer.py` | 阶段 B：调用 agy 生成 `report.md`，登记 `learning_log.json` |
-| `searcher.py` | 阶段 A：优先 agy 抓新闻，aihubmix grounding 兜底 |
-| `agy_runner.py` | PTY 包装 `agy --print`，给阶段 A/B 共用 |
+| `prompts/analysis.md` | 分析+学习+巡检 prompt |
+| `analyzer.py` | 阶段 B：调用 aihubmix 生成 `report.md`，登记 `learning_log.json` |
+| `searcher.py` | 阶段 A：aihubmix Gemini grounding 抓新闻，OpenAI 兼容路径兜底 |
 | `reporter.py` | 09:00 推送（飞书 IM + wiki + 桌面 + NAS） |
 | `main.py` | AstrBot plugin，暴露 `/api/plug/dianchi_tech/{recent,report/<date>,health}` |
 | `_conf_schema.json` | 配置：蔡挺 union_id、wiki 空间名 |
@@ -135,6 +134,6 @@ reporter 通过 `dc_engines.feishu_hub.get_client()` 拿单例 client，凭证�
 ## 后续可加（先不做）
 
 - 学习笔记导出累计 PDF
-- agy 巡检发现异常 → 触发 Hermes 主动告警
+- 巡检发现异常 → 触发 Hermes 主动告警
 - 资讯 + 学习内容做向量索引（喂 feishu_reader 增强问答）
 - 周报 / 月报汇总

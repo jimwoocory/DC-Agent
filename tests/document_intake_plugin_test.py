@@ -4,10 +4,12 @@ import pytest
 
 from astrbot.api.message_components import File
 from data.plugins.document_intake_plugin.main import (
+    DocumentIntakeCardHandle,
     DocumentIntakePlugin,
     IntakeResult,
     _build_context_block,
     _copy_component_to_inbox,
+    _finalize_document_intake_card,
 )
 
 
@@ -87,3 +89,46 @@ def test_build_context_block_contains_document_excerpt(tmp_path):
     assert block.startswith("<dc_document_intake>")
     assert "training.txt" in block
     assert "新人培训第一步" in block
+
+
+@pytest.mark.asyncio
+async def test_finalize_document_intake_card_uses_runtime_card(tmp_path):
+    class Streamer:
+        def __init__(self) -> None:
+            self.finalized = []
+
+        async def finalize(self, message_id, card):
+            self.finalized.append((message_id, card))
+            return True
+
+    streamer = Streamer()
+    handle = DocumentIntakeCardHandle(
+        streamer=streamer,
+        message_id="om_doc",
+        platform_id="lark-test",
+    )
+    result = IntakeResult(
+        original_name="training.txt",
+        stored_path=tmp_path / "training.txt",
+        sha256="sha",
+        size_bytes=12,
+        parsed_text="培训内容",
+        status="parsed",
+    )
+
+    ok = await _finalize_document_intake_card(
+        handle,
+        results=[result],
+        kb_summary={
+            "kb_name": "nas_knowledge",
+            "imported_count": 1,
+            "failed_count": 0,
+        },
+        inbox_path=tmp_path,
+        auto_import=True,
+    )
+
+    assert ok is True
+    assert streamer.finalized[0][0] == "om_doc"
+    card = streamer.finalized[0][1]
+    assert card["header"]["title"]["content"] == "文档上传 · 已入库"

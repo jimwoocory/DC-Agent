@@ -18,7 +18,6 @@ class ResourceKey(str, Enum):
     CODEX_CLI_GLOBAL = "codex_cli_global"
     CODEX_CLI_HIGH = "codex_cli_high"
     CODEX_CLI_XHIGH = "codex_cli_xhigh"
-    ANTIGRAVITY_CLI_FLASH = "antigravity_cli_flash"
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,13 +96,4 @@ DEFAULT_RESOURCE_CONFIGS: dict[str, ResourceConfig] = {
 DEFAULT_RESOURCE_CONFIGS[ResourceKey.GEMINI_CLI_PRO.value] = ResourceConfig(
     key=ResourceKey.GEMINI_CLI_PRO.value,
     cooldown_after_completion_seconds=30,
-)
-
-# Antigravity CLI/Gemini Flash 临时保护阈值：
-# - 官方可核验口径按 15 RPM 保守理解，系统暂按 12 RPM 以内落地。
-# - 单并发 + 5 秒冷却，20 人同时闲聊时由 router 短排队/快速切备用。
-DEFAULT_RESOURCE_CONFIGS[ResourceKey.ANTIGRAVITY_CLI_FLASH.value] = ResourceConfig(
-    key=ResourceKey.ANTIGRAVITY_CLI_FLASH.value,
-    cooldown_after_completion_seconds=5,
-    estimated_run_seconds=10,
 )

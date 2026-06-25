@@ -81,14 +81,6 @@ CARD_RUNTIME_DYNAMIC_CARD_TYPE_FORWARDERS = {
         "_send_card_file",
     ): "filename-to-card_type mapper is local and literal-gated",
     (
-        "data/plugins/employee_onboarding/main.py",
-        "_send_card",
-    ): "typed onboarding wrapper; call sites are literal-gated",
-    (
-        "data/plugins/employee_onboarding/main.py",
-        "_send_entry_card_to_employee",
-    ): "stage mapper returns registered onboarding card types",
-    (
         "data/plugins/feishu_pet_assistant/main.py",
         "_send_card",
     ): "typed pet-card wrapper; call sites are literal-gated",
@@ -191,14 +183,6 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         fallback="plain_text",
         notes="Shared progress card used by waiting-card helpers and Hermes updates.",
     ),
-    "antigravity_queue": CardSpec(
-        card_type="antigravity_queue",
-        version="1.0",
-        owner="dc_router",
-        builder="build_antigravity_queue_card",
-        triggers=("Antigravity over capacity", "fallback channel selected"),
-        fallback="plain_text",
-    ),
     "task_result": CardSpec(
         card_type="task_result",
         version="1.0",
@@ -230,6 +214,15 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_media_generation_card",
         triggers=("image generation", "video generation"),
         fallback="plain_text",
+    ),
+    "source_image_edit": CardSpec(
+        card_type="source_image_edit",
+        version="1.0",
+        owner="dc_router",
+        builder="build_source_image_edit_card",
+        triggers=("source image background removal", "cutout skill"),
+        fallback="plain_text_image",
+        notes="Deterministic source-image edit card; not a text-to-image task.",
     ),
     "truth_intake_request": CardSpec(
         card_type="truth_intake_request",
@@ -266,33 +259,33 @@ CARD_REGISTRY: dict[str, CardSpec] = {
     "onboarding_department": CardSpec(
         card_type="onboarding_department",
         version="1.0",
-        owner="employee_onboarding",
+        owner="legacy_onboarding_cards",
         builder="build_onboarding_dept_card",
-        triggers=("new friend", "manual onboarding push"),
+        triggers=("legacy/manual card render",),
         fallback="plain_text",
     ),
     "onboarding_role": CardSpec(
         card_type="onboarding_role",
         version="1.0",
-        owner="employee_onboarding",
+        owner="legacy_onboarding_cards",
         builder="build_onboarding_role_card",
-        triggers=("department selected",),
+        triggers=("legacy/manual card render",),
         fallback="plain_text",
     ),
     "onboarding_name_prompt": CardSpec(
         card_type="onboarding_name_prompt",
         version="1.0",
-        owner="employee_onboarding",
+        owner="legacy_onboarding_cards",
         builder="build_onboarding_name_prompt_card",
-        triggers=("role selected", "missing employee display name"),
+        triggers=("legacy/manual card render",),
         fallback="plain_text",
     ),
     "onboarding_tutorial_list": CardSpec(
         card_type="onboarding_tutorial_list",
         version="1.0",
-        owner="employee_onboarding",
+        owner="legacy_onboarding_cards",
         builder="build_onboarding_tutorial_list_card",
-        triggers=("identity registration completed", "quiz failed review list"),
+        triggers=("legacy/manual card render",),
         fallback="plain_text",
     ),
     "employee_insight_welcome": CardSpec(
@@ -322,7 +315,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
     "training_quiz_feedback": CardSpec(
         card_type="training_quiz_feedback",
         version="1.0",
-        owner="employee_onboarding",
+        owner="department_training_quiz",
         builder="build_quiz_feedback_card",
         triggers=("quiz answer submitted",),
         fallback="plain_text",
@@ -330,7 +323,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
     "training_quiz_result": CardSpec(
         card_type="training_quiz_result",
         version="1.0",
-        owner="employee_onboarding",
+        owner="department_training_quiz",
         builder="build_quiz_result_card",
         triggers=("quiz completed",),
         fallback="plain_text",
@@ -341,6 +334,18 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         owner="harness_sensor_plugin/knowledge_base",
         builder="build_kb_archive_card",
         triggers=("materials archived", "knowledge base sync completed"),
+        fallback="plain_text",
+    ),
+    "document_intake": CardSpec(
+        card_type="document_intake",
+        version="1.0",
+        owner="document_intake_plugin",
+        builder="build_document_intake_card",
+        triggers=(
+            "file upload received",
+            "document parse completed",
+            "kb import completed",
+        ),
         fallback="plain_text",
     ),
     "employee_pending": CardSpec(
@@ -437,24 +442,6 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         owner="content_sop/workflow_intent_plugin",
         builder="build_boss_quicklook_card",
         triggers=("boss summary requested", "executive quicklook"),
-        fallback="plain_text",
-    ),
-    "god_mode_approval": CardSpec(
-        card_type="god_mode_approval",
-        version="1.0",
-        owner="god_mode_plugin",
-        builder_module="dc_engines.god_mode",
-        builder="build_god_mode_approval_card",
-        triggers=("/god side-effect approval",),
-        fallback="plain_text",
-    ),
-    "god_mode_execution": CardSpec(
-        card_type="god_mode_execution",
-        version="1.0",
-        owner="god_mode_plugin",
-        builder_module="dc_engines.god_mode",
-        builder="build_god_mode_execution_card",
-        triggers=("approved /god Feishu card action",),
         fallback="plain_text",
     ),
     "assistant_distillation_review": CardSpec(
@@ -1032,13 +1019,6 @@ def _sample_payload(
             "current_stage": "任务推理中（这个问题稍复杂）",
             "reasoning_tier": "high",
         },
-        "build_antigravity_queue_card": {
-            "job_id": "agy-card-health-001",
-            "queue_position": 2,
-            "eta_text": "约 1 分钟",
-            "elapsed_sec": 12,
-            "original_prompt": "帮我整理客户触达方案",
-        },
         "build_final_card": {
             "title": "Hermes 深度分析完成",
             "result_md": "## 结论\n\n方案可以推进。\n\n- 先确认客户名单\n- 再发送节日问候",
@@ -1060,6 +1040,13 @@ def _sample_payload(
             "media_type": "image",
             "prompt": "端午节品牌海报",
             "status": "running",
+        },
+        "build_source_image_edit_card": {
+            "task_title": "去背景任务",
+            "status": "处理中",
+            "operation": "去背景/人物抠出",
+            "engine": "rembg 或 PIL conservative",
+            "source_summary": "只处理透明通道，保留原图人物像素。",
         },
         "build_truth_intake_request_card": {
             "task_title": "端午客户问候话术",
@@ -1115,6 +1102,17 @@ def _sample_payload(
             "status": "已入库",
             "archive_path": "data/harness_intake/archived/card-health-003/",
             "doc_id": "doc_card_health_003",
+        },
+        "build_document_intake_card": {
+            "status": "已入库",
+            "files": [
+                {"name": "部门 SOP.pdf", "status": "parsed", "size_bytes": 204800},
+                {"name": "客户资料.xlsx", "status": "parsed", "size_bytes": 40960},
+            ],
+            "kb_name": "nas_knowledge",
+            "inbox_path": "nas/knowledge/inbox/download/",
+            "imported_count": 2,
+            "summary_note": "已复制到 NAS，并完成后台知识库导入。",
         },
         "build_employee_pending_card": {
             "task_title": "端午客户问候话术草稿",
@@ -1224,38 +1222,6 @@ def _sample_payload(
             "next_actions": ["确认名单", "锁定发送时间"],
             "detail_summary": "已完成主文案和执行节奏梳理。",
             "task_id": "boss-card-health-001",
-        },
-        _builder_key(
-            "build_god_mode_approval_card",
-            "dc_engines.god_mode",
-        ): {
-            "run": SimpleNamespace(
-                run_id="god-card-health-001",
-                status="waiting_approval",
-                summary="发送一张审批卡样例",
-                approval_required=True,
-                audit_id="audit-card-health-001",
-                actions=(
-                    SimpleNamespace(
-                        action_id="act-card-health-001",
-                        tool_name="dc_agent_send_feishu_card",
-                        capability="feishu_card",
-                        description="发送 Feishu 灰度样卡",
-                        side_effect=True,
-                    ),
-                ),
-            ),
-        },
-        _builder_key(
-            "build_god_mode_execution_card",
-            "dc_engines.god_mode",
-        ): {
-            "action": SimpleNamespace(
-                action_id="act-card-health-001",
-                tool_name="dc_agent_send_feishu_card",
-                capability="feishu_card",
-                description="God Mode 已批准执行样例",
-            ),
         },
         _builder_key(
             "build_candidate_review_card",

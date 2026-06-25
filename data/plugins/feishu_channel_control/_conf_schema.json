@@ -6,8 +6,8 @@
   },
   "dm_policy": {
     "type": "string",
-    "default": "pairing",
-    "description": "私聊策略：pairing / allowlist / open / disabled"
+    "default": "open",
+    "description": "私聊策略：open / pairing / allowlist / disabled；普通聊天入口默认开放，敏感动作后续单独鉴权"
   },
   "group_policy": {
     "type": "string",

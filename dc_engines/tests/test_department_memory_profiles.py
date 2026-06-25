@@ -15,6 +15,11 @@ def test_default_profiles_cover_content_planning_and_client() -> None:
     assert {profile.profile_id for profile in profiles} >= {
         "content_director_script_workflow",
         "planning_content_sop_workflow",
+        "execution_delivery_workflow",
+        "design_delivery_workflow",
+        "film_production_delivery_workflow",
+        "ai_application_workflow",
+        "brand_publicity_ops_workflow",
         "client_touchpoint_workflow",
     }
 
@@ -41,6 +46,48 @@ def test_matching_profiles_for_expanded_planning_memory_scenarios() -> None:
 
     assert account[0].department_id == "planning"
     assert gift[0].department_id == "planning"
+
+
+def test_matching_profile_for_execution_delivery_workflow() -> None:
+    execution = matching_department_memory_profiles(
+        "活动统筹部需要整理场地物料安装点检和验收材料",
+    )
+
+    assert execution[0].department_id == "execution_ops"
+    assert "验收材料" in execution[0].tone_template
+
+
+def test_matching_profiles_for_split_execution_departments() -> None:
+    design = matching_department_memory_profiles("设计部检查设计稿VI和尺寸比例")
+    film = matching_department_memory_profiles("影视制作部整理拍摄通告和成片交付")
+    ai_app = matching_department_memory_profiles("AI应用部配置部门小助手和知识库接入")
+
+    assert design[0].department_id == "design_dept"
+    assert film[0].department_id == "film_production"
+    assert ai_app[0].department_id == "ai_application"
+
+
+def test_matching_profile_for_brand_publicity_ops_without_stealing_planning() -> None:
+    brand = matching_department_memory_profiles(
+        "品宣部整理媒介KOC任务下发和社群舆情复盘",
+    )
+    planning = matching_department_memory_profiles(
+        "中台账号运营要怎么设计栏目和直播节奏",
+    )
+
+    assert brand[0].department_id == "brand_publicity"
+    assert "柳汽是外派独立分支" in brand[0].tone_template
+    assert planning[0].department_id == "planning"
+
+
+def test_brand_or_vehicle_words_do_not_select_content_director_profile() -> None:
+    matches = matching_department_memory_profiles(
+        "五菱和柳汽新能源用户观察，顺便看看风行相关讨论",
+    )
+
+    assert all(
+        profile.department_id != "execution_content_director" for profile in matches
+    )
 
 
 def test_external_profile_config_extends_default_profiles(tmp_path: Path) -> None:

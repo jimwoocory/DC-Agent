@@ -1,6 +1,6 @@
 {
   "feature": "planning_content_sop",
-  "goal": "Keep planning-department short-video, visual brief, and campaign content production separated into source facts, creative assumptions, review checklist, and employee-ready outputs.",
+  "goal": "Route planning-department work by actual employee need: everyday creative/framework/image requests must enter fast creative mode, while source-backed competitor/trend work must require retrieval and citations, and formal review tasks still keep source facts, assumptions, and checklist separated.",
   "acceptance_criteria": [
     {
       "id": "planning-content-sop-001",
@@ -14,8 +14,23 @@
     },
     {
       "id": "planning-content-sop-003",
-      "description": "Router metadata identifies planning mixed-media requests and marks missing materials before generation.",
-      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_content_sop_metadata_routes_planning_video_image_request -q"
+      "description": "Router metadata identifies planning mixed-media requests as planning_creative_fast so everyday creative work answers first instead of blocking on historical company memory.",
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_content_sop_metadata_routes_planning_video_image_request tests/dc_router/test_router_core.py::test_planning_framework_request_routes_to_fast_creative -q"
+    },
+    {
+      "id": "planning-content-sop-003a",
+      "description": "Planning framework requests are locked to framework-first output: table of contents, PPT slide titles, page details, and closed-loop structure.",
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_planning_framework_request_routes_to_fast_creative dc_engines/tests/test_department_workflows.py::test_planning_framework_outline_requires_toc_and_slide_titles -q"
+    },
+    {
+      "id": "planning-content-sop-003b",
+      "description": "Planning direct image/poster requests are hard-routed as direct media generation with no prompt-coaching loop and portrait poster defaults.",
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_planning_direct_media_request_routes_without_prompt_coaching -q"
+    },
+    {
+      "id": "planning-content-sop-003c",
+      "description": "Planning competitor, trend, social-platform, and feedback requests require source-backed retrieval metadata before answer synthesis.",
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_planning_research_request_requires_sources -q"
     },
     {
       "id": "planning-content-sop-004",

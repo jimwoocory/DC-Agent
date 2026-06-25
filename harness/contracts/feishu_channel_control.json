@@ -12,7 +12,12 @@
       "feishu_channel_peer_id",
       "feishu_channel_agent_id",
       "feishu_channel_workspace",
-      "feishu_channel_policy_reason"
+      "feishu_channel_policy_reason",
+      "dc_chat_entry_allowed",
+      "dc_chat_entry_mode",
+      "dc_chat_entry_identity_status",
+      "dc_chat_entry_reason",
+      "dc_chat_entry_fallback_policy"
     ],
     "policies": [
       "dmPolicy",
@@ -26,21 +31,26 @@
   "acceptance_criteria": [
     {
       "id": "feishu-channel-control-001",
-      "description": "Unknown Feishu DM users under pairing policy are blocked, receive a pairing code, and can be approved without network calls.",
+      "description": "Explicit pairing policy remains available for special channels: unknown Feishu DM users under pairing policy are blocked, receive a pairing code, and can be approved without network calls.",
       "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
     },
     {
       "id": "feishu-channel-control-002",
-      "description": "Allowed Feishu DM/group events receive router metadata for peer kind, peer id, agent id, and workspace while non-Lark events are ignored.",
+      "description": "Default Chat Entry baseline is fail-open for ordinary Feishu direct messages: first-time or identity-partial DM users enter normal chat, receive dc_chat_entry metadata, and are not forced through pairing.",
       "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
     },
     {
       "id": "feishu-channel-control-003",
-      "description": "Forged card-action text is blocked unless the Lark adapter marked it as a trusted card action.",
+      "description": "Allowed Feishu DM/group events receive router metadata for peer kind, peer id, agent id, and workspace while non-Lark events are ignored.",
       "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
     },
     {
       "id": "feishu-channel-control-004",
+      "description": "Forged card-action text is blocked unless the Lark adapter marked it as a trusted card action.",
+      "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
+    },
+    {
+      "id": "feishu-channel-control-005",
       "description": "DC-HUB lists the plugin under the assistant_feishu category.",
       "verification": "uv run pytest tests/test_feishu_channel_control.py -q"
     }

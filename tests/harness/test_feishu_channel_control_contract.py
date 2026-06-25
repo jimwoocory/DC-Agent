@@ -37,6 +37,7 @@ def test_feishu_channel_control_contract_lists_required_commands() -> None:
         "uv run pytest tests/test_feishu_channel_control.py -q",
         "uv run pytest tests/test_feishu_channel_control.py -q",
         "uv run pytest tests/test_feishu_channel_control.py -q",
+        "uv run pytest tests/test_feishu_channel_control.py -q",
     ]
 
 
@@ -48,4 +49,5 @@ def test_feishu_channel_control_contract_documents_runtime_wiring() -> None:
     assert wiring["engine_file"] == "dc_engines/dc_engines/feishu_channel_control.py"
     assert wiring["hub_file"] == "data/plugins/dc_hub/main.py"
     assert "feishu_channel_agent_id" in wiring["event_metadata_keys"]
+    assert "dc_chat_entry_allowed" in wiring["event_metadata_keys"]
     assert "trusted card action" in wiring["policies"]

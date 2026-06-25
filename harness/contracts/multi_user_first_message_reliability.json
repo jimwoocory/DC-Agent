@@ -22,7 +22,7 @@
     {
       "id": "first-message-004",
       "title": "Side-effect plugins must fail open",
-      "text": "Inbox, employee insight, onboarding, memory, and knowledge-base enrichment plugins may annotate or persist side effects, but slow or failing side-effect work must time out or degrade without blocking the primary chat response path."
+      "text": "Inbox, employee insight, memory, and knowledge-base enrichment plugins may annotate or persist side effects, but slow or failing side-effect work must time out or degrade without blocking the primary chat response path."
     },
     {
       "id": "first-message-005",
@@ -50,11 +50,6 @@
       "id": "A4",
       "title": "Concierge KB enrichment times out without blocking LLM request preparation",
       "command": "uv run pytest dc_engines/tests/test_concierge_identity.py::test_employee_kb_context_timeout_fails_open -q"
-    },
-    {
-      "id": "A5",
-      "title": "Employee onboarding times out without blocking business first messages",
-      "command": "uv run pytest tests/test_employee_onboarding_maintenance.py::test_onboarding_timeout_fails_open_for_business_first_message -q"
     }
   ],
   "operator_notes": [

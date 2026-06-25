@@ -170,6 +170,46 @@ async def test_streamer_finalize_first_call_still_returns_true_with_real_stream(
     assert "om_first" not in streamer._streams
 
 
+@pytest.mark.asyncio
+async def test_streamer_schedule_retract_deletes_message() -> None:
+    """Retractable task cards should be deleted via Feishu message delete."""
+    streamer_mod = _load_streamer_module()
+    deleted_message_ids: list[str] = []
+
+    class _FakeResponse:
+        def success(self) -> bool:
+            return True
+
+    class _FakeMessageApi:
+        async def adelete(self, req):
+            deleted_message_ids.append(req.message_id)
+            return _FakeResponse()
+
+    class _FakeClient:
+        class _V1:
+            message = _FakeMessageApi()
+
+        im = type("_Im", (), {"v1": _V1()})()
+
+    streamer = streamer_mod.FeishuCardStreamer(_FakeClient())  # type: ignore[arg-type]
+    streamer._streams = {
+        "om_retract": SimpleNamespace(
+            finalized=False,
+            auto_update_task=None,
+            last_card=None,
+            elapsed_sec=1.0,
+        )
+    }
+
+    task = streamer.schedule_retract("om_retract", delay_sec=0)
+    assert task is not None
+    await task
+
+    assert deleted_message_ids == ["om_retract"]
+    assert "om_retract" not in streamer._streams
+    assert "om_retract" in streamer._finalized_message_ids
+
+
 # ─── daily_card_renderer-level dedup ──────────────────────────────────────
 
 

@@ -1,15 +1,14 @@
 """CLI provider handlers — extracted from the legacy ``routing_adapter.py``.
 
 This module is the *only* boundary that knows how to dispatch to local CLI
-backed providers (Antigravity / Codex / Grok Build). It is invoked from
+backed providers (Codex / Grok Build). It is invoked from
 ``routing.apply_decision`` when ``RouterDecision.provider_id`` starts with
 ``cli/`` and the router is in non-dry-run mode.
 
 设计原则 (P3 重构 2026-06-11):
 - ``routing_adapter.py`` 已成为 LEGACY；新 dispatch 路径必须独立
   handle CLI providers, 不依赖旧 ``route_via_dc_router``.
-- Antigravity: circuit-breaker gated, QuotaGate-admitted, queue-card
-  rendered. 失败时自动 fallback 到 ``ANTIGRAVITY_FALLBACK_PROVIDER_ID``.
+- Legacy local CLI ids/cards are rejected or cancelled only.
 - Codex: progress card + 直接 finalization. 不排队 (depth=DIRECT).
 - Grok Build: 失败时自动 fallback 到 ``GROK_BUILD_FALLBACK_PROVIDER_ID``.
 - 任何异常都被吞掉, 返回 False → caller 走 v1.0 fallback.
@@ -22,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -34,11 +33,21 @@ from astrbot.core.provider.entities import ProviderType
 # 关键常量 - 跟 routing_adapter.py 保持一致; 后续允许从 config 注入
 _DC_AGENT_ROOT = Path(__file__).resolve().parents[3]
 CLI_PROVIDER_PREFIX = "cli/"
-ANTIGRAVITY_PROVIDER_ID = "cli/antigravity/gemini-3.5-flash"
-ANTIGRAVITY_RESOURCE_KEY = "antigravity_cli_flash"
-ANTIGRAVITY_COOLDOWN_SECONDS = 5
-ANTIGRAVITY_FALLBACK_PROVIDER_ID = "aihubmix/gemini-3.5-flash"
+DISABLED_LEGACY_CLI_PROVIDER_ID = "cli/antigravity/gemini-3.5-flash"
+DISABLED_LEGACY_CLI_BACKEND = "disabled_legacy_cli"
+DISABLED_LEGACY_CLI_REASON = "legacy CLI provider disabled"
+DISABLED_LEGACY_CLI_MESSAGE = (
+    "旧本地 CLI 入口已经关闭，这个旧队列/旧入口不会继续执行。"
+    "请重新发送需求，小助手会按当前 router 处理。"
+)
 GROK_BUILD_FALLBACK_PROVIDER_ID = "aihubmix/grok-4.3"
+PENDING_CLI_RECOVERY_TTL_SECONDS = 15 * 60
+SOURCE_IMAGE_EDIT_PROMPT_RE = re.compile(
+    r"(去掉背景|去背景|去除背景|移除背景|删除背景|背景透明|透明底|"
+    r"扣掉背景|背景不要|抠图|抠出来|抠出|人物抠|人像抠|提取人物|"
+    r"保留人物|锁定人物|人物不能被修改|人物不要改|主体分离)",
+    re.IGNORECASE,
+)
 
 
 def _safe_platform(event: Any) -> str:
@@ -72,7 +81,11 @@ def _parse_cli_provider(provider_id: str) -> tuple[str, str, str | None]:
         return "", provider_id, None
     model = provider_id.removeprefix(CLI_PROVIDER_PREFIX)
     if model.startswith("antigravity/"):
-        return "antigravity", model.removeprefix("antigravity/"), None
+        return (
+            DISABLED_LEGACY_CLI_BACKEND,
+            model.removeprefix("antigravity/"),
+            None,
+        )
     if model.startswith("grok-build") or model == "grok-build":
         return "grok", model, None
     if model.startswith("codex/"):
@@ -134,209 +147,27 @@ async def _switch_provider(
         return False
 
 
-def _format_wait(eta_at: float | None) -> str:
-    if not eta_at:
-        return "稍后"
-    minutes = max(1, math.ceil((eta_at - time.time()) / 60))
-    return f"约 {minutes} 分钟"
-
-
-# ────────────────── Antigravity CLI ──────────────────
-
-
-async def _send_antigravity_queue_message(
-    event: Any,
-    *,
-    queue_position: int,
-    eta_at: float | None,
-) -> None:
-    """Best-effort: 排队提示直接通过 set_result 发回, 不依赖 streamer."""
-    if event is None:
-        return
-    msg = (
-        "哎呀，现在小助手太忙啦，当前同时接待人数已经超过 9 人。"
-        "我已经帮您排好队了，请您耐心等待⌛️\n\n"
-        f"当前位置：第 {queue_position} 位\n"
-        f"预计等待：{_format_wait(eta_at)}"
+async def _handle_disabled_legacy_cli_provider(event: Any, *, decision: Any) -> None:
+    provider_id = str(
+        getattr(decision, "provider_id", "") or DISABLED_LEGACY_CLI_PROVIDER_ID
     )
     try:
-        event.should_call_llm(False)
-        event.set_result(MessageEventResult().message(msg).use_t2i(False).stop_event())
-    except Exception:  # noqa: BLE001
-        pass
-
-
-async def _start_antigravity(
-    context: Any,
-    event: Any,
-    *,
-    decision: Any,
-    prompt: str,
-) -> bool:
-    """Antigravity CLI 接管 (走 QuotaGate admit)."""
-    try:
-        from harness import AdmissionMode, QuotaRequest
-
-        from .antigravity_health import (
-            antigravity_allowed,
-            mark_antigravity_failure,
-            mark_antigravity_success,
-            record_antigravity_circuit_fallback,
-        )
-        from .cli_runner import CliRunner
-        from .dc_quota_runtime import get_quota_gate
-    except Exception as exc:  # noqa: BLE001
-        logger.error("[cli_handlers] antigravity 依赖 import 失败: %s", exc)
-        return False
-
-    allowed, reason, state = antigravity_allowed()
-    if not allowed:
-        record_antigravity_circuit_fallback(reason=reason, state=state)
-        available = _provider_ids(context)
-        if ANTIGRAVITY_FALLBACK_PROVIDER_ID in available:
-            if await _switch_provider(context, event, ANTIGRAVITY_FALLBACK_PROVIDER_ID):
-                event.set_extra(
-                    "dc_router_antigravity_health_fallback",
-                    {
-                        "provider_id": decision.provider_id,
-                        "fallback_provider_id": ANTIGRAVITY_FALLBACK_PROVIDER_ID,
-                        "reason": reason,
-                        "remaining_seconds": state.get("remaining_seconds", 0),
-                    },
-                )
-                logger.info(
-                    "[cli_handlers] Antigravity circuit open · fallback=%s",
-                    ANTIGRAVITY_FALLBACK_PROVIDER_ID,
-                )
-                return True
-        return False
-
-    backend, model, _effort = _parse_cli_provider(decision.provider_id)
-    if backend != "antigravity":
-        logger.warning(
-            "[cli_handlers] decision.provider_id=%s 不是 antigravity backend, 不接管",
-            decision.provider_id,
-        )
-        return False
-
-    original_prompt = (event.message_str or "").strip()
-    platform_id = _safe_platform(event)
-    gate = await get_quota_gate()
-    try:
-        admission = await gate.admit(
-            QuotaRequest(
-                primary_resource_key=ANTIGRAVITY_RESOURCE_KEY,
-                resource_keys=(ANTIGRAVITY_RESOURCE_KEY,),
-                payload={
-                    "provider_id": decision.provider_id,
-                    "backend": backend,
-                    "intent": decision.intent,
-                    "model": model,
-                    "umo": event.unified_msg_origin,
-                    "prompt": prompt,
-                    "original_prompt": original_prompt,
-                    "platform_id": platform_id,
-                },
-                requested_by=event.get_sender_id() or None,
-                session_id=event.unified_msg_origin,
-            )
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[cli_handlers] QuotaGate.admit 失败: %s", exc)
-        return False
-
-    mode_value = (
-        admission.mode.value
-        if hasattr(admission.mode, "value")
-        else str(admission.mode)
-    )
-    if mode_value == AdmissionMode.QUEUED.value:
-        await _send_antigravity_queue_message(
-            event,
-            queue_position=admission.queue_position or 1,
-            eta_at=admission.eta_at,
-        )
         event.set_extra(
-            "dc_router_antigravity_queue",
+            "dc_router_disabled_legacy_cli",
             {
-                "provider_id": decision.provider_id,
-                "fallback_provider_id": ANTIGRAVITY_FALLBACK_PROVIDER_ID,
-                "job_id": admission.job.job_id,
-                "queue_position": admission.queue_position or 1,
-                "eta_at": admission.eta_at,
+                "provider_id": provider_id,
+                "reason": DISABLED_LEGACY_CLI_REASON,
             },
         )
-        return True
-
-    try:
-        result = await CliRunner(cwd=_DC_AGENT_ROOT).run_antigravity(
-            prompt, model=model, timeout=90
-        )
-    except Exception as exc:  # noqa: BLE001
-        mark_antigravity_failure(error_code="exception", error=str(exc))
-        try:
-            await gate.fail(
-                admission.job.job_id,
-                f"Antigravity CLI exception: {exc}",
-                retry_after_seconds=ANTIGRAVITY_COOLDOWN_SECONDS,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return False
-
-    if not result.ok:
-        mark_antigravity_failure(error_code=result.error_code, error=result.error)
-        try:
-            await gate.fail(
-                admission.job.job_id,
-                f"{result.error_code or 'cli_error'}: {result.error or ''}",
-                retry_after_seconds=ANTIGRAVITY_COOLDOWN_SECONDS,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        # 失败 fallback
-        available = _provider_ids(context)
-        if ANTIGRAVITY_FALLBACK_PROVIDER_ID in available:
-            if await _switch_provider(context, event, ANTIGRAVITY_FALLBACK_PROVIDER_ID):
-                event.set_extra(
-                    "dc_router_antigravity_failure_fallback",
-                    {
-                        "provider_id": decision.provider_id,
-                        "fallback_provider_id": ANTIGRAVITY_FALLBACK_PROVIDER_ID,
-                        "error_code": result.error_code,
-                    },
-                )
-                return True
-        return False
-
-    mark_antigravity_success(elapsed_sec=result.elapsed_sec)
-    try:
-        await gate.complete(
-            admission.job.job_id,
-            result={
-                "provider_id": decision.provider_id,
-                "elapsed_sec": result.elapsed_sec,
-            },
-            cooldown_seconds=ANTIGRAVITY_COOLDOWN_SECONDS,
-        )
-    except Exception:  # noqa: BLE001
-        pass
-
-    event.set_extra("dc_router_cli_provider", decision.provider_id)
-    event.should_call_llm(False)
-    try:
+        event.should_call_llm(False)
         event.set_result(
-            MessageEventResult().message(result.text).use_t2i(False).stop_event()
+            MessageEventResult()
+            .message(DISABLED_LEGACY_CLI_MESSAGE)
+            .use_t2i(False)
+            .stop_event()
         )
     except Exception:  # noqa: BLE001
         pass
-    logger.info(
-        "[cli_handlers] Antigravity direct success provider=%s model=%s elapsed=%.2fs",
-        decision.provider_id,
-        model,
-        result.elapsed_sec,
-    )
-    return True
 
 
 # ────────────────── Codex CLI ──────────────────
@@ -499,10 +330,13 @@ async def dispatch_cli_provider(
     backend, _, _ = _parse_cli_provider(provider_id)
     prompt = build_cli_prompt(event, decision)
 
-    if backend == "antigravity":
-        return await _start_antigravity(
-            context, event, decision=decision, prompt=prompt
+    if backend == DISABLED_LEGACY_CLI_BACKEND:
+        await _handle_disabled_legacy_cli_provider(event, decision=decision)
+        logger.warning(
+            "[cli_handlers] legacy CLI provider is disabled provider_id=%s",
+            provider_id,
         )
+        return True
     if backend == "codex":
         return await _start_codex(context, event, decision=decision, prompt=prompt)
     if backend == "grok":
@@ -515,12 +349,12 @@ async def dispatch_cli_provider(
     return False
 
 
-# 处理 Antigravity 排队卡动作 (来自 card_action handler)
-async def handle_antigravity_queue_card_action(
+# 处理旧队列卡动作 (来自 card_action handler)
+async def handle_disabled_legacy_cli_card_action(
     context: Any,
     event: Any,
 ) -> bool:
-    """用户点 Antigravity 排队卡「用池池小助手先处理」→ 取消队列 + 切 fallback.
+    """Handle old queue cards as cancel-only disabled legacy cards.
 
     返回 True 表示事件已被处理 (set_result 已调).
     """
@@ -540,40 +374,26 @@ async def handle_antigravity_queue_card_action(
         return True
 
     job_id = str(value.get("job_id") or "").strip()
-    available = _provider_ids(context)
-    if ANTIGRAVITY_FALLBACK_PROVIDER_ID not in available:
-        event.should_call_llm(False)
-        event.set_result(
-            MessageEventResult()
-            .message("池池小助手现在也有点忙，我先继续帮您保留排队位置。")
-            .use_t2i(False)
-            .stop_event()
-        )
-        return True
-
     try:
         from .dc_quota_runtime import get_quota_gate
 
         gate = await get_quota_gate()
-        cancelled = await gate.cancel_pending_job(job_id, reason="user fallback")
+        await gate.cancel_pending_job(job_id, reason=DISABLED_LEGACY_CLI_REASON)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[cli_handlers] cancel antigravity queue 失败: %s", exc)
-        cancelled = False
+        logger.warning("[cli_handlers] cancel legacy CLI queue failed: %s", exc)
 
-    if not cancelled:
-        event.should_call_llm(False)
-        event.set_result(
-            MessageEventResult()
-            .message("池池小助手现在也有点忙，我先继续帮您保留排队位置。")
-            .use_t2i(False)
-            .stop_event()
-        )
-        return True
-
-    if await _switch_provider(context, event, ANTIGRAVITY_FALLBACK_PROVIDER_ID):
-        event.set_extra("dc_router_antigravity_fallback_job_id", job_id)
-        return True
-    return False
+    event.set_extra(
+        "dc_router_disabled_legacy_cli_card_job_id",
+        job_id,
+    )
+    event.should_call_llm(False)
+    event.set_result(
+        MessageEventResult()
+        .message(DISABLED_LEGACY_CLI_MESSAGE)
+        .use_t2i(False)
+        .stop_event()
+    )
+    return True
 
 
 # ────────────────── Background queue recovery ──────────────────
@@ -585,7 +405,7 @@ _DEFAULT_RECOVERY_INTERVAL = 60
 
 
 async def _resume_pending_cli_jobs(_context: Any, gate: Any, *, limit: int = 20) -> int:
-    """Re-admit pending QuotaGate CLI jobs (antigravity / codex) when resources free.
+    """Re-admit pending QuotaGate CLI jobs when resources free.
 
     Returns the number of jobs that were successfully restarted.
     """
@@ -603,6 +423,45 @@ async def _resume_pending_cli_jobs(_context: Any, gate: Any, *, limit: int = 20)
             continue
         backend = str(payload.get("backend") or "")
         if backend not in {"antigravity", "codex"}:
+            continue
+        prompt_text = " ".join(
+            str(payload.get(key) or "")
+            for key in ("original_prompt", "prompt")
+            if payload.get(key)
+        )
+        if SOURCE_IMAGE_EDIT_PROMPT_RE.search(prompt_text):
+            await gate.cancel_pending_job(
+                pending.job_id,
+                reason="source image edit must not be recovered as CLI queue",
+            )
+            logger.info(
+                "[cli_handlers] cancelled stale source-image CLI pending job=%s",
+                pending.job_id,
+            )
+            continue
+        if backend == "antigravity" or provider_id.startswith("cli/antigravity/"):
+            await gate.cancel_pending_job(
+                pending.job_id,
+                reason=DISABLED_LEGACY_CLI_REASON,
+            )
+            logger.info(
+                "[cli_handlers] cancelled retired legacy CLI pending job=%s",
+                pending.job_id,
+            )
+            continue
+        if (
+            pending.enqueue_at
+            and time.time() - pending.enqueue_at > PENDING_CLI_RECOVERY_TTL_SECONDS
+        ):
+            await gate.cancel_pending_job(
+                pending.job_id,
+                reason="pending CLI recovery TTL expired",
+            )
+            logger.info(
+                "[cli_handlers] cancelled expired pending CLI job=%s age=%.0fs",
+                pending.job_id,
+                time.time() - pending.enqueue_at,
+            )
             continue
         job = await gate.start_pending_job(pending.job_id)
         if job is None:
@@ -671,14 +530,14 @@ def stop_queue_recovery() -> None:
 
 
 __all__ = [
-    "ANTIGRAVITY_FALLBACK_PROVIDER_ID",
-    "ANTIGRAVITY_PROVIDER_ID",
-    "ANTIGRAVITY_RESOURCE_KEY",
     "CLI_PROVIDER_PREFIX",
+    "DISABLED_LEGACY_CLI_BACKEND",
+    "DISABLED_LEGACY_CLI_PROVIDER_ID",
+    "DISABLED_LEGACY_CLI_REASON",
     "GROK_BUILD_FALLBACK_PROVIDER_ID",
     "build_cli_prompt",
     "dispatch_cli_provider",
-    "handle_antigravity_queue_card_action",
+    "handle_disabled_legacy_cli_card_action",
     "is_cli_provider",
     "parse_cli_provider",
     "start_queue_recovery",

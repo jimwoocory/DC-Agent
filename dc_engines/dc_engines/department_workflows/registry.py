@@ -11,7 +11,10 @@ LEGACY_DEPARTMENT_IDS = {
     "branding": "brand_publicity",
     "exec_office": "executive_office",
     "operations": "execution_ops",
-    "film": "brand_publicity",
+    "film": "film_production",
+    "design": "design_dept",
+    "digital": "ai_application",
+    "ai": "ai_application",
 }
 
 

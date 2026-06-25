@@ -472,6 +472,7 @@ class GPTImagePlugin(Star):
             card=final_card,
             platform_id="",
             detail=f"gpt image generation finalized record={record.record_id}",
+            retract_after_sec=8.0 if success else None,
         )
 
     @filter.llm_tool(name="generate_image")
@@ -499,6 +500,7 @@ class GPTImagePlugin(Star):
             prompt,
             media_kind="image",
             aspect_ratio=aspect_ratio,
+            target_engine="gpt-image-2",
         )
 
         waiting_card = await self._start_image_waiting_card(

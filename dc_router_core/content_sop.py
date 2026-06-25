@@ -66,11 +66,15 @@ class ContentSopMetadata:
 
 
 _CLIENT_RE = re.compile(
-    r"(客户|客户部|邀约|回访|续约|私域|话术|触达|vip|渠道|线索|权益|报价|承诺)",
+    r"(客户|客户部|中台客户部|中台客户|邀约|回访|续约|私域|话术|触达|vip|渠道|线索|权益|报价|承诺)",
     re.IGNORECASE,
 )
 _PLANNING_RE = re.compile(
-    r"(策划|策划部|策略|规划|分镜|短视频|脚本|传播|洞察|brief|storyboard)",
+    r"(策划|策划部|策略|策略部|中台策略部|中台策略|中台策划|规划|分镜|短视频|脚本|传播|洞察|brief|storyboard)",
+    re.IGNORECASE,
+)
+_EXECUTION_RE = re.compile(
+    r"(执行部门|执行部|执行运营|项目执行|活动执行|活动统筹部|活动统筹|物料|安装|验收材料|礼品打样|入库|出库|库存)",
     re.IGNORECASE,
 )
 _COPY_RE = re.compile(r"(文案|话术|标题|slogan|广告语|邮件|短信|正文)", re.IGNORECASE)
@@ -112,6 +116,8 @@ def infer_content_sop_metadata(
 def _infer_department(text: str) -> ContentDepartment:
     client_score = len(_CLIENT_RE.findall(text))
     planning_score = len(_PLANNING_RE.findall(text))
+    if _EXECUTION_RE.search(text) and client_score == 0 and planning_score == 0:
+        return ContentDepartment.UNKNOWN
     if client_score > planning_score:
         return ContentDepartment.CLIENT_DEPT
     if planning_score > 0:

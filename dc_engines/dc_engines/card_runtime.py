@@ -79,6 +79,7 @@ async def finalize_card_via_runtime(
     platform_id: str = "",
     detail: str = "",
     fallback: str = "plain_text",
+    retract_after_sec: float | None = None,
 ) -> bool:
     """Finalize one registered card and record the outcome."""
     assert_registered_card(card_type)
@@ -105,4 +106,25 @@ async def finalize_card_via_runtime(
         detail=detail or ("card finalized" if ok else "streamer.finalize failed"),
         fallback="" if ok else fallback,
     )
+    if ok and retract_after_sec is not None:
+        try:
+            task = streamer.schedule_retract(message_id, retract_after_sec)
+            scheduled = task is not None
+            retract_detail = (
+                f"card retract scheduled after {max(0.0, retract_after_sec):.1f}s"
+                if scheduled
+                else "streamer.schedule_retract returned None"
+            )
+        except Exception as exc:  # noqa: BLE001
+            scheduled = False
+            retract_detail = f"{type(exc).__name__}: {exc}"
+        record_card_runtime_event(
+            event="retract_scheduled",
+            card_type=card_type,
+            ok=scheduled,
+            platform_id=platform_id,
+            message_id=message_id,
+            detail=retract_detail,
+            fallback="" if scheduled else fallback,
+        )
     return ok

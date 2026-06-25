@@ -170,6 +170,8 @@ class InternalAgentSubStage(Stage):
             streaming_response = self.streaming_response
             if (enable_streaming := event.get_extra("enable_streaming")) is not None:
                 streaming_response = bool(enable_streaming)
+            if _is_router_web_search_required(event):
+                streaming_response = False
 
             has_provider_request = event.get_extra("provider_request") is not None
             has_valid_message = bool(event.message_str and event.message_str.strip())
@@ -687,6 +689,13 @@ def _lark_message_id(event: AstrMessageEvent) -> str:
 
     extra = event.get_extra("message_id")
     return str(extra) if extra else ""
+
+
+def _is_router_web_search_required(event: AstrMessageEvent) -> bool:
+    raw_value = event.get_extra("dc_router_meta_search_required")
+    if isinstance(raw_value, bool):
+        return raw_value
+    return str(raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 async def _record_internal_agent_stats(

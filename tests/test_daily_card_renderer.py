@@ -163,6 +163,31 @@ async def test_webchat_waiting_card_does_not_send_feishu_card(monkeypatch) -> No
     send_card.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_media_route_result_does_not_render_second_casual_card(monkeypatch) -> None:
+    renderer = _load_daily_card_renderer()
+    streamer = _make_streamer()
+    plugin = object.__new__(renderer.DailyCardRendererPlugin)
+    plugin.context = _make_context(streamer)
+    plugin._finalized_stream_ids = {}
+    send_card = AsyncMock(return_value=SimpleNamespace(message_id="om_duplicate"))
+    monkeypatch.setattr(renderer, "send_card_via_runtime", send_card)
+
+    result = (
+        MessageEventResult()
+        .message("已进入生图任务：GPT Image 2 主用，Dreamina 即梦自动兜底。")
+        .set_result_content_type(ResultContentType.GENERAL_RESULT)
+    )
+    event = _make_lark_event(result)
+    original_get_extra = event.get_extra
+    event.get_extra.side_effect = lambda key: "image" if key == "dc_media_route_handled" else original_get_extra(key)
+
+    await plugin.finalize_or_render_card(event)
+
+    send_card.assert_not_awaited()
+    assert result.chain
+
+
 def test_consumed_card_result_will_not_trigger_empty_model_fallback() -> None:
     renderer = _load_daily_card_renderer()
     result = (

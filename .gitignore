@@ -182,6 +182,8 @@ data/case_archives/
 data/employee_directory/
 data/workspaces/
 data/feishu-rpa-persistent-profile/
+data/runtime/
+harness/replay/proposals/
 
 # Dashboard 编译产物（用户自定义 build，再 build 就有；含 minified JS 不适合 git）
 data/dist/

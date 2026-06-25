@@ -1,6 +1,6 @@
 """巅池-技术 日报 plugin —— 只暴露 API 给 dashboard 看历史。
 
-真正的工作（夜间 agy 跑完整链路、早上推送）是 cron 脚本干的，见：
+真正的工作（夜间模型链路、早上推送）是 cron 脚本干的，见：
     scripts-tools/dianchi-tech-night.sh    # 01:00 北京 = 美西 10:00
     scripts-tools/dianchi-tech-report.sh   # 09:30 北京 推飞书 + wiki
 
@@ -21,7 +21,7 @@ from astrbot.api.star import Context, Star, register
 @register(
     "dianchi_tech",
     "dc_agent",
-    "巅池-技术 日报（agy 爬硅谷 AI 资讯 + agy 学习/巡检 + 飞书私聊+wiki）",
+    "巅池-技术 日报（aihubmix 爬硅谷 AI 资讯 + 学习/巡检 + 飞书私聊+wiki）",
     "0.1.0",
 )
 class DianchiTechPlugin(Star):

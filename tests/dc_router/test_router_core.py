@@ -187,7 +187,7 @@ async def test_business_router_falls_back_when_classifier_returns_none() -> None
 
     assert decision.intent == RouterIntent.FALLBACK.value
     assert decision.source == "fallback"
-    assert decision.provider_id == "cli/antigravity/gemini-3.5-flash"
+    assert decision.provider_id == "aihubmix/qwen3.7-max"
 
 
 @pytest.mark.asyncio
@@ -217,13 +217,13 @@ async def test_business_router_preserves_feishu_channel_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_realtime_routes_to_antigravity_first() -> None:
+async def test_realtime_routes_to_qwen_max() -> None:
     dc_router = DCRouter(classifier=ExplodingClassifier())
 
     decision = await dc_router.decide("今天行业有什么热点")
 
     assert decision.intent == RouterIntent.REALTIME.value
-    assert decision.provider_id == "cli/antigravity/gemini-3.5-flash"
+    assert decision.provider_id == "aihubmix/qwen3.7-max"
 
 
 @pytest.mark.asyncio
@@ -312,12 +312,214 @@ async def test_content_sop_metadata_routes_planning_video_image_request() -> Non
 
     decision = await dc_router.decide("策划部做一个短视频脚本和生图 prompt")
 
-    assert decision.intent == RouterIntent.DEEP_CREATIVE.value
-    assert decision.source == "content_sop"
+    assert decision.intent == RouterIntent.CREATIVE.value
+    assert decision.source == "department_workflow"
     assert decision.metadata["content_sop"] == "true"
     assert decision.metadata["department"] == "planning"
+    assert decision.metadata["department_workflow"] == "planning_creative_fast"
     assert decision.metadata["content_type"] == "mixed"
-    assert decision.metadata["material_status"] == "needs_materials"
+    assert decision.metadata["material_policy"] == "optional_for_first_draft"
+
+
+@pytest.mark.asyncio
+async def test_planning_framework_request_routes_to_fast_creative() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("帮我梳理一个夏季活动方案框架，先给创意方向")
+
+    assert decision.intent == RouterIntent.CREATIVE.value
+    assert decision.provider_id == "aihubmix/doubao-seed-2-1-pro"
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department"] == "planning"
+    assert decision.metadata["department_workflow"] == "planning_creative_fast"
+    assert decision.metadata["answer_policy"] == "answer_first"
+    assert decision.metadata["memory_policy"] == "skip_deep_company_memory_by_default"
+    assert decision.metadata["planning_output_mode"] == "framework_first"
+    assert (
+        decision.metadata["framework_policy"]
+        == "toc_then_slide_titles_then_page_details"
+    )
+
+
+@pytest.mark.asyncio
+async def test_middle_office_strategy_routes_to_planning_fast_creative() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide(
+        "中台策略部帮我梳理一个活动方案框架，先给创意方向"
+    )
+
+    assert decision.intent == RouterIntent.CREATIVE.value
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department"] == "planning"
+    assert decision.metadata["department_workflow"] == "planning_creative_fast"
+
+
+@pytest.mark.asyncio
+async def test_middle_office_client_does_not_route_as_planning() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("中台客户部帮我写客户活动邀约话术，用在微信私域")
+
+    assert decision.intent == RouterIntent.DEEP_CREATIVE.value
+    assert decision.source == "content_sop"
+    assert decision.metadata["department"] == "client_dept"
+    assert "department_workflow" not in decision.metadata
+
+
+@pytest.mark.asyncio
+async def test_execution_department_delivery_routes_to_work_preflight() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("执行部门帮我整理场地物料安装点检和验收材料")
+
+    assert decision.intent == RouterIntent.WORK_PREFLIGHT.value
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department"] == "execution_ops"
+    assert decision.metadata["department_workflow"] == "execution_delivery"
+    assert decision.metadata["queue_policy"] == "no_queue_without_resource_reason"
+
+
+@pytest.mark.asyncio
+async def test_execution_gift_inventory_routes_to_work_preflight() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("帮我做礼品打样生产跟踪和入库出库库存清单")
+
+    assert decision.intent == RouterIntent.WORK_PREFLIGHT.value
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department"] == "execution_ops"
+
+
+@pytest.mark.asyncio
+async def test_split_execution_departments_route_to_own_workflows() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    design = await dc_router.decide("设计部帮我检查设计稿VI、字体和尺寸比例")
+    film = await dc_router.decide("影视制作部帮我整理拍摄通告、机位安排和成片交付")
+    ai_app = await dc_router.decide("AI应用部帮我设计部门小助手和知识库接入工作流")
+
+    assert design.intent == RouterIntent.WORK_PREFLIGHT.value
+    assert design.metadata["department"] == "design_dept"
+    assert design.metadata["department_workflow"] == "design_delivery"
+    assert film.intent == RouterIntent.WORK_PREFLIGHT.value
+    assert film.metadata["department"] == "film_production"
+    assert film.metadata["department_workflow"] == "film_production_delivery"
+    assert ai_app.intent == RouterIntent.WORK_PREFLIGHT.value
+    assert ai_app.metadata["department"] == "ai_application"
+    assert ai_app.metadata["department_workflow"] == "ai_application_enablement"
+
+
+@pytest.mark.asyncio
+async def test_brand_publicity_ops_routes_to_work_preflight() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("品宣部帮我整理媒介KOC任务下发和社群舆情复盘")
+
+    assert decision.intent == RouterIntent.WORK_PREFLIGHT.value
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department"] == "brand_publicity"
+    assert decision.metadata["department_workflow"] == "brand_publicity_ops"
+    assert decision.metadata["branch_policy"] == "liuqi_placeholder_only"
+    assert decision.metadata["queue_policy"] == "no_queue_without_resource_reason"
+
+
+@pytest.mark.asyncio
+async def test_brand_publicity_does_not_steal_strategy_or_direct_media() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    strategy = await dc_router.decide("中台账号运营要怎么设计栏目和直播节奏")
+    direct_media = await dc_router.decide("品宣部帮我生成一张端午海报")
+
+    assert strategy.metadata["department"] == "planning"
+    assert strategy.metadata["department_workflow"] == "planning_creative_fast"
+    assert direct_media.metadata["department_workflow"] == "planning_direct_media"
+
+
+@pytest.mark.asyncio
+async def test_brand_middle_platform_coordination_is_context_only() -> None:
+    dc_router = DCRouter(classifier=FakeClassifier(None))
+
+    decision = await dc_router.decide(
+        MessageEnvelope(
+            text="品宣和中台策略部都提到直播账号运营，这个先怎么分工？",
+            metadata={"platform_id": "巅池-Agent小助手"},
+        )
+    )
+
+    assert decision.source != "department_workflow"
+    assert "department_workflow" not in decision.metadata
+    assert decision.metadata["rdf_department_signal"] == "department_context"
+    assert "department_context_not_entrypoint" in decision.metadata["rule_gate_notes"]
+
+
+@pytest.mark.asyncio
+async def test_liuq_brand_context_keeps_org_interface_context_only() -> None:
+    dc_router = DCRouter(classifier=FakeClassifier(None))
+
+    decision = await dc_router.decide(
+        MessageEnvelope(
+            text="柳汽这边的品宣账号运营怎么先保留组织接口？",
+            metadata={"platform_id": "巅池-Agent小助手"},
+        )
+    )
+
+    assert decision.source != "department_workflow"
+    assert "department_workflow" not in decision.metadata
+    assert decision.metadata["rdf_department_signal"] == "department_context"
+    assert "department_context_not_entrypoint" in decision.metadata["rule_gate_notes"]
+
+
+@pytest.mark.asyncio
+async def test_liuq_branch_name_alone_does_not_create_active_brand_route() -> None:
+    dc_router = DCRouter(classifier=FakeClassifier(None))
+
+    decision = await dc_router.decide("柳汽这边今天有什么安排")
+
+    assert decision.metadata.get("department") != "brand_publicity"
+    assert decision.metadata.get("department_workflow") != "brand_publicity_ops"
+
+
+@pytest.mark.asyncio
+async def test_execution_leaf_department_does_not_steal_direct_media_request() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide(
+        MessageEnvelope(
+            text="帮我生成一张缤果 Pro 夏至海报",
+            metadata={"requester_department": "设计部"},
+        )
+    )
+
+    assert decision.metadata.get("department_workflow") != "execution_delivery"
+    assert decision.metadata.get("media_policy") == "direct_generation"
+
+
+@pytest.mark.asyncio
+async def test_planning_direct_media_request_routes_without_prompt_coaching() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("帮我生成一张缤果 Pro 夏至海报")
+
+    assert decision.intent == RouterIntent.CREATIVE.value
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department_workflow"] == "planning_direct_media"
+    assert decision.metadata["answer_policy"] == "generate_directly_no_prompt_coaching"
+    assert decision.metadata["default_aspect_ratio"] == "portrait"
+
+
+@pytest.mark.asyncio
+async def test_planning_research_request_requires_sources() -> None:
+    dc_router = DCRouter(classifier=ExplodingClassifier())
+
+    decision = await dc_router.decide("帮我找一下小红书和抖音最近竞品活动趋势")
+
+    assert decision.intent == RouterIntent.REALTIME.value
+    assert decision.source == "department_workflow"
+    assert decision.metadata["department"] == "planning"
+    assert decision.metadata["department_workflow"] == "planning_research_with_sources"
+    assert decision.metadata["search_required"] == "true"
+    assert decision.metadata["source_policy"] == "separate_facts_from_assumptions"
 
 
 @pytest.mark.asyncio

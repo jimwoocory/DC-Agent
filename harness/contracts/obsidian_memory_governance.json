@@ -42,7 +42,7 @@
     "Do not replace data/nas_memory.db as the raw source memory index.",
     "Do not require a native Obsidian plugin for the first production version.",
     "Do not require realtime file watching for Obsidian edits in the first production version.",
-    "Do not use data/agy_review_candidates as a production review queue.",
+    "Do not use data/router_review_candidates as a production review queue.",
     "Do not promote unreviewed or sensitive-blocked memory into default runtime recall.",
     "Do not implement automatic deletion or forgetting before a retention policy exists.",
     "Do not require full AstrBot KB write-back for assistants that can query governed NAS memory directly.",

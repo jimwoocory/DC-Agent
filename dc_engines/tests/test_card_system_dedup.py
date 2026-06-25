@@ -41,6 +41,18 @@ class _FakeStreamer:
         raise AssertionError("unregistered card_type must not call streamer.finalize")
 
 
+class _FinalizeAndRetractStreamer:
+    def __init__(self) -> None:
+        self.scheduled_retracts: list[tuple[str, float]] = []
+
+    async def finalize(self, _message_id: str, _card: dict) -> bool:
+        return True
+
+    def schedule_retract(self, message_id: str, delay_sec: float):
+        self.scheduled_retracts.append((message_id, delay_sec))
+        return object()
+
+
 def _ev(
     ok: bool,
     message_id: str,
@@ -84,7 +96,9 @@ async def test_runtime_send_rejects_unregistered_card_before_streamer_call() -> 
 
 
 @pytest.mark.asyncio
-async def test_runtime_finalize_rejects_unregistered_card_before_streamer_call() -> None:
+async def test_runtime_finalize_rejects_unregistered_card_before_streamer_call() -> (
+    None
+):
     streamer = _FakeStreamer()
 
     with pytest.raises(KeyError, match="unknown card_type"):
@@ -96,6 +110,22 @@ async def test_runtime_finalize_rejects_unregistered_card_before_streamer_call()
         )
 
     assert streamer.finalize_called is False
+
+
+@pytest.mark.asyncio
+async def test_runtime_finalize_can_schedule_retractable_task_card() -> None:
+    streamer = _FinalizeAndRetractStreamer()
+
+    ok = await finalize_card_via_runtime(
+        streamer,
+        card_type="media_generation",
+        message_id="om_media_task",
+        card={"elements": []},
+        retract_after_sec=8.0,
+    )
+
+    assert ok is True
+    assert streamer.scheduled_retracts == [("om_media_task", 8.0)]
 
 
 class TestDedupeConsecutiveFailures:

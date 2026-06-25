@@ -90,19 +90,6 @@ DEFAULT_MODULES: tuple[HubModule, ...] = (
         migration="hub-core-candidate",
     ),
     HubModule(
-        "employee_onboarding",
-        "员工入职引导",
-        "assistant_core",
-        "飞书卡片身份采集、教程和准入测试。",
-        migration="hub-core-candidate",
-    ),
-    HubModule(
-        "onboarding_guide",
-        "首次对话引导",
-        "assistant_core",
-        "旧版 ABC 角色引导；employee_onboarding 启用时自动让路，仅作备用入口。",
-    ),
-    HubModule(
         "feishu_doc_fetcher",
         "飞书文档直读",
         "assistant_feishu",

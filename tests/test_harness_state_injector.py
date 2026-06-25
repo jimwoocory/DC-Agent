@@ -79,3 +79,33 @@ async def test_harness_state_injector_skips_casual_chat_to_avoid_stale_context()
     assert "DC-Agent 真实性铁律" in req.system_prompt
     assert "Harness 任务状态约束" not in req.system_prompt
     assert "abcdef12" not in req.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_truth_source_context_injected_into_system_prompt():
+    store = _FakeHarnessStore()
+    context = SimpleNamespace(harness_store=store)
+    plugin = HarnessStateInjectorPlugin(context)
+    truth_block = (
+        '<dc_truth_source intake_id="abc" task_id=task123>\n'
+        "原始需求：帮我写报告\n"
+        "员工补充/提供的真实资料：真实材料\n"
+        "</dc_truth_source>"
+    )
+    event = SimpleNamespace(
+        message_str="补充：真实材料",
+        unified_msg_origin="巅池-Agent小助手:FriendMessage:ou_user",
+        get_platform_id=lambda: "巅池-Agent小助手",
+        get_extra=lambda key: truth_block
+        if key == "dc_truth_source_context"
+        else "casual"
+        if key == "dc_router_intent"
+        else "",
+    )
+    req = ProviderRequest(system_prompt="base")
+
+    await plugin.inject_active_tasks(event, req)
+
+    assert store.calls == 0
+    assert req.system_prompt.startswith("base")
+    assert truth_block in req.system_prompt

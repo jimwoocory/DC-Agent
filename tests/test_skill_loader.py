@@ -87,7 +87,26 @@ version: 1.0.0
         encoding="utf-8",
     )
 
-    # 3) document-intake (无 trigger phrases, 走 has_attachments 入口)
+    # 3) planning-writing (策划部豆包式写作入口)
+    (root / "planning-writing").mkdir()
+    (root / "planning-writing" / "SKILL.md").write_text(
+        """---
+name: Planning Department Writing
+description: &gt;
+  Use this skill when planning colleagues ask for promotion strategies, proposal planning,
+  ad creative copy, or market research reports. Trigger phrases: &quot;推广策略&quot;,
+  &quot;方案策划&quot;, &quot;广告创意&quot;, &quot;市场调研报告&quot;.
+version: 1.0.0
+---
+
+# Planning Department Writing
+
+策划部写作技能, 覆盖推广策略、方案策划、广告创意、市场调研报告.
+""",
+        encoding="utf-8",
+    )
+
+    # 4) document-intake (无 trigger phrases, 走 has_attachments 入口)
     (root / "document-intake").mkdir()
     (root / "document-intake" / "SKILL.md").write_text(
         """---
@@ -103,7 +122,7 @@ version: 1.0.0
         encoding="utf-8",
     )
 
-    # 4) execution-oriented Agent Skills. These should not bypass business
+    # 5) execution-oriented Agent Skills. These should not bypass business
     # intent allowlists unless explicitly promoted into policy.
     (root / "obsidian-cli").mkdir()
     (root / "obsidian-cli" / "SKILL.md").write_text(
@@ -328,6 +347,17 @@ def test_match_trigger_phrase_english(
     )
     names = [s.name for s in matched]
     assert "creative-copywriting" in names
+
+
+def test_creative_intent_matches_planning_writing_modes(
+    use_fake_root: Path,  # noqa: ARG001
+) -> None:
+    """策划部四个豆包式写作入口应在 CREATIVE 下命中 planning-writing."""
+    matched = match_skill_for_intent(
+        RouterIntent.CREATIVE, "帮我做一个五菱小红书推广策略"
+    )
+    names = [s.name for s in matched]
+    assert names[:1] == ["planning-writing"]
 
 
 def test_match_intent_skip_casual() -> None:

@@ -31,8 +31,25 @@ class HarnessStateInjectorPlugin(Star):
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
+        self._inject_truth_source_context(event, req)
         await self._runtime.inject_active_tasks(event, req)
 
     _format_task_line = staticmethod(format_task_line)
     _safe_extra = staticmethod(safe_extra)
     _should_inject_active_tasks = staticmethod(should_inject_active_tasks)
+
+    @staticmethod
+    def _inject_truth_source_context(
+        event: AstrMessageEvent,
+        req: ProviderRequest,
+    ) -> None:
+        get_extra = getattr(event, "get_extra", None)
+        if not callable(get_extra):
+            return
+        block = str(get_extra("dc_truth_source_context") or "").strip()
+        if not block or "<dc_truth_source" not in block:
+            return
+        existing = req.system_prompt or ""
+        if block in existing:
+            return
+        req.system_prompt = f"{existing.rstrip()}\n\n{block}\n" if existing else block

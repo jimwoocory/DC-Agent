@@ -66,6 +66,7 @@ dependencies = [
   "packaging>=24.2",
   "pexpect>=4.9.0",
   "python-ripgrep==0.0.8",
+  "rembg[cpu]>=2.0.76",
 ]
 
 [dependency-groups]

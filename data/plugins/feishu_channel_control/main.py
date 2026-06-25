@@ -66,12 +66,14 @@ class FeishuChannelControlPlugin(Star):
     async def initialize(self) -> None:
         self.context.feishu_channel_control = self
         self._ensure_ingress_audit_schema()
+        synced = self._sync_employee_directory_approvals()
         logger.info(
-            "[feishu_channel_control] enabled=%s dm=%s group=%s state=%s",
+            "[feishu_channel_control] enabled=%s dm=%s group=%s state=%s employee_synced=%s",
             self.config.enabled,
             self.config.dm_policy,
             self.config.group_policy,
             self.state_path,
+            synced,
         )
 
     @filter.command(
@@ -288,6 +290,43 @@ class FeishuChannelControlPlugin(Star):
                 conn.commit()
         except Exception as exc:  # noqa: BLE001
             logger.warning("[feishu_channel_control] 初始化入口审计表失败：%s", exc)
+
+    def _sync_employee_directory_approvals(self) -> int:
+        if not self.config.auto_approve_employee_directory:
+            return 0
+        db_path = self.project_root / "data" / "employees.db"
+        if not db_path.exists():
+            return 0
+        synced = 0
+        try:
+            with sqlite3.connect(db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT open_id, display_name, department
+                    FROM employees
+                    WHERE open_id LIKE 'ou_%'
+                    """
+                ).fetchall()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[feishu_channel_control] 同步员工准入失败：%s", exc)
+            return 0
+
+        for open_id, display_name, department in rows:
+            normalized = str(open_id or "").strip()
+            if not normalized:
+                continue
+            if self.state.remember_approved(
+                normalized,
+                approver="employee_directory",
+                source="employee_directory",
+            ):
+                item = self.state.approved.get(normalized)
+                if isinstance(item, dict):
+                    item["display_name"] = str(display_name or "")
+                    item["department"] = str(department or "")
+                    self.state.save()
+                synced += 1
+        return synced
 
     def _audit_db_path(self) -> Path:
         project_root = getattr(self, "project_root", Path.cwd())

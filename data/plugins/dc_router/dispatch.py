@@ -6,14 +6,16 @@ Order matters:
   3) short acknowledgements and chitchat
   4) reasoning prefix provider pinning
   5) Feishu channel provider pinning
-  6) truth intake material guard
-  7) employee SOP signal confirmation
-  8) department memory prompt
-  9) memory context injection via extras only
- 10) assistant tone context via extras only
- 11) media route background tasks
- 12) dc_router.decide() for intent classification and provider routing
- 13) v1.0 fallback when disabled, dry-run, or decide raises
+  6) source image edit skill (deterministic cutout/background removal)
+  7) context alignment guard for stale quoted failure/internal context
+  8) truth intake material guard
+  9) employee SOP signal confirmation
+ 10) department memory prompt
+ 11) memory context injection via extras only
+ 12) assistant tone context via extras only
+ 13) media route background tasks
+ 14) dc_router.decide() for intent classification and provider routing
+ 15) v1.0 fallback when disabled, dry-run, or decide raises
 
 Any stage that returns ``stop=True`` ends dispatch immediately.
 """
@@ -35,8 +37,10 @@ from .preprocessing import (
     try_capture_sop_signal,
     try_handle_card_action,
     try_handle_chitchat,
+    try_handle_context_alignment,
     try_handle_department_memory,
     try_handle_media_route,
+    try_handle_source_image_edit,
     try_inject_assistant_tone,
 )
 from .routing import (
@@ -306,12 +310,10 @@ async def _build_arbiter(cfg: DCRouterConfig) -> Any:
     try:
         from harness import QuotaGateArbiter
 
-        from .antigravity_health import antigravity_allowed
         from .dc_quota_runtime import get_quota_gate
 
         return QuotaGateArbiter(
             quota_gate=await get_quota_gate(),
-            circuit_checker=antigravity_allowed,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[dc_router] QuotaGateArbiter 构造失败，回退透传仲裁: %s", exc)
@@ -375,6 +377,13 @@ async def _run_dc_router(
 
     if dry_run:
         annotate_event_with_decision(event, decision)
+        _capture_router_observation(
+            event=event,
+            envelope=envelope,
+            decision=decision,
+            handled=False,
+            dry_run=True,
+        )
         return (
             False,
             str(getattr(decision, "intent", "") or ""),
@@ -382,11 +391,40 @@ async def _run_dc_router(
         )
 
     handled = await apply_decision(context, event, decision)
+    _capture_router_observation(
+        event=event,
+        envelope=envelope,
+        decision=decision,
+        handled=handled,
+        dry_run=False,
+    )
     return (
         handled,
         str(getattr(decision, "intent", "") or ""),
         str(getattr(decision, "provider_id", "") or ""),
     )
+
+
+def _capture_router_observation(
+    *,
+    event: Any,
+    envelope: Any,
+    decision: Any,
+    handled: bool,
+    dry_run: bool,
+) -> None:
+    try:
+        from .observation_capture import capture_router_decision_observation
+
+        capture_router_decision_observation(
+            event=event,
+            envelope=envelope,
+            decision=decision,
+            handled=handled,
+            dry_run=dry_run,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[dc_router] observation capture skipped: %s", exc)
 
 
 async def dispatch(
@@ -455,9 +493,21 @@ async def dispatch(
                 source="feishu_channel",
             )
 
-    # ── 6-10) truth intake / SOP signal / dept memory / memory injection / tone ─────
+    # ── 6) source image edit skill (抠图/去背景必须先于 truth-intake) ──────────────
+    if is_dc_router_managed_platform(platform_id):
+        if await try_handle_source_image_edit(context, event, text):
+            return DispatchResult(handled=True, source="source_image_edit")
+
+    # ── 7-12) context alignment / truth intake / SOP / dept memory / memory / tone ─────
     memory_query_text = text
     if is_dc_router_managed_platform(platform_id):
+        context_alignment = try_handle_context_alignment(event, raw_text=text)
+        if context_alignment.stop:
+            return DispatchResult(
+                handled=True,
+                source="context_alignment",
+                decision_intent=context_alignment.reason,
+            )
         if await _maybe_truth_intake(context, event, cfg):
             return DispatchResult(handled=True, source="truth_intake")
         sop_signal = try_capture_sop_signal(event, text=text)

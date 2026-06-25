@@ -12,7 +12,7 @@ from reporter import load_report  # noqa: E402
 
 def test_load_report_fallback_includes_retry_attempts(tmp_path: Path) -> None:
     run_meta = {
-        "agy": {"exit": 0},
+        "scan": {"exit": 0},
         "analysis": {
             "exit": 124,
             "duration_seconds": 4810,
@@ -42,7 +42,7 @@ def test_load_report_fallback_includes_retry_attempts(tmp_path: Path) -> None:
     text, ok = load_report(tmp_path, "2026-05-29")
 
     assert ok is False
-    assert "夜间任务退出码：agy=0, analysis=124" in text
+    assert "夜间任务退出码：stage_a=0, analysis=124" in text
     assert "硬超时：2400s" in text
     assert "最多尝试：2 次" in text
     assert "第1次=timeout/exit124/2405s" in text

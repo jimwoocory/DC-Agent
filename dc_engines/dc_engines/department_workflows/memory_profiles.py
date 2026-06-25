@@ -35,13 +35,12 @@ DEFAULT_DEPARTMENT_MEMORY_PROFILES: tuple[DepartmentMemoryProfile, ...] = (
             "脚本",
             "分镜",
             "拍摄",
-            "文案",
             "混剪",
-            "五菱",
-            "缤果",
-            "星光",
-            "柳汽",
-            "风行",
+            "剪辑",
+            "口播",
+            "镜头",
+            "成片",
+            "拍摄脚本",
         ),
         tone_template=(
             "处理汽车短视频任务时，优先给可落地方案：明确竖屏/横屏、时长、"
@@ -52,13 +51,29 @@ DEFAULT_DEPARTMENT_MEMORY_PROFILES: tuple[DepartmentMemoryProfile, ...] = (
     DepartmentMemoryProfile(
         profile_id="planning_content_sop_workflow",
         department_id="planning",
-        display_name="中台-策划",
-        aliases=("中台-策划", "中台策划", "策划", "策划部", "策略部", "策略"),
+        display_name="中台-策略部",
+        aliases=(
+            "中台-策略部",
+            "中台策略部",
+            "中台-策略",
+            "中台策略",
+            "中台策划",
+            "策划",
+            "策划部",
+            "策略部",
+            "策略",
+        ),
         trigger_keywords=(
             "方案",
             "策划",
             "传播",
             "创意",
+            "方案框架",
+            "框架搭建",
+            "竞品",
+            "行业趋势",
+            "海报思路",
+            "视觉 brief",
             "brief",
             "活动",
             "短视频",
@@ -80,16 +95,172 @@ DEFAULT_DEPARTMENT_MEMORY_PROFILES: tuple[DepartmentMemoryProfile, ...] = (
             "研讨会",
         ),
         tone_template=(
-            "处理中台-策划任务时，先拆目标、受众、平台、素材和约束，再输出"
-            "创意 brief、传播主线、内容结构、分镜/脚本和执行清单；涉及客户、"
-            "品牌规范、车型卖点或历史项目结论时必须标注来源，不把未提供信息当事实。"
+            "处理中台-策略部任务时，优先围绕新项目给创意、方案框架、文案方向、"
+            "海报思路、视觉 brief、短视频分镜和脚本；竞品、行业趋势、平台数据等"
+            "需要标注来源和可信度；历史方案只在案例参考、复盘、集锦或风格校准时调用，"
+            "不默认做深度全库检索。"
+        ),
+    ),
+    DepartmentMemoryProfile(
+        profile_id="execution_delivery_workflow",
+        department_id="execution_ops",
+        display_name="执行部门",
+        aliases=(
+            "执行部门",
+            "执行部",
+            "执行运营",
+            "项目执行",
+            "活动执行",
+            "活动统筹部",
+            "活动统筹",
+        ),
+        trigger_keywords=(
+            "执行分工表",
+            "项目启动会",
+            "落地沟通会",
+            "场地",
+            "勘场",
+            "物料",
+            "安装",
+            "点检",
+            "验收材料",
+            "礼品打样",
+            "生产",
+            "入库",
+            "出库",
+            "库存",
+        ),
+        tone_template=(
+            "处理执行部门任务时，优先输出任务拆解、负责人矩阵、时间排期、"
+            "点检清单、风险预案、验收材料和待确认项；不替客户部承诺预算、"
+            "合同、价格或回款，不替策略部做创意定调。"
+        ),
+    ),
+    DepartmentMemoryProfile(
+        profile_id="design_delivery_workflow",
+        department_id="design_dept",
+        display_name="设计部",
+        aliases=("设计部", "主设", "平面设计", "视觉设计"),
+        trigger_keywords=(
+            "设计稿",
+            "VI",
+            "色调",
+            "字体",
+            "尺寸比例",
+            "制作文件",
+            "源文件",
+            "排版",
+            "视觉检查",
+        ),
+        tone_template=(
+            "处理设计部任务时，优先检查创意是否偏离、色调/VI/字体/背景/尺寸比例"
+            "是否符合品牌和制作要求，并输出修改清单、制作风险和交付文件清单；"
+            "不替甲方或项目负责人作最终通过结论。"
+        ),
+    ),
+    DepartmentMemoryProfile(
+        profile_id="film_production_delivery_workflow",
+        department_id="film_production",
+        display_name="影视制作部",
+        aliases=("影视制作部", "影视", "影视制作", "编导", "拍摄", "后期", "剪辑"),
+        trigger_keywords=(
+            "拍摄通告",
+            "机位",
+            "道化服",
+            "现场拍摄",
+            "跟拍",
+            "后期剪辑",
+            "成片",
+            "成片交付",
+            "验收材料",
+        ),
+        tone_template=(
+            "处理影视制作部任务时，优先落到拍摄通告、机位安排、现场拍摄清单、"
+            "后期交付计划和验收材料；拍摄时间、地点、人员、机位数量和交付标准"
+            "必须来自确认材料。"
+        ),
+    ),
+    DepartmentMemoryProfile(
+        profile_id="ai_application_workflow",
+        department_id="ai_application",
+        display_name="AI应用部",
+        aliases=("AI应用部", "AI应用", "ai应用部", "数字化应用部", "数字化应用"),
+        trigger_keywords=(
+            "AI工具",
+            "自动化",
+            "工作流",
+            "知识库接入",
+            "机器人配置",
+            "小助手配置",
+            "部门小助手",
+            "使用培训",
+            "权限",
+        ),
+        tone_template=(
+            "处理 AI 应用部任务时，先梳理部门场景、现有资料、权限和数据边界，"
+            "再输出 AI 工具配置、自动化工作流、知识库接入方案、上线检查清单和培训要点；"
+            "不得承诺未验证的接口能力或数据访问权限。"
+        ),
+    ),
+    DepartmentMemoryProfile(
+        profile_id="brand_publicity_ops_workflow",
+        department_id="brand_publicity",
+        display_name="品宣部",
+        aliases=(
+            "品宣部",
+            "品宣",
+            "品牌宣传",
+            "宣发",
+            "运营部",
+            "媒介",
+            "KOC",
+            "用户故事",
+            "企微",
+            "社群",
+            "舆情",
+        ),
+        trigger_keywords=(
+            "直播运营",
+            "账号运营",
+            "内容运营",
+            "起号",
+            "爆品",
+            "引流品",
+            "周复盘",
+            "月复盘",
+            "任务下发",
+            "需求管理表",
+            "日报",
+            "反馈闭环",
+            "沟通脚本",
+            "甲方审核",
+            "成片审核",
+            "风险预警",
+            "负面稀释",
+            "用户证言",
+        ),
+        tone_template=(
+            "处理品宣部任务时，默认公司内品宣团队统一承接直播/账号内容运营、"
+            "媒介/KOC、用户故事、用户活动、企微、社群和舆情相关工作；先输出"
+            "任务表、节奏、KPI、反馈闭环和风险项，不把柳汽拆成公司内自动路由。"
+            "柳汽是外派独立分支，只在用户明确提到并提供材料时作为项目/客户上下文。"
         ),
     ),
     DepartmentMemoryProfile(
         profile_id="client_touchpoint_workflow",
         department_id="client_dept",
         display_name="客户部",
-        aliases=("客户部", "客户", "客户那边", "客户侧", "业务部", "市场部"),
+        aliases=(
+            "客户部",
+            "中台客户部",
+            "中台-客户",
+            "中台客户",
+            "客户",
+            "客户那边",
+            "客户侧",
+            "业务部",
+            "市场部",
+        ),
         trigger_keywords=(
             "客户",
             "邀约",

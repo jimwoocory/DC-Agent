@@ -142,6 +142,7 @@ class DreaminaPlugin(Star):
             card=final_card,
             platform_id="",
             detail=f"dreamina media generation finalized record={record.record_id}",
+            retract_after_sec=8.0 if success else None,
         )
 
     async def _execute_dreamina(
@@ -343,7 +344,11 @@ class DreaminaPlugin(Star):
         if not prompt:
             yield event.plain_result("请提供图片描述，例如：/生成图片 一只可爱的橘猫")
             return
-        prompt = build_structured_media_prompt(prompt, media_kind="image")
+        prompt = build_structured_media_prompt(
+            prompt,
+            media_kind="image",
+            target_engine="dreamina",
+        )
 
         # 构建命令
         command = [
@@ -714,7 +719,11 @@ class DreaminaPlugin(Star):
         """
         event.stop_event()
         yield
-        prompt = build_structured_media_prompt(prompt, media_kind="image")
+        prompt = build_structured_media_prompt(
+            prompt,
+            media_kind="image",
+            target_engine="dreamina",
+        )
         command = [
             "text2image",
             "--prompt",

@@ -57,10 +57,11 @@ from dc_router_core.provider_map import (
     AIHUBMIX_CLAUDE_OPUS_4_8,
     AIHUBMIX_CLAUDE_SONNET_4_6,
     AIHUBMIX_DEEPSEEK_PRO,
+    AIHUBMIX_DOUBAO_SEED_2_1_PRO,
     AIHUBMIX_GEMINI_FLASH,
     AIHUBMIX_GROK,
     AIHUBMIX_QWEN_FLASH,
-    ANTIGRAVITY_CLI_FLASH,
+    AIHUBMIX_QWEN_MAX,
     CLI_CODEX_GPT_5_4,
     CLI_GROK_BUILD,
     DEFAULT_PROVIDER_MAP,
@@ -194,7 +195,9 @@ class TestRuleMatcherContracts:
         assert match_prefix("普通文本") is None
         assert match_prefix("#未知前缀 text") is None
 
-    def test_public_opinion_keyword_has_priority_over_realtime_and_creative(self) -> None:
+    def test_public_opinion_keyword_has_priority_over_realtime_and_creative(
+        self,
+    ) -> None:
         match = match_keywords("最新热点舆情来了，顺便写一版营销文案")
         assert match is not None
         assert match.intent is RouterIntent.PUBLIC_OPINION
@@ -288,10 +291,11 @@ class TestProviderMapContracts:
             AIHUBMIX_CLAUDE_OPUS_4_8,
             AIHUBMIX_CLAUDE_SONNET_4_6,
             AIHUBMIX_DEEPSEEK_PRO,
+            AIHUBMIX_DOUBAO_SEED_2_1_PRO,
             AIHUBMIX_GEMINI_FLASH,
             AIHUBMIX_GROK,
             AIHUBMIX_QWEN_FLASH,
-            ANTIGRAVITY_CLI_FLASH,
+            AIHUBMIX_QWEN_MAX,
             CLI_CODEX_GPT_5_4,
             CLI_GROK_BUILD,
         }
@@ -301,9 +305,9 @@ class TestProviderMapContracts:
                 f"{route.provider_id!r}"
             )
 
-    def test_casual_routes_to_antigravity_cli(self) -> None:
+    def test_casual_routes_to_qwen_max(self) -> None:
         route = get_provider_route(RouterIntent.CASUAL)
-        assert route.provider_id == ANTIGRAVITY_CLI_FLASH
+        assert route.provider_id == AIHUBMIX_QWEN_MAX
         assert route.depth is RouteDepth.DIRECT
         assert route.action is RouteAction.ANSWER
 
@@ -328,9 +332,9 @@ class TestProviderMapContracts:
         assert route.provider_id == AIHUBMIX_CLAUDE_OPUS_4_8
         assert route.target_model == "claude-opus-4-8"
 
-    def test_fallback_routes_to_antigravity(self) -> None:
+    def test_fallback_routes_to_qwen_max(self) -> None:
         route = get_provider_route(RouterIntent.FALLBACK)
-        assert route.provider_id == ANTIGRAVITY_CLI_FLASH
+        assert route.provider_id == AIHUBMIX_QWEN_MAX
 
     def test_get_provider_route_returns_fallback_for_unknown_intent(self) -> None:
         # DEFAULT_PROVIDER_MAP.get(unknown) is None; the typed dict requires
@@ -545,7 +549,7 @@ class TestBusinessRouterContracts:
         decision = await router.decide("这个事你怎么看")
         assert decision.intent == RouterIntent.FALLBACK.value
         assert decision.source == "fallback"
-        assert decision.provider_id == ANTIGRAVITY_CLI_FLASH
+        assert decision.provider_id == AIHUBMIX_QWEN_MAX
 
     @pytest.mark.asyncio
     async def test_attachment_without_summary_routes_to_multimodal(self) -> None:
@@ -585,11 +589,11 @@ class TestBusinessRouterContracts:
         )
 
     @pytest.mark.asyncio
-    async def test_realtime_routes_to_antigravity_first(self) -> None:
+    async def test_realtime_routes_to_qwen_max(self) -> None:
         router = DCRouter(classifier=_ExplodingClassifier())
         decision = await router.decide("今天行业有什么热点")
         assert decision.intent == RouterIntent.REALTIME.value
-        assert decision.provider_id == ANTIGRAVITY_CLI_FLASH
+        assert decision.provider_id == AIHUBMIX_QWEN_MAX
 
     @pytest.mark.asyncio
     async def test_prefix_overrides_keyword_after_attachment_summary(self) -> None:
@@ -610,7 +614,103 @@ class TestBusinessRouterContracts:
         router = DCRouter(arbiter=PassThroughArbiter())
         decision = await router.decide("#创意 slogan")
         # arbiter is invoked but does not change route — provider_id is preserved.
-        assert decision.provider_id == AIHUBMIX_DEEPSEEK_PRO
+        assert decision.provider_id == AIHUBMIX_DOUBAO_SEED_2_1_PRO
+
+    @pytest.mark.asyncio
+    async def test_planning_department_fast_creative_is_hard_routed(self) -> None:
+        router = DCRouter(classifier=_ExplodingClassifier())
+        decision = await router.decide(
+            MessageEnvelope(
+                text="帮我梳理一个夏季活动方案框架，先给创意方向",
+                metadata={"platform_id": "巅池-Agent小助手"},
+            )
+        )
+
+        assert decision.intent == RouterIntent.CREATIVE.value
+        assert decision.provider_id == AIHUBMIX_DOUBAO_SEED_2_1_PRO
+        assert decision.source == "department_workflow"
+        assert decision.metadata["department"] == "planning"
+        assert decision.metadata["department_workflow"] == "planning_creative_fast"
+        assert decision.metadata["answer_policy"] == "answer_first"
+        assert (
+            decision.metadata["memory_policy"] == "skip_deep_company_memory_by_default"
+        )
+        assert decision.metadata["planning_output_mode"] == "framework_first"
+        assert (
+            decision.metadata["framework_policy"]
+            == "toc_then_slide_titles_then_page_details"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("text", "mode", "label"),
+        [
+            ("帮我做一个五菱小红书推广策略", "promotion_strategy", "推广策略"),
+            ("帮我做一个通品店铺运营方案策划", "proposal_planning", "方案策划"),
+            ("帮我写一组缤果夏季广告创意文案", "ad_creative", "广告创意"),
+            ("帮我做一个竞品市场调研报告", "market_research_report", "市场调研报告"),
+        ],
+    )
+    async def test_planning_department_writing_modes_are_locked(
+        self, text: str, mode: str, label: str
+    ) -> None:
+        router = DCRouter(classifier=_ExplodingClassifier())
+        decision = await router.decide(
+            MessageEnvelope(
+                text=text,
+                metadata={"platform_id": "巅池-Agent小助手"},
+            )
+        )
+
+        assert decision.intent == RouterIntent.CREATIVE.value
+        assert decision.provider_id == AIHUBMIX_DOUBAO_SEED_2_1_PRO
+        assert decision.source == "department_workflow"
+        assert decision.metadata["department_workflow"] == "planning_creative_fast"
+        assert decision.metadata["planning_writing_skill"] == "planning-writing"
+        assert decision.metadata["planning_writing_mode"] == mode
+        assert decision.metadata["planning_writing_mode_label"] == label
+        assert decision.metadata["planning_structure_policy"]
+        if mode == "market_research_report":
+            assert decision.metadata["search_required"] == "true"
+            assert (
+                decision.metadata["source_policy"] == "separate_facts_from_assumptions"
+            )
+
+    @pytest.mark.asyncio
+    async def test_planning_department_direct_media_is_hard_routed(self) -> None:
+        router = DCRouter(classifier=_ExplodingClassifier())
+        decision = await router.decide(
+            MessageEnvelope(
+                text="帮我生成一张缤果 Pro 夏至海报",
+                metadata={"platform_id": "巅池-Agent小助手"},
+            )
+        )
+
+        assert decision.intent == RouterIntent.CREATIVE.value
+        assert decision.source == "department_workflow"
+        assert decision.metadata["department_workflow"] == "planning_direct_media"
+        assert (
+            decision.metadata["answer_policy"] == "generate_directly_no_prompt_coaching"
+        )
+        assert decision.metadata["default_aspect_ratio"] == "portrait"
+
+    @pytest.mark.asyncio
+    async def test_planning_department_research_requires_sources(self) -> None:
+        router = DCRouter(classifier=_ExplodingClassifier())
+        decision = await router.decide(
+            MessageEnvelope(
+                text="帮我找一下小红书和抖音最近竞品活动趋势",
+                metadata={"platform_id": "巅池-Agent小助手"},
+            )
+        )
+
+        assert decision.intent == RouterIntent.REALTIME.value
+        assert decision.source == "department_workflow"
+        assert (
+            decision.metadata["department_workflow"] == "planning_research_with_sources"
+        )
+        assert decision.metadata["search_required"] == "true"
+        assert decision.metadata["source_policy"] == "separate_facts_from_assumptions"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -752,7 +852,7 @@ class TestRouterDecisionContracts:
         decision = RouterDecision.from_route(route, reason="x", source="rules")
         payload = decision.model_dump()
         assert payload["intent"] == "casual"
-        assert payload["provider_id"] == ANTIGRAVITY_CLI_FLASH
+        assert payload["provider_id"] == AIHUBMIX_QWEN_MAX
         assert payload["depth"] == "direct"
         assert payload["action"] == "answer"
 
@@ -802,10 +902,11 @@ class TestPublicAPIContracts:
 
     def test_provider_map_constants_are_stable(self) -> None:
         # Re-pinning the contract: changes to any of these are breaking.
-        assert ANTIGRAVITY_CLI_FLASH == "cli/antigravity/gemini-3.5-flash"
         assert AIHUBMIX_GEMINI_FLASH == "aihubmix/gemini-3.5-flash"
         assert AIHUBMIX_QWEN_FLASH == "aihubmix/qwen3.6-flash"
+        assert AIHUBMIX_QWEN_MAX == "aihubmix/qwen3.7-max"
         assert AIHUBMIX_DEEPSEEK_PRO == "aihubmix/deepseek-v4-pro"
+        assert AIHUBMIX_DOUBAO_SEED_2_1_PRO == "aihubmix/doubao-seed-2-1-pro"
         assert AIHUBMIX_GROK == "aihubmix/grok-4.3"
         assert AIHUBMIX_CLAUDE_SONNET_4_6 == "aihubmix/claude-sonnet-4-6"
         assert AIHUBMIX_CLAUDE_OPUS_4_7 == "aihubmix/claude-opus-4-7"
@@ -859,12 +960,12 @@ class TestRuleTableConsistency:
             assert all(isinstance(k, str) for k in keywords)
 
     def test_provider_route_actions_are_known(self) -> None:
-        valid_actions = {a for a in RouteAction}
+        valid_actions = set(RouteAction)
         for _intent, route in DEFAULT_PROVIDER_MAP.items():
             assert route.action in valid_actions
 
     def test_ops_provider_route_actions_are_known(self) -> None:
-        valid_actions = {a for a in RouteAction}
+        valid_actions = set(RouteAction)
         for _intent, route in OPS_PROVIDER_MAP.items():
             assert route.action in valid_actions
 

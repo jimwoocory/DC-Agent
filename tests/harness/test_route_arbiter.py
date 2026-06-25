@@ -19,7 +19,7 @@ from dc_router_core.taxonomy import RouteAction, RouteDepth, RouterIntent
 from harness.quota_gate import QuotaGate, QuotaRequest
 from harness.route_arbiter import QuotaGateArbiter
 
-ANTIGRAVITY_KEY = "antigravity_cli_flash"
+CODEX_KEY = "codex_cli_global"
 
 
 def _circuit(allowed: bool, reason: str = "timeout streak"):
@@ -37,8 +37,8 @@ async def _busy_gate(tmp_path: Path) -> QuotaGate:
     gate = QuotaGate(tmp_path / "quota.db")
     decision = await gate.admit(
         QuotaRequest(
-            primary_resource_key=ANTIGRAVITY_KEY,
-            resource_keys=(ANTIGRAVITY_KEY,),
+            primary_resource_key=CODEX_KEY,
+            resource_keys=(CODEX_KEY,),
         )
     )
     assert decision.mode.value == "run_now"
@@ -61,13 +61,16 @@ async def test_healthy_resources_pass_through(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_circuit_open_swaps_provider_keeps_depth(tmp_path: Path):
-    arbiter = QuotaGateArbiter(circuit_checker=_circuit(False, "cli timeout"))
-    route = get_provider_route(RouterIntent.CASUAL)
-    assert route.provider_id.startswith("cli/antigravity/")
+    arbiter = QuotaGateArbiter(
+        circuit_checker=_circuit(False, "cli timeout"),
+        circuit_provider_prefix="cli/codex/",
+    )
+    route = get_provider_route(RouterIntent.SIMPLE_CODE)
+    assert route.provider_id.startswith("cli/codex/")
 
     result = await arbiter.arbitrate(route, _envelope(), {"k": "v"})
 
-    assert result.route.provider_id == "aihubmix/gemini-3.5-flash"
+    assert result.route.provider_id == "aihubmix/qwen3.7-max"
     assert result.depth == route.depth
     assert result.action == route.action
     assert result.metadata["arbiter_circuit_fallback"] == "true"
@@ -97,7 +100,7 @@ async def test_quota_busy_queues_light_intent_at_front(tmp_path: Path):
         depth=route.depth,
         action=route.action,
         target_model=route.target_model,
-        resource_keys=(ANTIGRAVITY_KEY,),
+        resource_keys=(CODEX_KEY,),
     )
 
     result = await arbiter.arbitrate(busy_route, _envelope(), {})
@@ -118,7 +121,7 @@ async def test_quota_busy_escalates_heavy_intent_to_hermes(tmp_path: Path):
         depth=route.depth,
         action=route.action,
         target_model=route.target_model,
-        resource_keys=(ANTIGRAVITY_KEY,),
+        resource_keys=(CODEX_KEY,),
     )
 
     result = await arbiter.arbitrate(busy_route, _envelope(), {})
@@ -132,8 +135,8 @@ async def test_quota_available_after_completion_passes_through(tmp_path: Path):
     gate = QuotaGate(tmp_path / "quota.db")
     decision = await gate.admit(
         QuotaRequest(
-            primary_resource_key=ANTIGRAVITY_KEY,
-            resource_keys=(ANTIGRAVITY_KEY,),
+            primary_resource_key=CODEX_KEY,
+            resource_keys=(CODEX_KEY,),
         )
     )
     await gate.complete(decision.job.job_id, cooldown_seconds=0)
@@ -145,7 +148,7 @@ async def test_quota_available_after_completion_passes_through(tmp_path: Path):
         depth=route.depth,
         action=route.action,
         target_model=route.target_model,
-        resource_keys=(ANTIGRAVITY_KEY,),
+        resource_keys=(CODEX_KEY,),
     )
 
     result = await arbiter.arbitrate(keyed_route, _envelope(), {})
@@ -160,21 +163,21 @@ async def test_dc_router_applies_arbitration_result(tmp_path: Path):
     arbiter = QuotaGateArbiter(
         quota_gate=gate,
         circuit_checker=_circuit(False, "cli timeout"),
+        circuit_provider_prefix="cli/codex/",
     )
     router = DCRouter(arbiter=arbiter)
 
-    decision = await router.decide(_envelope("帮我看看今天天气怎么样"))
+    decision = await router.decide(_envelope("#代码 写一个 hello world 脚本"))
 
-    # CASUAL/FALLBACK 路由的 provider 是 cli/antigravity/*，circuit open 必须换走
-    assert decision.provider_id == "aihubmix/gemini-3.5-flash"
+    assert decision.provider_id == "aihubmix/qwen3.7-max"
     assert decision.metadata["arbiter_circuit_fallback"] == "true"
 
 
 @pytest.mark.asyncio
-async def test_dc_router_pass_through_keeps_legacy_decision(tmp_path: Path):
+async def test_dc_router_pass_through_keeps_default_decision(tmp_path: Path):
     router = DCRouter()
 
     decision = await router.decide(_envelope("帮我看看今天天气怎么样"))
 
-    assert decision.provider_id.startswith("cli/antigravity/")
+    assert decision.provider_id == "aihubmix/qwen3.7-max"
     assert "arbiter_circuit_fallback" not in decision.metadata

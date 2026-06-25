@@ -1,9 +1,8 @@
 """巅池-技术 日报阶段 A：抓硅谷 AI 当日动态 → raw_news.md。
 
-2026-05-26 蔡挺决策（agy 已复活，切回 agy 主通道）：
-1. **主路径**：agy CLI（Antigravity）via PTY 包装（agy_runner.py）→ Gemini 搜索 + 初步分析
-2. **兜底**：aihubmix 原生 Gemini 路径 + google_search grounding（不依赖 agy 登录态）
-3. **二级兜底**：aihubmix OpenAI 兼容路径（无实时网搜，仅模型知识）
+2026-06-25：本地 legacy CLI 已关闭。
+1. **主路径**：aihubmix 原生 Gemini 路径 + google_search grounding
+2. **兜底**：aihubmix OpenAI 兼容路径（无实时网搜，仅模型知识）
 
 raw_news.md 顶部明确标"数据源"，便于回溯哪条路出来的。
 """
@@ -19,9 +18,6 @@ from datetime import date as _date
 from pathlib import Path
 
 import httpx
-
-sys.path.insert(0, str(Path(__file__).parent))
-from agy_runner import run_agy  # noqa: E402
 
 CMD_CONFIG = Path("/Users/dianchi/DC-Agent/data/cmd_config.json")
 GEMINI_MODEL = "gemini-3.5-flash"
@@ -62,7 +58,7 @@ def _load_aihubmix_key() -> str:
 
 
 def _prompt(date_str: str) -> str:
-    """给 agy 和 Gemini 共用的硅谷科技圈 prompt。"""
+    """Build the Silicon Valley AI news collection prompt."""
     return f"""你是『巅池-技术』日报阶段 A 的**硅谷科技圈**资讯采集助手。今天 {date_str}（北京时间）。
 
 请用你的搜索能力**实时搜索**过去 24-48 小时硅谷 AI 科技圈的最新动态。
@@ -71,7 +67,7 @@ def _prompt(date_str: str) -> str:
 
 - **新模型 / 新版本发布**（参数、benchmark、能力变化、context window、token 价）
 - **API / SDK 变更**（新 endpoint、新参数、deprecation、breaking change、SDK 版本号）
-- **新功能 / 新工具**（Claude Code / Agent SDK / Gemini CLI / Antigravity / Codex 等开发者工具更新）
+- **新功能 / 新工具**（Claude Code / Agent SDK / Gemini CLI / Codex 等开发者工具更新）
 - **研究论文 / 技术博客**（官方 research blog、arXiv 重要论文、技术深度文章）
 - **开源项目动态**（重要 GitHub release、上游 commit、社区流行 fork）
 - **架构 / 训练方法创新**（新训练范式、新推理优化、benchmark 突破）
@@ -126,26 +122,7 @@ OpenAI / Anthropic / Google DeepMind (Gemini) / xAI (Grok)
 """
 
 
-# ─────────────────────── 主路径：agy ───────────────────────
-
-
-def try_agy(date_str: str) -> tuple[bool, str, dict]:
-    log.info("主路径：agy CLI（Antigravity / Gemini）")
-    result = run_agy(_prompt(date_str), timeout=300)
-    meta = {
-        "channel": "agy",
-        "kind": result["kind"],
-        "elapsed_sec": result["elapsed_sec"],
-        "error": result.get("error", ""),
-    }
-    if result["ok"] and result["text"]:
-        log.info("agy 成功 %.1fs %d chars", result["elapsed_sec"], len(result["text"]))
-        return True, result["text"], meta
-    log.warning("agy 失败 kind=%s err=%s", result["kind"], result.get("error", ""))
-    return False, "", meta
-
-
-# ─────────────────────── 兜底 1：aihubmix Gemini grounding ───────────────────────
+# ─────────────────────── 主路径：aihubmix Gemini grounding ───────────────────────
 
 
 def gemini_grounding(api_key: str, prompt: str) -> tuple[bool, str, dict]:
@@ -242,33 +219,18 @@ def run(date_str: str, out_path: Path) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path = out_path.parent / "searcher_meta.json"
 
-    # 1) 主路径：agy
-    ok, text, agy_meta = try_agy(date_str)
-    if ok:
-        out_path.write_text(
-            header("agy CLI / Antigravity（主通道）") + text + "\n", encoding="utf-8"
-        )
-        meta_path.write_text(
-            json.dumps(
-                {"channel": "agy", "agy": agy_meta}, ensure_ascii=False, indent=2
-            ),
-            encoding="utf-8",
-        )
-        return 0
-
-    # 2) 兜底 1：aihubmix Gemini grounding
+    # 1) 主路径：aihubmix Gemini grounding
     key = _load_aihubmix_key()
     if not key:
         out_path.write_text(
             header("ALL FAILED")
-            + f"# 硅谷 AI 资讯 {date_str}\n\n⚠️ agy 失败 + 缺 aihubmix key。\n\nagy: {agy_meta}\n",
+            + f"# 硅谷 AI 资讯 {date_str}\n\n⚠️ 缺 aihubmix key，无法执行搜索。\n",
             encoding="utf-8",
         )
         meta_path.write_text(
             json.dumps(
                 {
                     "channel": "ALL FAILED",
-                    "agy": agy_meta,
                     "error": "missing aihubmix key",
                 },
                 ensure_ascii=False,
@@ -278,12 +240,12 @@ def run(date_str: str, out_path: Path) -> int:
         )
         return 2
 
-    log.info("兜底 1：aihubmix native gemini-3.5-flash + google_search grounding")
+    log.info("主路径：aihubmix native gemini-3.5-flash + google_search grounding")
     ok2, text2, gemini_meta = gemini_grounding(key, _prompt(date_str))
     if ok2:
         out_path.write_text(
             header(
-                f"aihubmix native {GEMINI_MODEL} + google_search grounding（agy 降级，{gemini_meta.get('grounding_chunks', 0)} 个来源）"
+                f"aihubmix native {GEMINI_MODEL} + google_search grounding（{gemini_meta.get('grounding_chunks', 0)} 个来源）"
             )
             + text2
             + "\n",
@@ -292,8 +254,7 @@ def run(date_str: str, out_path: Path) -> int:
         meta_path.write_text(
             json.dumps(
                 {
-                    "channel": "gemini_grounding_fallback",
-                    "agy": agy_meta,
+                    "channel": "gemini_grounding",
                     "gemini": gemini_meta,
                 },
                 ensure_ascii=False,
@@ -301,19 +262,17 @@ def run(date_str: str, out_path: Path) -> int:
             ),
             encoding="utf-8",
         )
-        return 1
+        return 0
 
     log.warning(
         "Gemini grounding 失败 %s，二级兜底 OpenAI 兼容路径", gemini_meta.get("error")
     )
 
-    # 3) 二级兜底：OpenAI 兼容（无网搜）
+    # 2) 兜底：OpenAI 兼容（无网搜）
     ok3, text3, oai_meta = gemini_openai_compat(key, _prompt(date_str))
     if ok3:
         out_path.write_text(
-            header(
-                f"aihubmix OpenAI 兼容 {GEMINI_MODEL}（agy + grounding 都挂，无实时网搜）"
-            )
+            header(f"aihubmix OpenAI 兼容 {GEMINI_MODEL}（grounding 失败，无实时网搜）")
             + text3
             + "\n",
             encoding="utf-8",
@@ -321,8 +280,7 @@ def run(date_str: str, out_path: Path) -> int:
         meta_path.write_text(
             json.dumps(
                 {
-                    "channel": "openai_compat_2nd_fallback",
-                    "agy": agy_meta,
+                    "channel": "openai_compat_fallback",
                     "gemini_grounding": gemini_meta,
                     "oai": oai_meta,
                 },
@@ -336,14 +294,13 @@ def run(date_str: str, out_path: Path) -> int:
     # 全挂
     out_path.write_text(
         header("ALL FAILED")
-        + f"# 硅谷 AI 资讯 {date_str}\n\n⚠️ agy / Gemini grounding / OpenAI 兼容三路全失败。\n\nagy: {agy_meta}\n\ngrounding: {gemini_meta}\n\noai: {oai_meta}\n",
+        + f"# 硅谷 AI 资讯 {date_str}\n\n⚠️ Gemini grounding / OpenAI 兼容两路全失败。\n\ngrounding: {gemini_meta}\n\noai: {oai_meta}\n",
         encoding="utf-8",
     )
     meta_path.write_text(
         json.dumps(
             {
                 "channel": "ALL FAILED",
-                "agy": agy_meta,
                 "gemini_grounding": gemini_meta,
                 "oai": oai_meta,
             },

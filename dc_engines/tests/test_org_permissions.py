@@ -24,10 +24,14 @@ def test_canonical_department_tree_and_aliases() -> None:
     assert normalize_department_name("中台") == "中台部门"
     assert normalize_department_name("策划部") == "策略部"
     assert normalize_department_name("中台-策划") == "策略部"
+    assert normalize_department_name("AI应用") == "AI应用部"
+    assert normalize_department_name("品宣运营") == "运营部"
     assert normalize_department_name("公司") == "总经办"
     assert canonical_department_path("客户部") == ("总经办", "中台部门", "客户部")
     assert canonical_department_path("策划部") == ("总经办", "中台部门", "策略部")
     assert canonical_department_path("综合部") == ("总经办", "执行部门", "综合部")
+    assert canonical_department_path("AI应用部") == ("总经办", "执行部门", "AI应用部")
+    assert canonical_department_path("运营部") == ("总经办", "品宣部门", "运营部")
     assert canonical_department_path("柳汽") == ("总经办", "品宣部门", "柳汽")
 
 

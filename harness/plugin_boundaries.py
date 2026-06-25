@@ -145,8 +145,8 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
         responsibility=(
             "Unified intent classification and provider routing gateway. "
             "Merged from data/plugins/llm_router/; sole entry point for "
-            "business/Ops platform messages. Owns circuit breakers for "
-            "antigravity/qwen3.6-flash, QuotaGate queue recovery, and "
+            "business/Ops platform messages. Owns Qwen/Grok health, "
+            "QuotaGate queue recovery, and "
             "platform-level preprocessing (chitchat, card action, dept "
             "memory, tone, media, feishu channel)."
         ),
@@ -160,8 +160,6 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
         ),
         config_paths=("data/config/dc_router_config.json",),
         runtime_data_patterns=(
-            "data/antigravity_health.json",
-            "data/antigravity_health_events.jsonl",
             "data/grok_worker_state.json",
             "data/dc_router_queue_recovery.lock",
         ),
@@ -205,24 +203,6 @@ _DEFAULT_BOUNDARIES: tuple[PluginBoundary, ...] = (
         ),
         config_paths=("data/config/content_sop_rule_review_plugin_config.json",),
         runtime_data_patterns=("data/content_sop_rule_proposals.db",),
-    ),
-    PluginBoundary(
-        name="god_mode_plugin",
-        role="ops_plugin",
-        path="data/plugins/god_mode_plugin",
-        boundary_status="thin_adapter",
-        responsibility=(
-            "Feishu /god administrator approval entrypoint for DC-Agent tool "
-            "server actions. Planning, approval state, idempotency, and audit "
-            "persistence are owned by dc_engines.god_mode."
-        ),
-        adapter_entrypoints=(
-            "filter.command:god",
-            "feishu_card_action:god_mode_approval",
-        ),
-        engine_modules=("dc_engines.god_mode",),
-        config_paths=("data/config/god_mode_plugin_config.json",),
-        runtime_data_patterns=("data/god_mode_audit.db",),
     ),
     PluginBoundary(
         name="dc_hub",

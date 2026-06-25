@@ -9,10 +9,10 @@ Coverage surface:
 - :class:`TestIsCliProvider` — the ``cli/`` prefix detector that
   every public entry point funnels through.
 - :class:`TestBuildCliPrompt` — intent-aware prompt construction. These
-  prompts are the *only* text that gets fed into Antigravity/Codex/Grok
+  prompts are the *only* text that gets fed into Codex/Grok
   CLIs, so a wrong template here means a wrong model behaviour.
 - :class:`TestDispatchCliProviderBackend` — backend dispatch
-  routing (antigravity / codex / grok / unsupported). The internal
+  routing (disabled legacy CLI / codex / grok / unsupported). The internal
   ``_start_*`` helpers are patched so we can verify the dispatch
   table itself stays correct.
 - :class:`TestDispatchCliProviderNonCli` — non-CLI provider_ids must
@@ -84,15 +84,15 @@ def _ensure_astrbot_stub() -> None:
             self._use_t2i: bool | None = None
             self._stop = False
 
-        def message(self, text: str) -> "_StubMessageEventResult":
+        def message(self, text: str) -> _StubMessageEventResult:
             self._message = text
             return self
 
-        def use_t2i(self, flag: bool) -> "_StubMessageEventResult":
+        def use_t2i(self, flag: bool) -> _StubMessageEventResult:
             self._use_t2i = flag
             return self
 
-        def stop_event(self) -> "_StubMessageEventResult":
+        def stop_event(self) -> _StubMessageEventResult:
             self._stop = True
             return self
 
@@ -127,9 +127,8 @@ def _ensure_astrbot_stub() -> None:
 _ensure_astrbot_stub()
 
 # ─────────────────────────────────────────────────────────────────────────
-# Module loading — bypass ``dc_router/__init__.py`` (would load plugin.py
-# → health.py → antigravity_health.py → qwen_health.py) and load only
-# the cli_handlers module.
+# Module loading — bypass ``dc_router/__init__.py`` (would load the plugin
+# runtime) and load only the cli_handlers module.
 # ─────────────────────────────────────────────────────────────────────────
 
 _DC_AGENT_ROOT = Path(__file__).resolve().parents[2]
@@ -179,10 +178,12 @@ def _make_decision(
     *,
     provider_id: str = "cli/antigravity/gemini-3.5-flash",
     intent: str = "casual",
+    metadata: dict | None = None,
 ) -> MagicMock:
     decision = MagicMock(name="decision")
     decision.provider_id = provider_id
     decision.intent = intent
+    decision.metadata = metadata or {}
     return decision
 
 
@@ -199,10 +200,10 @@ class TestParseCliProvider:
     its return value. A regression here means wrong backend dispatch.
     """
 
-    def test_antigravity_flash_strips_backend_prefix(self, cli_handlers) -> None:
-        """``cli/antigravity/<model>`` → ('antigravity', '<model>', None)"""
+    def test_legacy_cli_provider_is_disabled_backend(self, cli_handlers) -> None:
+        """``cli/antigravity/<model>`` is parsed as disabled, not executable."""
         assert cli_handlers.parse_cli_provider("cli/antigravity/gemini-3.5-flash") == (
-            "antigravity",
+            cli_handlers.DISABLED_LEGACY_CLI_BACKEND,
             "gemini-3.5-flash",
             None,
         )
@@ -306,14 +307,14 @@ class TestParseCliProvider:
         """空字符串 → ('', '', None) (不抛异常, 这是 v1.0 fallback 的边界)."""
         assert cli_handlers.parse_cli_provider("") == ("", "", None)
 
-    def test_antigravity_nested_path_strips_only_one_prefix(self, cli_handlers) -> None:
+    def test_legacy_cli_nested_path_strips_only_one_prefix(self, cli_handlers) -> None:
         """``cli/antigravity/`` 前缀只剥一层.
 
         这是 v1 旧 routing_adapter 的写法: ``antigravity/gemini-3.5-flash``
         的 model 段可能本身再含 ``/``? — 当前不会, 但保险起见剥前缀不递归.
         """
         assert cli_handlers.parse_cli_provider("cli/antigravity/gemini-3.5-flash") == (
-            "antigravity",
+            cli_handlers.DISABLED_LEGACY_CLI_BACKEND,
             "gemini-3.5-flash",
             None,
         )
@@ -367,7 +368,7 @@ class TestIsCliProvider:
 class TestBuildCliPrompt:
     """build_cli_prompt is the *only* place where prompts for CLI backends
     are constructed. A regression here = wrong model behaviour because
-    Antigravity / Codex / Grok never see the original AstrBot pipeline.
+    Codex / Grok never see the original AstrBot pipeline.
     """
 
     def test_casual_intent_uses_assistant_voice(self, cli_handlers) -> None:
@@ -477,12 +478,12 @@ class TestBuildCliPrompt:
 class TestDispatchCliProviderBackend:
     """Verify the backend→handler dispatch table is intact.
 
-    Patches the three private ``_start_*`` helpers so we exercise only
+    Patches executable private ``_start_*`` helpers so we exercise only
     the dispatcher itself, not the full CLI runner / QuotaGate chain.
     """
 
     @pytest.mark.asyncio
-    async def test_antigravity_backend_calls_start_antigravity(
+    async def test_legacy_cli_backend_is_disabled_without_starting_cli(
         self, cli_handlers
     ) -> None:
         event = _make_event()
@@ -490,9 +491,6 @@ class TestDispatchCliProviderBackend:
             provider_id="cli/antigravity/gemini-3.5-flash", intent="casual"
         )
         with (
-            patch.object(
-                cli_handlers, "_start_antigravity", new=AsyncMock(return_value=True)
-            ) as mock_anti,
             patch.object(
                 cli_handlers, "_start_codex", new=AsyncMock(return_value=False)
             ) as mock_codex,
@@ -504,9 +502,16 @@ class TestDispatchCliProviderBackend:
                 MagicMock(), event, decision
             )
         assert result is True
-        mock_anti.assert_awaited_once()
         mock_codex.assert_not_awaited()
         mock_grok.assert_not_awaited()
+        event.should_call_llm.assert_called_once_with(False)
+        event.set_extra.assert_called_with(
+            "dc_router_disabled_legacy_cli",
+            {
+                "provider_id": "cli/antigravity/gemini-3.5-flash",
+                "reason": cli_handlers.DISABLED_LEGACY_CLI_REASON,
+            },
+        )
 
     @pytest.mark.asyncio
     async def test_codex_backend_calls_start_codex(self, cli_handlers) -> None:
@@ -515,9 +520,6 @@ class TestDispatchCliProviderBackend:
             provider_id="cli/codex/gpt-5.5-medium", intent="work_preflight"
         )
         with (
-            patch.object(
-                cli_handlers, "_start_antigravity", new=AsyncMock(return_value=False)
-            ),
             patch.object(
                 cli_handlers, "_start_codex", new=AsyncMock(return_value=True)
             ) as mock_codex,
@@ -537,9 +539,6 @@ class TestDispatchCliProviderBackend:
         decision = _make_decision(provider_id="cli/grok-build", intent="public_opinion")
         with (
             patch.object(
-                cli_handlers, "_start_antigravity", new=AsyncMock(return_value=False)
-            ),
-            patch.object(
                 cli_handlers, "_start_codex", new=AsyncMock(return_value=False)
             ),
             patch.object(
@@ -557,7 +556,7 @@ class TestDispatchCliProviderBackend:
         self, cli_handlers
     ) -> None:
         """``cli/claude-...`` 是预留但当前未实现的 backend — 必须返回 False,
-        不要让它误派到 antigravity/codex/grok.
+        不要让它误派到 codex/grok.
 
         当前 ``_parse_cli_provider`` 能 parse 出 backend='claude', 但
         ``dispatch_cli_provider`` 没有 'claude' 分支 → 返回 False → 让
@@ -568,9 +567,6 @@ class TestDispatchCliProviderBackend:
             provider_id="cli/claude-opus-4-7-medium", intent="deep_insight"
         )
         with (
-            patch.object(
-                cli_handlers, "_start_antigravity", new=AsyncMock()
-            ) as mock_anti,
             patch.object(cli_handlers, "_start_codex", new=AsyncMock()) as mock_codex,
             patch.object(cli_handlers, "_start_grok", new=AsyncMock()) as mock_grok,
         ):
@@ -578,7 +574,6 @@ class TestDispatchCliProviderBackend:
                 MagicMock(), event, decision
             )
         assert result is False
-        mock_anti.assert_not_awaited()
         mock_codex.assert_not_awaited()
         mock_grok.assert_not_awaited()
 
@@ -592,9 +587,6 @@ class TestDispatchCliProviderBackend:
             provider_id="aihubmix/claude-opus-4-7", intent="deep_insight"
         )
         with (
-            patch.object(
-                cli_handlers, "_start_antigravity", new=AsyncMock()
-            ) as mock_anti,
             patch.object(cli_handlers, "_start_codex", new=AsyncMock()) as mock_codex,
             patch.object(cli_handlers, "_start_grok", new=AsyncMock()) as mock_grok,
         ):
@@ -602,7 +594,6 @@ class TestDispatchCliProviderBackend:
                 MagicMock(), event, decision
             )
         assert result is False
-        mock_anti.assert_not_awaited()
         mock_codex.assert_not_awaited()
         mock_grok.assert_not_awaited()
 
@@ -615,35 +606,21 @@ class TestDispatchCliProviderBackend:
         decision = MagicMock()
         decision.provider_id = None
         decision.intent = "casual"
-        with patch.object(
-            cli_handlers, "_start_antigravity", new=AsyncMock()
-        ) as mock_anti:
-            result = await cli_handlers.dispatch_cli_provider(
-                MagicMock(), event, decision
-            )
+        result = await cli_handlers.dispatch_cli_provider(MagicMock(), event, decision)
         assert result is False
-        mock_anti.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_backend_failure_propagates(self, cli_handlers) -> None:
-        """_start_antigravity 返回 False 时 dispatch_cli_provider 也返回 False.
-
-        这是 caller 走 v1.0 fallback 的信号 — 一旦这里吞掉 False 改成
-        强制 True, 就把整个 fallback 链搞坏了.
-        """
+    async def test_disabled_legacy_cli_does_not_call_backend(
+        self, cli_handlers
+    ) -> None:
+        """Legacy CLI provider ids are terminally disabled before backend start."""
         event = _make_event()
         decision = _make_decision(
             provider_id="cli/antigravity/gemini-3.5-flash", intent="casual"
         )
-        with patch.object(
-            cli_handlers,
-            "_start_antigravity",
-            new=AsyncMock(return_value=False),
-        ):
-            result = await cli_handlers.dispatch_cli_provider(
-                MagicMock(), event, decision
-            )
-        assert result is False
+        result = await cli_handlers.dispatch_cli_provider(MagicMock(), event, decision)
+        assert result is True
+        event.should_call_llm.assert_called_once_with(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -661,35 +638,21 @@ class TestCliHandlersConstants:
         """CLI provider ID 必须是 ``cli/<backend>/...`` 形式."""
         assert cli_handlers.CLI_PROVIDER_PREFIX == "cli/"
 
-    def test_antigravity_provider_id_has_cli_prefix(self, cli_handlers) -> None:
-        """ANTIGRAVITY_PROVIDER_ID 必须能被 parse_cli_provider 认成 antigravity."""
+    def test_legacy_cli_provider_id_is_disabled_backend(self, cli_handlers) -> None:
+        """DISABLED_LEGACY_CLI_PROVIDER_ID is recognized only as a disabled legacy id."""
         backend, _, _ = cli_handlers.parse_cli_provider(
-            cli_handlers.ANTIGRAVITY_PROVIDER_ID
+            cli_handlers.DISABLED_LEGACY_CLI_PROVIDER_ID
         )
-        assert backend == "antigravity", (
-            f"ANTIGRAVITY_PROVIDER_ID={cli_handlers.ANTIGRAVITY_PROVIDER_ID!r} "
-            f"parsed to backend={backend!r} (expected 'antigravity')"
-        )
-
-    def test_antigravity_fallback_is_not_cli(self, cli_handlers) -> None:
-        """ANTIGRAVITY_FALLBACK_PROVIDER_ID 必须是 aihubmix 等非 CLI provider,
-        否则 fallback 会自我递归陷入 QuotaGate."""
-        assert not cli_handlers.is_cli_provider(
-            cli_handlers.ANTIGRAVITY_FALLBACK_PROVIDER_ID
+        assert backend == cli_handlers.DISABLED_LEGACY_CLI_BACKEND, (
+            f"DISABLED_LEGACY_CLI_PROVIDER_ID={cli_handlers.DISABLED_LEGACY_CLI_PROVIDER_ID!r} "
+            f"parsed to backend={backend!r} "
+            f"(expected {cli_handlers.DISABLED_LEGACY_CLI_BACKEND!r})"
         )
 
     def test_grok_fallback_is_not_cli(self, cli_handlers) -> None:
         assert not cli_handlers.is_cli_provider(
             cli_handlers.GROK_BUILD_FALLBACK_PROVIDER_ID
         )
-
-    def test_antigravity_resource_key_is_antigravity_prefixed(
-        self, cli_handlers
-    ) -> None:
-        """resource key 是 QuotaGate 唯一标识, 不能跟其它 resource 撞."""
-        key = cli_handlers.ANTIGRAVITY_RESOURCE_KEY
-        assert "antigravity" in key
-        assert key != "default"  # 不能用 default 占位
 
     def test_all_exports_are_present(self, cli_handlers) -> None:
         """__all__ 里所有名字都能从模块取到 — 防 PR 漏 import."""
@@ -762,3 +725,147 @@ class TestQueueRecoveryLifecycle:
         # (无法直接看 interval 参数, 但行为是 sleep 60s, 跟 default 一致)
         assert cli_handlers._DEFAULT_RECOVERY_INTERVAL == 60
         cli_handlers.stop_queue_recovery()
+
+
+class TestQueueRecoveryFiltering:
+    @pytest.mark.asyncio
+    async def test_old_legacy_cli_queue_card_is_disabled_without_provider_switch(
+        self, cli_handlers
+    ) -> None:
+        event = _make_event(
+            text=(
+                '__card_action__:{"value":{"source":"antigravity_queue_card",'
+                '"action":"use_fallback","job_id":"legacy-cli-old-1"}}'
+            )
+        )
+        context = MagicMock()
+        context.provider_manager.set_provider = AsyncMock()
+
+        handled = await cli_handlers.handle_disabled_legacy_cli_card_action(
+            context, event
+        )
+
+        assert handled is True
+        context.provider_manager.set_provider.assert_not_awaited()
+        event.should_call_llm.assert_called_once_with(False)
+        result = event.set_result.call_args.args[0]
+        message = getattr(result, "_message", "") or result.chain[0].text
+        assert "旧本地 CLI 入口已经关闭" in message
+        event.set_extra.assert_called_with(
+            "dc_router_disabled_legacy_cli_card_job_id",
+            "legacy-cli-old-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_recovery_cancels_source_image_edit_pending_job(
+        self, cli_handlers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pending = types.SimpleNamespace(
+            job_id="job_cutout",
+            enqueue_at=1.0,
+            payload={
+                "provider_id": cli_handlers.DISABLED_LEGACY_CLI_PROVIDER_ID,
+                "backend": "antigravity",
+                "original_prompt": "帮我把这张图片去掉背景，人物抠出来",
+            },
+        )
+        gate = MagicMock()
+        gate.list_pending_jobs = AsyncMock(return_value=[pending])
+        gate.cancel_pending_job = AsyncMock(return_value=True)
+        gate.start_pending_job = AsyncMock(return_value=None)
+        monkeypatch.setattr(cli_handlers.time, "time", lambda: 2.0)
+
+        resumed = await cli_handlers._resume_pending_cli_jobs(MagicMock(), gate)
+
+        assert resumed == 0
+        gate.cancel_pending_job.assert_awaited_once_with(
+            "job_cutout",
+            reason="source image edit must not be recovered as CLI queue",
+        )
+        gate.start_pending_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recovery_cancels_expired_pending_job(
+        self, cli_handlers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pending = types.SimpleNamespace(
+            job_id="job_old",
+            enqueue_at=100.0,
+            payload={
+                "provider_id": "cli/codex/gpt-5.4",
+                "backend": "codex",
+                "original_prompt": "帮我写一份品牌分析",
+            },
+        )
+        gate = MagicMock()
+        gate.list_pending_jobs = AsyncMock(return_value=[pending])
+        gate.cancel_pending_job = AsyncMock(return_value=True)
+        gate.start_pending_job = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            cli_handlers.time,
+            "time",
+            lambda: 100.0 + cli_handlers.PENDING_CLI_RECOVERY_TTL_SECONDS + 1,
+        )
+
+        resumed = await cli_handlers._resume_pending_cli_jobs(MagicMock(), gate)
+
+        assert resumed == 0
+        gate.cancel_pending_job.assert_awaited_once_with(
+            "job_old",
+            reason="pending CLI recovery TTL expired",
+        )
+        gate.start_pending_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recovery_cancels_retired_legacy_cli_pending_job(
+        self, cli_handlers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pending = types.SimpleNamespace(
+            job_id="job_legacy_cli_old",
+            enqueue_at=100.0,
+            payload={
+                "provider_id": cli_handlers.DISABLED_LEGACY_CLI_PROVIDER_ID,
+                "backend": "antigravity",
+                "original_prompt": "帮我写一份品牌分析",
+            },
+        )
+        gate = MagicMock()
+        gate.list_pending_jobs = AsyncMock(return_value=[pending])
+        gate.cancel_pending_job = AsyncMock(return_value=True)
+        gate.start_pending_job = AsyncMock(return_value=None)
+        monkeypatch.setattr(cli_handlers.time, "time", lambda: 120.0)
+
+        resumed = await cli_handlers._resume_pending_cli_jobs(MagicMock(), gate)
+
+        assert resumed == 0
+        gate.cancel_pending_job.assert_awaited_once_with(
+            "job_legacy_cli_old",
+            reason=cli_handlers.DISABLED_LEGACY_CLI_REASON,
+        )
+        gate.start_pending_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recovery_starts_fresh_pending_job(
+        self, cli_handlers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        pending = types.SimpleNamespace(
+            job_id="job_fresh",
+            enqueue_at=100.0,
+            payload={
+                "provider_id": "cli/codex/gpt-5.4",
+                "backend": "codex",
+                "original_prompt": "帮我写一份品牌分析",
+            },
+        )
+        started = types.SimpleNamespace(job_id="job_fresh")
+        gate = MagicMock()
+        gate.list_pending_jobs = AsyncMock(return_value=[pending])
+        gate.cancel_pending_job = AsyncMock(return_value=True)
+        gate.start_pending_job = AsyncMock(return_value=started)
+        monkeypatch.setattr(cli_handlers.time, "time", lambda: 120.0)
+
+        resumed = await cli_handlers._resume_pending_cli_jobs(MagicMock(), gate)
+
+        assert resumed == 1
+        gate.cancel_pending_job.assert_not_awaited()
+        gate.start_pending_job.assert_awaited_once_with("job_fresh")

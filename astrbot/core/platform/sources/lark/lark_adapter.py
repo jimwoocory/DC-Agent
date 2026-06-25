@@ -136,6 +136,8 @@ class LarkPlatformAdapter(Platform):
         ]
         self.polling_chat_store_path = self._default_polling_chat_store_path()
         self._load_persisted_polling_chat_ids()
+        if self.polling_fallback_enabled and self.polling_fallback_chat_ids:
+            self._persist_polling_chat_ids()
         self.polling_fallback_interval = max(
             3,
             int(platform_config.get("lark_polling_fallback_interval_sec", 8) or 8),
@@ -155,6 +157,27 @@ class LarkPlatformAdapter(Platform):
         self._polling_next_start_time = self._initial_polling_start_time(
             has_persisted_seen_messages=bool(self.message_id_timestamps)
         )
+        self._polling_next_start_times: dict[str, int] = dict.fromkeys(
+            self.polling_fallback_chat_ids,
+            self._polling_next_start_time,
+        )
+        self.multimodal_merge_window_seconds = max(
+            0.0,
+            float(
+                platform_config.get(
+                    "lark_multimodal_merge_window_seconds",
+                    platform_config.get("lark_image_text_merge_window_seconds", 5),
+                )
+                or 5
+            ),
+        )
+        self.file_multimodal_merge_window_seconds = max(
+            self.multimodal_merge_window_seconds,
+            float(platform_config.get("lark_file_text_merge_window_seconds", 60) or 60),
+        )
+        self._pending_multimodal_messages: dict[
+            str, tuple[AstrBotMessage, asyncio.Task, float]
+        ] = {}
 
     def _install_socket_observers(self) -> None:
         if self.connection_mode == "webhook":
@@ -633,11 +656,7 @@ class LarkPlatformAdapter(Platform):
             chat_ids = self.polling_fallback_chat_ids
         for chat_id in loaded_chat_ids:
             normalized = str(chat_id or "").strip()
-            if (
-                normalized
-                and normalized.startswith("oc_")
-                and normalized not in chat_ids
-            ):
+            if normalized and normalized not in chat_ids:
                 chat_ids.append(normalized)
 
     def _persist_polling_chat_ids(self) -> None:
@@ -760,11 +779,21 @@ class LarkPlatformAdapter(Platform):
         if not chat_id or not getattr(self, "polling_fallback_enabled", False):
             return False
 
+        next_start_times = getattr(self, "_polling_next_start_times", None)
+        if next_start_times is None:
+            self._polling_next_start_times = {}
+            next_start_times = self._polling_next_start_times
+        next_start_times.setdefault(
+            chat_id,
+            getattr(self, "_polling_next_start_time", int(time.time())),
+        )
+
         chat_ids = getattr(self, "polling_fallback_chat_ids", None)
         if chat_ids is None:
             self.polling_fallback_chat_ids = []
             chat_ids = self.polling_fallback_chat_ids
         if chat_id in chat_ids:
+            self._persist_polling_chat_ids()
             return False
 
         chat_ids.append(chat_id)
@@ -835,7 +864,19 @@ class LarkPlatformAdapter(Platform):
             return
 
         end_time = int(time.time())
-        start_time = max(0, self._polling_next_start_time)
+        next_start_times = getattr(self, "_polling_next_start_times", None)
+        if next_start_times is None:
+            self._polling_next_start_times = {}
+            next_start_times = self._polling_next_start_times
+        start_time = max(
+            0,
+            int(
+                next_start_times.get(
+                    chat_id,
+                    getattr(self, "_polling_next_start_time", end_time),
+                )
+            ),
+        )
         page_token = ""
         fetched_pages = 0
         max_create_time = start_time
@@ -891,7 +932,8 @@ class LarkPlatformAdapter(Platform):
             if not has_more or not page_token or fetched_pages >= 5:
                 break
 
-        self._polling_next_start_time = max(start_time, max_create_time - 5)
+        next_start_times[chat_id] = max(start_time, max_create_time - 5)
+        self._polling_next_start_time = min(next_start_times.values())
 
     async def _polling_fallback_loop(self) -> None:
         logger.info(
@@ -1061,6 +1103,11 @@ class LarkPlatformAdapter(Platform):
         await self.handle_msg(abm)
 
     async def handle_msg(self, abm: AstrBotMessage) -> None:
+        if await self._maybe_buffer_multimodal_message(abm):
+            return
+        await self._enqueue_msg(abm)
+
+    async def _enqueue_msg(self, abm: AstrBotMessage) -> None:
         event = LarkMessageEvent(
             message_str=abm.message_str,
             message_obj=abm,
@@ -1083,6 +1130,116 @@ class LarkPlatformAdapter(Platform):
             str(abm.session_id)[:24],
             queue_size,
         )
+
+    @staticmethod
+    def _is_mergeable_multimodal_fragment(abm: AstrBotMessage) -> bool:
+        message_str = str(getattr(abm, "message_str", "") or "")
+        if message_str.startswith("__card_action__:"):
+            return False
+
+        components = list(getattr(abm, "message", []) or [])
+        if not components:
+            return False
+
+        return all(
+            isinstance(comp, (Comp.At, Comp.File, Comp.Image, Comp.Plain, Comp.Reply))
+            for comp in components
+        )
+
+    def _pending_multimodal_key(self, abm: AstrBotMessage) -> str:
+        message_type = (
+            abm.type.name
+            if hasattr(abm.type, "name")
+            else str(getattr(abm, "type", ""))
+        )
+        sender = getattr(getattr(abm, "sender", None), "user_id", "")
+        return f"{message_type}:{getattr(abm, 'session_id', '')}:{sender}"
+
+    @staticmethod
+    def _has_file_component(abm: AstrBotMessage | None) -> bool:
+        if abm is None:
+            return False
+        return any(isinstance(comp, Comp.File) for comp in (abm.message or []))
+
+    def _merge_window_for_fragments(
+        self,
+        current: AstrBotMessage,
+        previous: AstrBotMessage | None = None,
+    ) -> float:
+        base_window = float(
+            getattr(
+                self,
+                "multimodal_merge_window_seconds",
+                getattr(self, "image_text_merge_window_seconds", 0),
+            )
+            or 0
+        )
+        if self._has_file_component(current) or self._has_file_component(previous):
+            return max(
+                base_window,
+                float(
+                    getattr(
+                        self,
+                        "file_multimodal_merge_window_seconds",
+                        getattr(self, "file_text_merge_window_seconds", 60),
+                    )
+                    or 60
+                ),
+            )
+        return base_window
+
+    async def _maybe_buffer_multimodal_message(self, abm: AstrBotMessage) -> bool:
+        window = self._merge_window_for_fragments(abm)
+        pending_messages = getattr(self, "_pending_multimodal_messages", None)
+        if pending_messages is None:
+            self._pending_multimodal_messages = {}
+            pending_messages = self._pending_multimodal_messages
+
+        if window <= 0 or not self._is_mergeable_multimodal_fragment(abm):
+            return False
+
+        pending_key = self._pending_multimodal_key(abm)
+        previous = pending_messages.pop(pending_key, None)
+        if previous:
+            previous_abm, previous_task, _previous_window = previous
+            previous_task.cancel()
+            window = self._merge_window_for_fragments(abm, previous_abm)
+            abm.message = [*previous_abm.message, *abm.message]
+            abm.message_str = self._build_message_str_from_components(abm.message)
+            logger.info(
+                "[Lark] merged adjacent multimodal fragments platform=%s session=%s",
+                self.meta().id,
+                str(getattr(abm, "session_id", ""))[:24],
+            )
+
+        task = asyncio.create_task(
+            self._flush_pending_multimodal_message(pending_key, window)
+        )
+        pending_messages[pending_key] = (abm, task, window)
+        logger.info(
+            "[Lark] buffered multimodal fragment platform=%s session=%s window=%.1fs",
+            self.meta().id,
+            str(getattr(abm, "session_id", ""))[:24],
+            window,
+        )
+        return True
+
+    async def _flush_pending_multimodal_message(
+        self,
+        pending_key: str,
+        window: float,
+    ) -> None:
+        try:
+            await asyncio.sleep(window)
+        except asyncio.CancelledError:
+            return
+
+        pending_messages = getattr(self, "_pending_multimodal_messages", {})
+        pending = pending_messages.pop(pending_key, None)
+        if not pending:
+            return
+        abm, _task, _window = pending
+        await self._enqueue_msg(abm)
 
     async def convert_card_action(self, event) -> None:
         """卡片按钮回调 → 转 AstrBotMessage 投到事件队列。
@@ -1181,21 +1338,6 @@ class LarkPlatformAdapter(Platform):
                 logger.warning("[Lark] p2p chat entered 事件找不到 operator open_id")
                 return
 
-            abm = AstrBotMessage()
-            abm.timestamp = int(time.time())
-            abm.message = []
-            abm.type = MessageType.FRIEND_MESSAGE
-            abm.self_id = self.bot_name
-            abm.message_str = "__bot_p2p_chat_entered__"
-            abm.message_id = (
-                getattr(data, "last_message_id", None)
-                or f"p2p_entered_{int(time.time() * 1000)}_{open_id[:8]}"
-            )
-            abm.raw_message = data
-            abm.is_bot_p2p_chat_entered = True
-            abm.sender = MessageMember(user_id=open_id, nickname=open_id[:8])
-            abm.session_id = open_id
-
             logger.info(
                 "[Lark.P2PEntered] open_id=%s chat_id=%s",
                 open_id[:12],
@@ -1205,7 +1347,6 @@ class LarkPlatformAdapter(Platform):
                 str(getattr(data, "chat_id", "") or ""),
                 reason="p2p_entered",
             )
-            await self.handle_msg(abm)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[Lark] convert_p2p_chat_entered 异常：%s", exc)
 

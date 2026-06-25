@@ -2,14 +2,14 @@
 # 巅池-技术 夜间任务（cron 01:00 北京时间触发 = 美西 PT 10:00 PDT）
 #
 # 两阶段：
-#   阶段 A：Antigravity CLI (`agy -p`) 抓硅谷四大 AI 当日动态 → raw_news.md
-#   阶段 B：Antigravity CLI (`agy -p`) 读 raw_news.md，做分析 + 学习 + 巡检 → report.md
+#   阶段 A：aihubmix Gemini grounding 抓硅谷四大 AI 当日动态 → raw_news.md
+#   阶段 B：aihubmix 读 raw_news.md，做分析 + 学习 + 巡检 → report.md
 #
-# 失败不阻断：阶段 A 失败也跑阶段 B（让 agy 知道"今天没新闻"也能学习+巡检）
+# 失败不阻断：阶段 A 失败也跑阶段 B（让分析阶段知道"今天没新闻"也能学习+巡检）
 #
 # 不做的事：
 #   - 不发飞书（那是 09:30 reporter.py 的事）
-#   - 不改任何源代码（prompt 里硬约束 agy 只读）
+#   - 不改任何源代码（prompt 里硬约束只读）
 
 set -uo pipefail
 
@@ -42,7 +42,7 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [night] $*" | tee -a "$LOG"; }
 #         进程被目标进程替换，alarm 信号一并消失，timeout 形同虚设
 #         （历史教训：2026-05-27 Claude 卡 7h23m 才被外部 SIGALRM 偶然杀掉）。
 #         现在 perl 父进程保留，fork 子进程跑命令，超时由父进程负责 kill。
-# 注意 3：子进程开新 process group（setpgrp），agy 这类会 spawn 子孙
+# 注意 3：子进程开新 process group（setpgrp），模型任务可能 spawn 子孙
 #         的命令，TERM 整组才不会留孤儿。
 # 注意 4：退出码遵循 GNU timeout 约定——超时返 124，否则透传子进程退出码。
 #
@@ -75,40 +75,40 @@ with_timeout() {
 
 log "=== 夜间任务启动 $DATE ==="
 
-# ─────────── 阶段 A：searcher.py（agy 主 / Tavily+aihubmix 兜底）───────────
-log "阶段 A：searcher.py 抓硅谷 AI 资讯（agy 主通道 + Tavily 兜底）"
+# ─────────── 阶段 A：searcher.py（aihubmix 主路径）───────────
+log "阶段 A：searcher.py 抓硅谷 AI 资讯（aihubmix grounding 主路径）"
 
-AGY_START="$(date +%s)"
+STAGE_A_START="$(date +%s)"
 
-# 整体 8 分钟硬上限：agy 240s + 兜底 Tavily*4 + aihubmix ≈ 留出余量
+# 整体 8 分钟硬上限：grounding + OpenAI 兼容 ≈ 留出余量
 if with_timeout 480 "$VENV_PY" "$PLUGIN_DIR/searcher.py" --date "$DATE" --out "$DAY_DIR/raw_news.md" \
         >> "$DAY_DIR/searcher_stdout.log" 2>&1; then
-    AGY_EXIT=0
+    STAGE_A_EXIT=0
 else
-    AGY_EXIT=$?
+    STAGE_A_EXIT=$?
 fi
 
-AGY_DUR=$(( $(date +%s) - AGY_START ))
-log "阶段 A 结束 exit=$AGY_EXIT 耗时 ${AGY_DUR}s（0=agy主通道成功 / 1=兜底救场 / 2=全失败占位）"
+STAGE_A_DUR=$(( $(date +%s) - STAGE_A_START ))
+log "阶段 A 结束 exit=$STAGE_A_EXIT 耗时 ${STAGE_A_DUR}s（0=grounding 成功 / 1=兜底救场 / 2=全失败占位）"
 
 # searcher 始终会写 raw_news.md（哪怕是占位），所以不需要再写兜底文件
 if [ ! -s "$DAY_DIR/raw_news.md" ]; then
     log "⚠️  searcher.py 异常退出且未写文件，写占位"
-    echo "# 硅谷 AI 资讯 $DATE\n\n⚠️ searcher.py 异常（exit=$AGY_EXIT）。详见 searcher_stdout.log。" > "$DAY_DIR/raw_news.md"
+    echo "# 硅谷 AI 资讯 $DATE\n\n⚠️ searcher.py 异常（exit=$STAGE_A_EXIT）。详见 searcher_stdout.log。" > "$DAY_DIR/raw_news.md"
 fi
 
-# ─────────── 阶段 B：agy 分析 + 学习 + 巡检 ───────────
-log "阶段 B：agy 分析 + 学习 + 巡检（max_attempts=$ANALYSIS_MAX_ATTEMPTS hard_timeout=${ANALYSIS_HARD_TIMEOUT_SECONDS}s runner_timeout=${ANALYSIS_RUNNER_TIMEOUT_SECONDS}s）"
+# ─────────── 阶段 B：aihubmix 分析 + 学习 + 巡检 ───────────
+log "阶段 B：aihubmix 分析 + 学习 + 巡检（max_attempts=$ANALYSIS_MAX_ATTEMPTS hard_timeout=${ANALYSIS_HARD_TIMEOUT_SECONDS}s runner_timeout=${ANALYSIS_RUNNER_TIMEOUT_SECONDS}s）"
 
 ANALYSIS_START="$(date +%s)"
 ANALYSIS_EXIT=1
 ANALYSIS_ATTEMPTS_JSON=""
 ANALYSIS_ATTEMPT_COUNT=0
 
-# 在 DC_ROOT 下跑，agy 能读到 git / data / 源码
+# 在 DC_ROOT 下跑，便于读取 git / data / 源码
 cd "$DC_ROOT"
 
-# analyzer.py 负责读取 raw_news.md、调用 agy_runner、写 report.md 和 learning_log.json。
+# analyzer.py 负责读取 raw_news.md、写 report.md 和 learning_log.json。
 # 阶段 B 是无人值守高风险段：历史上 2026-05-27 曾卡 7h+ 后降级。
 # 因此这里做两层保护：
 #   1. 单次硬超时，超时后杀整个进程组。
@@ -167,11 +167,11 @@ log "阶段 B 结束 exit=$ANALYSIS_EXIT 耗时 ${ANALYSIS_DUR}s"
 cat > "$DAY_DIR/run.json" <<EOF
 {
   "date": "$DATE",
-  "started_at": "$(date -u -r $AGY_START +%Y-%m-%dT%H:%M:%SZ)",
+  "started_at": "$(date -u -r $STAGE_A_START +%Y-%m-%dT%H:%M:%SZ)",
   "ended_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "agy": { "exit": $AGY_EXIT, "duration_seconds": $AGY_DUR },
+  "stage_a": { "exit": $STAGE_A_EXIT, "duration_seconds": $STAGE_A_DUR },
   "analysis": {
-    "provider": "agy",
+    "provider": "aihubmix",
     "exit": $ANALYSIS_EXIT,
     "duration_seconds": $ANALYSIS_DUR,
     "max_attempts": $ANALYSIS_MAX_ATTEMPTS,

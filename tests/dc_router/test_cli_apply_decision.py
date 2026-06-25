@@ -49,7 +49,7 @@ async def test_apply_decision_dispatches_cli_provider_and_annotates_event() -> N
 
     event.set_extra.side_effect = _set_extra
     decision = types.SimpleNamespace(
-        provider_id="cli/antigravity/gemini-3.5-flash",
+        provider_id="cli/codex/gpt-5.5-medium",
         intent="simple_code",
         source="rules",
         reason="test cli path",
@@ -64,7 +64,7 @@ async def test_apply_decision_dispatches_cli_provider_and_annotates_event() -> N
 
     assert handled is True
     dispatch_cli.assert_awaited_once_with(context, event, decision)
-    assert extras["dc_router_provider"] == "cli/antigravity/gemini-3.5-flash"
+    assert extras["dc_router_provider"] == "cli/codex/gpt-5.5-medium"
     assert extras["dc_router_intent"] == "simple_code"
     assert extras["dc_router_source"] == "cli_rules"
     assert extras["dc_router_meta_route"] == "cli"

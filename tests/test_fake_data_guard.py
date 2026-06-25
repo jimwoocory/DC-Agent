@@ -52,10 +52,10 @@ def get_or_create_pet(user_id):
 
 
 def test_flags_fake_completion_near_card_wrapper_anchor(tmp_path: Path) -> None:
-    runtime_file = tmp_path / "data/plugins/employee_onboarding/main.py"
+    runtime_file = tmp_path / "data/plugins/employee_runtime/main.py"
     source = """
-async def show_onboarding_card(self, event):
-    card = build_onboarding_card("placeholder employee plan")
+async def show_runtime_card(self, event):
+    card = build_runtime_card("placeholder employee plan")
     await self._send_card(event, card)
 """
 
@@ -103,7 +103,7 @@ def test_ignores_test_docs_and_dashboard_placeholder_noise(tmp_path: Path) -> No
     paths = [
         tmp_path / "data/plugins/llm_router/tests/test_fixture.py",
         tmp_path / "data/plugins/llm_router/test/test_fixture.py",
-        tmp_path / "data/plugins/employee_onboarding/docs/example_runtime.py",
+        tmp_path / "data/plugins/employee_runtime/docs/example_runtime.py",
         tmp_path / "data/plugins/system_entries/pages/dashboard/placeholder.py",
     ]
     for path in paths:
@@ -138,10 +138,10 @@ def test_ignores_local_backup_runtime_files(tmp_path: Path) -> None:
 def test_scans_production_plugin_main_and_finds_fake_completion(
     tmp_path: Path,
 ) -> None:
-    production_file = tmp_path / "data/plugins/employee_onboarding/main.py"
+    production_file = tmp_path / "data/plugins/employee_runtime/main.py"
     production_file.parent.mkdir(parents=True, exist_ok=True)
     production_file.write_text(
-        "async def complete_onboarding(event):\n"
+        "async def complete_employee_task(event):\n"
         '    reply = "fake sample onboarding completion"\n'
         "    await event.send_card(reply)\n",
         encoding="utf-8",

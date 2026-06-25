@@ -33,6 +33,7 @@ from lark_oapi.api.im.v1 import (
     CreateMessageReactionRequestBody,
     CreateMessageRequest,
     CreateMessageRequestBody,
+    DeleteMessageRequest,
     Emoji,
     PatchMessageRequest,
     PatchMessageRequestBody,
@@ -79,6 +80,7 @@ class FeishuCardStreamer:
         # Finalized message ids use an insertion-ordered dict as a small
         # ordered set so FIFO eviction is straightforward.
         self._finalized_message_ids: dict[str, None] = {}
+        self._retract_tasks: set[asyncio.Task] = set()
 
     def _remember_finalized(self, message_id: str) -> None:
         """Remember a finalized message id with FIFO eviction."""
@@ -252,6 +254,76 @@ class FeishuCardStreamer:
             self._remember_finalized(message_id)
             # Release the stream reference after terminal state.
             self._streams.pop(message_id, None)
+
+    # ─────────────── 收回卡片 ───────────────
+
+    async def retract(self, message_id: str) -> bool:
+        """Delete a bot-sent card message from Feishu.
+
+        This is best-effort and intentionally independent from ``finalize``:
+        some cards are the final answer and must remain visible, while
+        transient task/progress cards can be deleted after their result is sent.
+        """
+        stream = self._streams.get(message_id)
+        if stream and stream.auto_update_task and not stream.auto_update_task.done():
+            stream.auto_update_task.cancel()
+            try:
+                await stream.auto_update_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if stream:
+            stream.finalized = True
+
+        try:
+            req = DeleteMessageRequest.builder().message_id(message_id).build()
+            resp = await self._client.im.v1.message.adelete(req)
+            if not resp.success():
+                logger.warning(
+                    "[streamer] 收回卡片失败 message_id=%s code=%s msg=%s",
+                    message_id,
+                    resp.code,
+                    resp.msg,
+                )
+                return False
+            self._streams.pop(message_id, None)
+            self._remember_finalized(message_id)
+            logger.info("[streamer] 卡片已收回 message_id=%s", message_id)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[streamer] retract 异常 message_id=%s: %s", message_id, exc)
+            return False
+
+    def schedule_retract(
+        self,
+        message_id: str,
+        delay_sec: float = 8.0,
+    ) -> asyncio.Task | None:
+        """Schedule best-effort card deletion after a short grace period."""
+        if not message_id:
+            return None
+        delay = max(0.0, float(delay_sec))
+
+        async def _delayed_retract() -> None:
+            try:
+                if delay:
+                    await asyncio.sleep(delay)
+                await self.retract(message_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "[streamer] delayed retract failed message_id=%s: %s",
+                    message_id,
+                    exc,
+                )
+
+        task = asyncio.create_task(
+            _delayed_retract(),
+            name=f"streamer-retract-{message_id[:8]}",
+        )
+        self._retract_tasks.add(task)
+        task.add_done_callback(self._retract_tasks.discard)
+        return task
 
     # ─────────────── 后台自动 update ───────────────
 

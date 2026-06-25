@@ -1,14 +1,8 @@
 """Circuit-breaker health state for the AIHubMix Qwen 3.6 Flash route.
 
-Mirror of ``antigravity_health`` but for the Qwen 3.6 Flash provider that powers
-casual chat.  When the model keeps returning empty responses we open the
-breaker and dc-router falls back to ``aihubmix/gemini-3.5-flash`` until the
-breaker auto-closes again (or an operator clears it via the dashboard).
-
-Defaults are intentionally tighter than antigravity because qwen-flash has
-historically returned empty without throwing an explicit error — we want a
-single empty result to already start the cooldown, and two empties in a row to
-fully open the breaker.
+When the model keeps returning empty responses we open the breaker and
+dc-router falls back to ``aihubmix/gemini-3.5-flash`` until the breaker
+auto-closes again, or an operator clears it via the dashboard.
 """
 
 from __future__ import annotations

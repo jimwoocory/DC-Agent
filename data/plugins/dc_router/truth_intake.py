@@ -17,6 +17,7 @@ from dc_engines.harness import HarnessTaskCreateRequest
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult
 from astrbot.api.message_components import File, Image, Record, Video
+from dc_router_core.department_requirements import match_department_requirement
 
 try:
     from .paths import data_path
@@ -60,8 +61,20 @@ SOURCE_MARKER_RE = re.compile(
 MEDIA_TASK_RE = re.compile(
     r"(海报|图片|图像|视频|动画|封面|视觉|物料|素材|生图|文生视频|图生视频)",
 )
+SOURCE_IMAGE_EDIT_BYPASS_RE = re.compile(
+    r"(去掉背景|去背景|去除背景|移除背景|删除背景|背景透明|透明底|"
+    r"扣掉背景|背景不要|抠图|抠出来|抠出|人物抠|人像抠|提取人物|"
+    r"保留人物|锁定人物|人物不能被修改|人物不要改|主体分离)",
+    re.IGNORECASE,
+)
 WRITING_TASK_RE = re.compile(r"(公告|邮件|文案|通知|话术|脚本|推文|公众号|介绍|汇报)")
 ANALYSIS_TASK_RE = re.compile(r"(分析|洞察|报告|复盘|策略|方案|调研|判断|评估)")
+PRIVATE_BUSINESS_SOURCE_RE = re.compile(
+    r"(内部|我们公司|咱们公司|客户|甲方|合同|报价|预算|财务|排期|进度|"
+    r"飞书|知识库|截图|文件|表格|图片|视频|素材|原文|私域|员工|老板|"
+    r"投放数据|转化漏斗|活动数据|销售数据|销量数据|门店数据)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -153,6 +166,8 @@ def _has_source_text(text: str) -> bool:
 def _needs_truth_evidence(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
+        return False
+    if SOURCE_IMAGE_EDIT_BYPASS_RE.search(stripped):
         return False
     if FICTION_OR_TEMPLATE_RE.search(stripped):
         return False
@@ -497,8 +512,8 @@ def _augment_event_with_source(
         original_text=original_text,
         task_id=task_id,
     )
-    merged = f"{original_text.strip()}\n\n{block}" if original_text.strip() else block
-    _replace_event_text(event, merged)
+    event.set_extra("dc_truth_source_context", block)
+    event.set_extra("dc_truth_original_text", original_text.strip())
     event.set_extra("dc_truth_intake_id", archive.intake_id)
     if task_id:
         event.set_extra("dc_truth_intake_task_id", task_id)
@@ -617,6 +632,27 @@ def _is_pure_meta_chitchat(text: str) -> bool:
     return any(k in t for k in meta)
 
 
+def _is_public_planning_research_request(text: str) -> bool:
+    """Let public market-research writing requests reach router web search.
+
+    Truth intake protects private/internal facts and supplied source materials.
+    A planning market-research report that explicitly asks for public/latest
+    information should be handled by dc_router search fidelity instead of
+    blocking the employee for Feishu materials first.
+    """
+    if PRIVATE_BUSINESS_SOURCE_RE.search(text):
+        return False
+    requirement = match_department_requirement(text)
+    if requirement is None:
+        return False
+    return (
+        requirement.metadata.get("department_workflow") == "planning_creative_fast"
+        and requirement.metadata.get("planning_writing_mode")
+        == "market_research_report"
+        and requirement.metadata.get("search_required") == "true"
+    )
+
+
 async def maybe_handle_truth_intake(
     context: Any,
     event: AstrMessageEvent,
@@ -638,6 +674,14 @@ async def maybe_handle_truth_intake(
     # Meta questions like "你现在是不是闲聊的状态？" should not trigger truth-intake
     # or inherit previous tasks; let daily_card_renderer handle as casual.
     if _is_pure_meta_chitchat(text):
+        return False
+
+    if _is_public_planning_research_request(text):
+        event.set_extra("dc_truth_intake_bypass", "public_planning_research")
+        return False
+
+    if SOURCE_IMAGE_EDIT_BYPASS_RE.search(text):
+        event.set_extra("dc_truth_intake_bypass", "source_image_edit")
         return False
 
     blocked_task = await _find_blocked_intake_task(context, event)

@@ -98,6 +98,55 @@ def test_pairing_policy_blocks_unknown_dm_and_approves(tmp_path: Path) -> None:
     assert approved.agent_id == "main"
 
 
+def test_default_chat_entry_allows_first_direct_message(tmp_path: Path) -> None:
+    state = FeishuChannelState(tmp_path / "state.json")
+    config = FeishuChannelConfig.from_dict({})
+    controller = FeishuChannelController(config, state)
+    peer = FeishuPeer(
+        kind="direct",
+        peer_id="ou_first_time_colleague",
+        sender_id="ou_first_time_colleague",
+        message_text="小助手你好",
+    )
+
+    decision = controller.decide(peer)
+    metadata = decision.metadata()
+
+    assert config.dm_policy == "open"
+    assert decision.allowed is True
+    assert decision.reason == "dm_allowed"
+    assert decision.stop_event is False
+    assert decision.reply_text == ""
+    assert state.is_approved("ou_first_time_colleague") is True
+    assert metadata["dc_chat_entry_allowed"] is True
+    assert metadata["dc_chat_entry_mode"] == "normal_chat"
+    assert metadata["dc_chat_entry_identity_status"] == "partial"
+    assert metadata["dc_chat_entry_fallback_policy"] == "normal_chat"
+
+
+def test_plugin_writes_chat_entry_metadata_for_unknown_direct_message(
+    tmp_path: Path,
+) -> None:
+    plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
+    plugin.project_root = tmp_path
+    plugin.config = FeishuChannelConfig.from_dict({})
+    plugin.state = FeishuChannelState(tmp_path / "state.json")
+    plugin.controller = FeishuChannelController(plugin.config, plugin.state)
+    event = FakeEvent(sender_id="ou_unknown_colleague", chat_id="oc_p2p_chat")
+
+    import asyncio
+
+    asyncio.run(plugin.on_message(event))
+
+    assert event.result is None
+    assert event.stopped is False
+    assert event.extras["feishu_channel_allowed"] is True
+    assert event.extras["dc_chat_entry_allowed"] is True
+    assert event.extras["dc_chat_entry_mode"] == "normal_chat"
+    assert event.extras["dc_chat_entry_identity_status"] == "partial"
+    assert event.extras["dc_chat_entry_fallback_policy"] == "normal_chat"
+
+
 def test_dynamic_dm_metadata_is_written_by_plugin(tmp_path: Path) -> None:
     plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
     plugin.config = FeishuChannelConfig.from_dict(
@@ -123,6 +172,64 @@ def test_dynamic_dm_metadata_is_written_by_plugin(tmp_path: Path) -> None:
     assert (
         event.extras["feishu_channel_workspace"] == "data/feishu_agents/feishu-ou_abc"
     )
+
+
+def test_open_dm_auto_approves_normal_colleague(tmp_path: Path) -> None:
+    state = FeishuChannelState(tmp_path / "state.json")
+    config = FeishuChannelConfig.from_dict({"dm_policy": "open"})
+    controller = FeishuChannelController(config, state)
+    peer = FeishuPeer(
+        kind="direct",
+        peer_id="ou_normal_colleague",
+        sender_id="ou_normal_colleague",
+    )
+
+    decision = controller.decide(peer)
+
+    assert decision.allowed is True
+    assert state.is_approved("ou_normal_colleague") is True
+    assert state.approved["ou_normal_colleague"]["source"] == "dm_open_auto"
+
+
+def test_plugin_auto_approves_employee_directory_on_initialize(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    with sqlite3.connect(data_dir / "employees.db") as conn:
+        conn.execute(
+            """
+            CREATE TABLE employees (
+                open_id TEXT PRIMARY KEY,
+                display_name TEXT DEFAULT '',
+                department TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO employees(open_id, display_name, department)
+            VALUES
+                ('ou_qin_chunsi', '覃春丝', '策略部'),
+                ('ou_caiting', '蔡挺', '数字化应用部')
+            """
+        )
+        conn.commit()
+
+    plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
+    plugin.context = SimpleNamespace()
+    plugin.project_root = tmp_path
+    plugin.config = FeishuChannelConfig.from_dict({"dm_policy": "open"})
+    plugin.state_path = tmp_path / "state.json"
+    plugin.state = FeishuChannelState(tmp_path / "state.json")
+    plugin.controller = FeishuChannelController(plugin.config, plugin.state)
+
+    import asyncio
+
+    asyncio.run(plugin.initialize())
+
+    assert plugin.state.is_approved("ou_qin_chunsi") is True
+    assert plugin.state.is_approved("ou_caiting") is True
+    assert plugin.state.approved["ou_qin_chunsi"]["source"] == "employee_directory"
+    assert plugin.state.approved["ou_qin_chunsi"]["display_name"] == "覃春丝"
 
 
 def test_lark_p2p_oc_chat_id_is_still_direct(tmp_path: Path) -> None:
@@ -262,6 +369,8 @@ def test_forged_card_action_is_blocked(tmp_path: Path) -> None:
 
     assert decision.allowed is False
     assert decision.reason == "forged_card_action"
+    assert decision.metadata()["dc_chat_entry_mode"] == "sensitive_action_candidate"
+    assert decision.metadata()["dc_chat_entry_fallback_policy"] == "fail_closed"
 
 
 def test_non_lark_event_is_ignored(tmp_path: Path) -> None:

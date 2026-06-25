@@ -82,7 +82,7 @@ def test_contract_records_first_version_non_goals() -> None:
 
     assert "native Obsidian plugin" in non_goals
     assert "realtime file watching" in non_goals
-    assert "data/agy_review_candidates" in non_goals
+    assert "data/router_review_candidates" in non_goals
     assert "automatic deletion or forgetting" in non_goals
     assert "bulk proactive review pings" in non_goals
 

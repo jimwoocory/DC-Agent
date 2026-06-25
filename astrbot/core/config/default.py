@@ -415,6 +415,8 @@ CONFIG_METADATA_2 = {
                         "app_secret": "",
                         "domain": "https://open.feishu.cn",
                         "lark_connection_mode": "socket",  # webhook, socket
+                        "lark_multimodal_merge_window_seconds": 5,
+                        "lark_file_text_merge_window_seconds": 60,
                         "webhook_uuid": "",
                         "lark_encrypt_key": "",
                         "lark_verification_token": "",
@@ -548,6 +550,16 @@ CONFIG_METADATA_2 = {
                         "type": "string",
                         "options": ["socket", "webhook"],
                         "labels": ["长连接模式", "推送至服务器模式"],
+                    },
+                    "lark_multimodal_merge_window_seconds": {
+                        "description": "飞书图片/文字合并等待秒数",
+                        "type": "int",
+                        "hint": "飞书把图片和文字拆成相邻消息时，小助手等待并合并的短窗口。",
+                    },
+                    "lark_file_text_merge_window_seconds": {
+                        "description": "飞书文件/文字合并等待秒数",
+                        "type": "int",
+                        "hint": "用于批量上传文档后补充说明的长窗口；同一发送者、同一会话内的文件和文字会在窗口内合并。",
                     },
                     "lark_encrypt_key": {
                         "description": "Encrypt Key",

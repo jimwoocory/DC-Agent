@@ -15,12 +15,12 @@ from dc_engines.card_system import (
 )
 from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
-    build_antigravity_queue_card,
     build_case_overview_card,
     build_casual_response_card,
     build_daily_response_card,
     build_deleted_skill_list_card,
     build_devops_status_card,
+    build_document_intake_card,
     build_employee_pending_card,
     build_error_card,
     build_kb_archive_card,
@@ -32,6 +32,7 @@ from dc_engines.feishu_card_streamer import (
     build_skill_detail_card,
     build_skill_list_card,
     build_skill_review_card,
+    build_source_image_edit_card,
     build_source_trace_card,
     build_task_reminder_card,
     build_truth_intake_received_card,
@@ -185,7 +186,7 @@ def test_card_asset_matrix_is_complete_and_readable():
     manifest = build_card_asset_manifest()
     matrix = format_card_asset_matrix(manifest)
 
-    assert "Card Asset Matrix: 45 cards" in matrix
+    assert "Card Asset Matrix: 44 cards" in matrix
     assert (
         "card_type | owner | builder | triggers | runtime_status | gateway_sites/runtime_refs | grey_push"
         in matrix
@@ -243,6 +244,24 @@ def test_casual_response_card_renders_user_quote_inside_card():
     assert body[2]["tag"] == "markdown"
     assert body[2]["content"] == "刚才模型返回了空内容，我已收到消息。请您再发一次。"
     assert body[2]["text_size"] == "normal"
+
+
+def test_casual_response_card_strips_internal_truth_context_from_quote():
+    card = build_casual_response_card(
+        content_md="已进入生图任务：GPT Image 2 主用。",
+        user_msg=(
+            '帮我生成一张图 <dc_truth_source intake_id="abc" task_id=task123>\n'
+            "原始需求：旧任务\n"
+            "员工补充/提供的真实资料：内部资料\n"
+            "</dc_truth_source>"
+        ),
+    )
+
+    joined = "\n".join(_markdown_contents(card))
+
+    assert "帮我生成一张图" in joined
+    assert "dc_truth_source" not in joined
+    assert "内部资料" not in joined
 
 
 def test_daily_response_card_centers_compact_markdown_tables():
@@ -379,47 +398,6 @@ def test_progress_card_keeps_default_hub_branch_for_non_memory_work():
     assert any(content.startswith("<font color='red'>Running") for content in contents)
 
 
-def test_antigravity_queue_card_uses_real_queue_fields_and_fallback_button():
-    card = build_antigravity_queue_card(
-        job_id="agy-job-1",
-        queue_position=3,
-        eta_text="约 1 分钟",
-        elapsed_sec=12,
-        original_prompt="你好",
-    )
-
-    assert card["header"]["title"]["content"] == "小助手排队中"
-    contents = "\n".join(_markdown_contents(card))
-    assert "**当前位置**：第 3 位" in contents
-    assert "**预计等待**：约 1 分钟" in contents
-    assert "**当前通道**：巅巅小助手" in contents
-    assert "OAuth" not in contents
-    assert "provider" not in contents
-    assert "AIHubMix" not in contents
-    button = _button_elements(card)[0]
-    assert button["text"]["content"] == "不想排队，使用池池小助手"
-    assert button["value"]["source"] == "antigravity_queue_card"
-    assert button["value"]["action"] == "use_fallback"
-    assert button["value"]["job_id"] == "agy-job-1"
-    assert button["value"]["fallback_provider_id"] == "aihubmix/gemini-3-flash-preview"
-
-
-def test_antigravity_queue_card_fallback_running_removes_button():
-    card = build_antigravity_queue_card(
-        job_id="agy-job-1",
-        queue_position=3,
-        eta_text="约 1 分钟",
-        status="fallback_running",
-    )
-
-    assert card["header"]["title"]["content"] == "池池小助手处理中"
-    assert card["header"]["template"] == "green"
-    contents = "\n".join(_markdown_contents(card))
-    assert "**当前通道**：池池小助手" in contents
-    assert "好的，我马上请池池小助手先帮您处理" in contents
-    assert _button_elements(card) == []
-
-
 def test_error_card_accepts_legacy_error_message_keyword():
     card = build_error_card(title="失败", error_message="legacy keyword")
     error_blocks = [
@@ -502,16 +480,19 @@ def test_start_waiting_card_for_event_uses_lark_chat_context():
     assert "Dreamina 即梦兜底生成中" in updated_contents
 
 
-def test_onboarding_department_card_uses_current_seven_function_departments():
+def test_onboarding_department_card_uses_current_ten_function_departments():
     card = build_onboarding_dept_card(welcome_name="新同事")
 
     buttons = _button_elements(card)
     assert [button["text"]["content"] for button in buttons] == [
         "总经办",
         "客户部",
-        "策划",
+        "策略部",
         "品宣部",
-        "执行运营",
+        "活动统筹部",
+        "设计部",
+        "影视制作部",
+        "AI应用部",
         "综合部",
         "财务部",
     ]
@@ -521,6 +502,9 @@ def test_onboarding_department_card_uses_current_seven_function_departments():
         "planning",
         "brand_publicity",
         "execution_ops",
+        "design_dept",
+        "film_production",
+        "ai_application",
         "general_affairs",
         "finance",
     ]
@@ -529,15 +513,22 @@ def test_onboarding_department_card_uses_current_seven_function_departments():
 def test_department_lessons_and_quiz_alias_legacy_codes_to_current_departments():
     client_name, client_body = get_dept_lesson_body("marketing")
     planning_name, planning_body = get_dept_lesson_body("strategy")
+    brand_name, brand_body = get_dept_lesson_body("brand_publicity")
     general_name, general_body = get_dept_lesson_body("general_affairs")
+    film_name, film_body = get_dept_lesson_body("film")
 
     assert client_name == "客户部"
     assert "客户触达话术" in client_body
     assert "客户邮件起草" not in client_body
     assert "客户问候邮件" not in client_body
     assert "不能硬生成正式稿" in get_quiz_for_dept("client_dept")[2]["explain"]
-    assert planning_name == "策划"
+    assert planning_name == "策略部"
     assert "应标 / 客户提案" in planning_body
+    assert brand_name == "品宣部"
+    assert "媒介 / KOC" in brand_body
+    assert "柳汽是外派独立分支" in get_quiz_for_dept("brand_publicity")[-1]["explain"]
+    assert film_name == "影视制作部"
+    assert "拍摄通告" in film_body
     assert general_name == "综合部"
     assert "行政通知整理" in general_body
 
@@ -658,6 +649,37 @@ def test_kb_archive_card_failure_shows_trace_and_error():
     assert "向量索引写入失败" in contents
 
 
+def test_document_intake_card_lists_files_and_import_status():
+    card = build_document_intake_card(
+        status="已入库",
+        files=[
+            {"name": "部门 SOP.pdf", "status": "parsed", "size_bytes": 204800},
+            {
+                "name": "旧版说明.zip",
+                "status": "unsupported",
+                "size_bytes": 1024,
+                "error": "Unsupported file type: .zip",
+            },
+        ],
+        kb_name="nas_knowledge",
+        inbox_path="nas/knowledge/inbox/download/",
+        imported_count=1,
+        unsupported_count=1,
+        summary_note="已复制到 NAS。",
+    )
+
+    assert card["header"]["title"]["content"] == "文档上传 · 已入库"
+    assert card["header"]["template"] == "green"
+    contents = "\n".join(_markdown_contents(card))
+    assert "**文件**" in contents
+    assert "2 个" in contents
+    assert "**知识库**：nas_knowledge" in contents
+    assert "部门 SOP.pdf" in contents
+    assert "旧版说明.zip" in contents
+    assert "Unsupported file type: .zip" in contents
+    assert "nas/knowledge/inbox/download/" in contents
+
+
 def test_employee_pending_card_lists_fields_and_uses_noop_button():
     card = build_employee_pending_card(
         task_title="端午客户问候话术草稿",
@@ -700,6 +722,23 @@ def test_media_generation_card_covers_running_and_result_fields():
     assert "**引擎**：GPT Image 2" in contents
     assert "绿色科技感端午海报" in contents
     assert "已等待 42 秒" in contents
+
+
+def test_source_image_edit_card_covers_status_and_engine_fields():
+    card = build_source_image_edit_card(
+        task_title="去背景任务",
+        status="已完成",
+        operation="去背景/人物抠出",
+        engine="rembg",
+        source_summary="只处理透明通道，保留原图人物像素。",
+        output_hint="/tmp/output.png",
+    )
+
+    content = "\n".join(_markdown_contents(card))
+    assert card["header"]["title"]["content"] == "源图编辑 · 已完成"
+    assert "源图编辑" in content
+    assert "rembg" in content
+    assert "只处理透明通道" in content
 
 
 def test_multimodal_case_and_task_reminder_cards_have_core_fields():

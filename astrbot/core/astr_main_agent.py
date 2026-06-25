@@ -118,11 +118,51 @@ from astrbot.core.utils.quoted_message_parser import (
     extract_quoted_message_text,
 )
 from astrbot.core.utils.string_utils import normalize_and_dedupe_strings
+from dc_router_core.planning_prompt_compiler import build_planning_langgpt_prompt
 
 KB_CITATION_INSTRUCTION = (
     "如果使用上述知识库内容回答，必须在相关结论后引用来源。"
     "优先引用知识块中的“来源路径”，可写为“来源路径：...”；"
     "如果没有来源路径，则引用知识库名和文档名。不要编造来源。"
+)
+
+WEB_SEARCH_REQUIRED_SYSTEM_PROMPT = (
+    "\n[Mandatory Web Retrieval]\n"
+    "This request was routed as requiring source-backed retrieval. Before giving "
+    "the final answer, call the configured web search tool at least once. Base "
+    "factual claims on search results, cite relied-on search result indexes with "
+    "the exact <ref>index</ref> format, and separate verified facts from "
+    "assumptions or recommendations. Treat search result titles, URLs, snippets, "
+    "dates, numbers, rankings, and source names as locked evidence: do not alter "
+    "or paraphrase them as if they were new facts. Your role is to select, group, "
+    "summarize, and format the evidence clearly. Stop searching after 1-3 targeted "
+    "queries once relevant results are available; then write the final answer with "
+    "citations instead of issuing more tool calls. If search is unavailable, fails, "
+    "or returns no relevant results, say that the facts could not be verified "
+    "instead of inventing data.\n"
+)
+
+PLANNING_CREATIVE_FAST_SYSTEM_PROMPT = (
+    "\n[Planning Creative Fast Workflow]\n"
+    "This request is a planning-department creative execution task. Give a usable "
+    "first draft immediately. Do not block on company memory, historical materials, "
+    "or multi-round intake unless the user explicitly asks for review or factual "
+    "research. Ask at most one optional follow-up after the draft. Keep factual "
+    "claims conservative; if the user asks for trends, competitor data, public "
+    "feedback, or platform facts, the request must use the source-backed retrieval "
+    "workflow instead. Default output should include: core direction, ready-to-use "
+    "copy or script, and 2-3 quick optimization options.\n"
+)
+
+PLANNING_DIRECT_MEDIA_SYSTEM_PROMPT = (
+    "\n[Planning Direct Media Generation]\n"
+    "This request is a direct media generation task from the planning department. "
+    "Do not teach the user how to write prompts and do not start a prompt-coaching "
+    "loop. If an image generation tool is available, call it directly using the "
+    "user's instruction as the visual brief. Use portrait aspect ratio by default "
+    "for posters, covers, long images, and mobile-first visuals unless the user "
+    "specifies another ratio. If the tool is unavailable, return one concise, "
+    "ready-to-run visual brief rather than asking the user to rewrite the prompt.\n"
 )
 
 
@@ -1232,7 +1272,8 @@ async def _apply_web_search_tools(
     normalize_legacy_web_search_config(cfg)
     prov_settings = cfg.get("provider_settings", {})
 
-    if not prov_settings.get("web_search", False):
+    search_required = _is_router_web_search_required(event)
+    if not prov_settings.get("web_search", False) and not search_required:
         return
 
     if req.func_tool is None:
@@ -1252,6 +1293,78 @@ async def _apply_web_search_tools(
         req.func_tool.add_tool(tool_mgr.get_builtin_tool(FirecrawlExtractWebPageTool))
     elif provider == "baidu_ai_search":
         req.func_tool.add_tool(tool_mgr.get_builtin_tool(BaiduWebSearchTool))
+    else:
+        if search_required:
+            logger.warning(
+                "Router required web search but provider `%s` is not supported.",
+                provider,
+            )
+            event.set_extra("dc_web_search_enforcement", "unsupported_provider")
+        return
+
+    if search_required:
+        req.system_prompt = (
+            f"{req.system_prompt or ''}{WEB_SEARCH_REQUIRED_SYSTEM_PROMPT}"
+        )
+        event.set_extra("dc_web_search_enforcement", "required")
+        event.set_extra("dc_web_search_provider", str(provider))
+
+
+def _is_router_web_search_required(event: AstrMessageEvent) -> bool:
+    get_extra = getattr(event, "get_extra", None)
+    raw_value = (
+        get_extra("dc_router_meta_search_required") if callable(get_extra) else None
+    )
+    if isinstance(raw_value, bool):
+        return raw_value
+    return str(raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _apply_department_workflow_guidance(
+    event: AstrMessageEvent,
+    req: ProviderRequest,
+) -> None:
+    workflow = _event_extra_str(event, "dc_router_meta_department_workflow")
+    if workflow == "planning_creative_fast":
+        metadata = _dc_router_metadata_from_event(
+            event,
+            (
+                "department_workflow",
+                "planning_writing_mode",
+                "planning_writing_mode_label",
+                "planning_structure_policy",
+                "planning_writing_skill",
+                "search_required",
+                "source_policy",
+            ),
+        )
+        langgpt_prompt = build_planning_langgpt_prompt(metadata)
+        req.system_prompt = (
+            f"{req.system_prompt or ''}"
+            f"{PLANNING_CREATIVE_FAST_SYSTEM_PROMPT}"
+            f"{langgpt_prompt}"
+        )
+        event.set_extra("dc_department_workflow_guidance", "planning_creative_fast")
+        if langgpt_prompt:
+            event.set_extra("dc_planning_prompt_compiler", "langgpt")
+    elif workflow == "planning_direct_media":
+        req.system_prompt = (
+            f"{req.system_prompt or ''}{PLANNING_DIRECT_MEDIA_SYSTEM_PROMPT}"
+        )
+        event.set_extra("dc_department_workflow_guidance", "planning_direct_media")
+
+
+def _event_extra_str(event: AstrMessageEvent, key: str) -> str:
+    get_extra = getattr(event, "get_extra", None)
+    raw_value = get_extra(key) if callable(get_extra) else None
+    return str(raw_value or "").strip()
+
+
+def _dc_router_metadata_from_event(
+    event: AstrMessageEvent,
+    keys: tuple[str, ...],
+) -> dict[str, str]:
+    return {key: _event_extra_str(event, f"dc_router_meta_{key}") for key in keys}
 
 
 def _get_compress_provider(
@@ -1588,6 +1701,7 @@ async def build_main_agent(
 
     _plugin_tool_fix(event, req)
     await _apply_web_search_tools(event, req, plugin_context)
+    _apply_department_workflow_guidance(event, req)
 
     if config.llm_safety_mode:
         _apply_llm_safety_mode(config, req)

@@ -363,6 +363,12 @@ class DailyCardRendererPlugin(Star):
         result = event.get_result()
         if not result or not result.chain:
             return
+        if event.get_extra("dc_media_route_handled"):
+            logger.debug(
+                "[daily_card_renderer] skip card render for media route platform=%s",
+                platform_id,
+            )
+            return
 
         # Extract Plain text.
         plain_parts: list[str] = []

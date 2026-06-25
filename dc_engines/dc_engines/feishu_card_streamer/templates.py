@@ -30,10 +30,25 @@ KAMI_MUTED = "grey"
 CASUAL_STRUCTURE_RE = re.compile(
     r"(^|\n)\s*(#{1,6}\s+|[-*]\s+|\d+[.)]\s+|```|>|[^\n|]+\|[^\n|]+)"
 )
+INTERNAL_CONTEXT_RE = re.compile(
+    r"\s*<dc_truth_source\b.*?</dc_truth_source>\s*"
+    r"|\s*<dc_truth_source\b.*$"
+    r"|\s*<dc_agent_memory_context\b.*?</dc_agent_memory_context>\s*"
+    r"|\s*<dc_agent_memory_context\b.*$",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _strip_internal_context(text: str) -> str:
+    """Remove machine-only context markers before building user-facing cards."""
+    if not text:
+        return ""
+    return INTERNAL_CONTEXT_RE.sub(" ", str(text)).strip()
 
 
 def _safe_md(text: str, limit: int = 5000) -> str:
     """飞书 lark_md 单元素长度上限 ~10K 字符，留 buffer。"""
+    text = _strip_internal_context(text)
     if not text:
         return "_(空)_"
     if len(text) > limit:
@@ -107,7 +122,7 @@ def _status_color(status: str) -> str:
         return SUCCESS_GREEN
     if status in {"部分待确认", "需要补充", "待审核", "降级", "需要确认", "已逾期"}:
         return WARNING_RED
-    if status in {"执行失败", "入库失败", "异常", "不建议直接用"}:
+    if status in {"失败", "执行失败", "入库失败", "异常", "不建议直接用"}:
         return "red"
     if status in {"示例/假设", "示例假设"}:
         return "violet"
@@ -531,87 +546,6 @@ def build_progress_card(
     }
 
 
-def build_antigravity_queue_card(
-    *,
-    job_id: str,
-    queue_position: int,
-    eta_text: str,
-    elapsed_sec: float = 0,
-    primary_channel_name: str = "巅巅小助手",
-    fallback_channel_name: str = "池池小助手",
-    fallback_provider_id: str = "aihubmix/gemini-3-flash-preview",
-    original_prompt: str = "",
-    status: str = "queued",
-) -> dict[str, Any]:
-    """Antigravity 短排队卡：真实队列位置 + 备用小助手入口。
-
-    provider_id 只放在按钮 value 里，员工可见文案不展示底层技术词。
-    """
-    is_fallback_running = status == "fallback_running"
-    title = f"{fallback_channel_name}处理中" if is_fallback_running else "小助手排队中"
-    status_line = (
-        _status_dot(f"{fallback_channel_name}已接手处理", SUCCESS_GREEN)
-        if is_fallback_running
-        else _status_dot("已保留排队位置，等待卡会持续刷新", WARNING_RED)
-    )
-    progress_line = (
-        f"{waiting_pulse(elapsed_sec)} {_font('等待中', WARNING_RED)} · "
-        f"**{progress_bar(elapsed_sec, 120)}** · "
-        f"{_font('⏱️已等待 ' + _format_elapsed(elapsed_sec), 'grey')}"
-    )
-    current_channel = (
-        fallback_channel_name if is_fallback_running else primary_channel_name
-    )
-    elements: list[dict[str, Any]] = [
-        _md(
-            "哎呀，现在小助手太忙啦，当前同时接待人数已经超过 9 人。\n"
-            "我已经帮您排好队了，请您耐心等待⌛️",
-            "normal",
-        ),
-        _md(status_line, "notation"),
-        _md(
-            _aligned_fields(
-                [
-                    ("当前位置", f"第 {max(int(queue_position or 1), 1)} 位"),
-                    ("预计等待", eta_text or "稍后"),
-                    ("当前通道", current_channel),
-                ]
-            )
-        ),
-        {"tag": "hr"},
-        _md(progress_line, "heading_3"),
-    ]
-    if is_fallback_running:
-        elements.append(_md(_muted("好的，我马上请池池小助手先帮您处理～"), "notation"))
-    else:
-        elements.extend(
-            [
-                _md(_muted("您也可以不排队，先让池池小助手处理。"), "notation"),
-                _button_row(
-                    [
-                        {
-                            "text": f"不想排队，使用{fallback_channel_name}",
-                            "type": "primary",
-                            "value": {
-                                "source": "antigravity_queue_card",
-                                "action": "use_fallback",
-                                "job_id": job_id,
-                                "fallback_provider_id": fallback_provider_id,
-                                "fallback_channel_name": fallback_channel_name,
-                                "original_prompt": original_prompt,
-                            },
-                        }
-                    ]
-                ),
-            ]
-        )
-    return _business_card(
-        title=title,
-        template="green" if is_fallback_running else "orange",
-        elements=elements,
-    )
-
-
 # ─────────────────────────── 2. 最终成功卡片 ───────────────────────────
 
 
@@ -832,33 +766,30 @@ def build_onboarding_dept_card(*, welcome_name: str = "") -> dict[str, Any]:
         if welcome_name
         else "欢迎来到巅池-Agent 小助手！"
     )
-    # 2026-05-22 按职能部组织架构调整为 7 部门。
+    # 2026-06-25 按职能部组织架构调整为 10 部门。
     # ID 跟 dc_engines.department_workflows.defaults 对齐，方便后续部门工作流匹配
     departments = [
         ("总经办", "executive_office"),
         ("客户部", "client_dept"),
-        ("策划", "planning"),
+        ("策略部", "planning"),
         ("品宣部", "brand_publicity"),
-        ("执行运营", "execution_ops"),
+        ("活动统筹部", "execution_ops"),
+        ("设计部", "design_dept"),
+        ("影视制作部", "film_production"),
+        ("AI应用部", "ai_application"),
         ("综合部", "general_affairs"),
         ("财务部", "finance"),
     ]
-    # 飞书 action element 一行最多 4 个 button，7 个部门分为 4 + 3。
-    row1 = [
-        {
-            "text": name,
-            "value": {"action": "select_dept", "dept": code},
-            "type": "primary",
-        }
-        for name, code in departments[:4]
-    ]
-    row2 = [
-        {
-            "text": name,
-            "value": {"action": "select_dept", "dept": code},
-            "type": "primary",
-        }
-        for name, code in departments[4:]
+    rows = [
+        [
+            {
+                "text": name,
+                "value": {"action": "select_dept", "dept": code},
+                "type": "primary",
+            }
+            for name, code in departments[index : index + 4]
+        ]
+        for index in range(0, len(departments), 4)
     ]
     return _business_card(
         title="入职引导 · 第 1 步",
@@ -877,8 +808,7 @@ def build_onboarding_dept_card(*, welcome_name: str = "") -> dict[str, Any]:
             ),
             {"tag": "hr"},
             _md("请选择你所在的部门。后续教程和测试题会按部门补充 1 道差异化题。"),
-            _button_row(row1),
-            _button_row(row2),
+            *(_button_row(row) for row in rows),
             _md(
                 _muted("点错了不要紧，流程走完后随时发 `/重新入职` 可以从头重做。"),
                 "notation",
@@ -1305,32 +1235,32 @@ _DEPT_LESSON_BODIES: dict[str, dict[str, str]] = {
         "name": "品宣部",
         "body": """## 品宣部 · 4 个常用场景
 
-### 1. 🎨 种草海报方案
-**`#高` 出 3 个创意方向 + 文案备选**，选定后再生图（先方向后视觉）。
-**关键**：直接说"画一张海报"出来的是猜的，要先沉淀方向再生图。
+### 1. 📈 账号 / 内容 / 直播运营
+整理账号周报、月报、直播复盘、起号动作和 KPI 拆解。
+**关键**：先给账号、平台、周期、现有数据和目标，否则只能出复盘框架。
 
-> 「**#高** 端午海报，产品=缤果，目标=年轻女性，出 3 个创意方向 + 文案备选」
+> 「品宣部帮我整理本周直播账号复盘，含内容节奏、KPI 问题、下周动作」
 
-### 2. 📔 小红书种草图文
-**方版生图 + 200 字带情绪的种草文案**，组合输出，可直接发。
+### 2. 🧩 媒介 / KOC 管理
+把媒介、KOC、达人任务拆成下发表、日报字段、内容回收和反馈闭环。
 
-> 「画一张**方版**的端午种草图，配 200 字小红书文案，要带情绪 + 痛点 + 钩子」
+> 「品宣部帮我做媒介 KOC 任务下发表，含需求、截止时间、日报和反馈闭环」
 
-### 3. 🎬 视频内容打标 / 摘要（用第 2 节看视频的能力）
-把视频丢给小助手，**提取主题 / 卖点 / 适合的投放渠道**。
+### 3. 🧑‍🤝‍🧑 用户故事 / 用户活动
+沉淀用户故事库，整理沟通脚本、拍摄通告、甲方审核和成片审核清单。
 
-> （发视频）「这条视频的核心卖点是什么？哪些画面有口播？适合投在抖音/小红书/视频号哪个渠道？」
+> 「这批用户故事素材帮我整理成沟通脚本、拍摄通告和成片审核清单」
 
-### 4. 📰 公众号推文起草（800-1500 字长文）
-**`#高` + 先列好提纲（目标读者 / 阅读情绪 / 结尾引导）**，输出有节奏的长文（开头钩子 / 主体 3 段 / 结尾引导转化）。
-**关键**：长文要有"读者旅程感"，告诉小助手目标读者是谁、希望他看完什么感觉、最后做什么动作。
+### 4. 🛡 舆情 / 社群 / 企微
+整理社群维护、用户证言、风险预警、负面稀释和竞品负面抓取。
+**关键**：柳汽是外派独立分支，暂时只留组织接口；公司内品宣相关活默认由同一组人承接。
 
-> 「**#高** 帮我起草一篇公众号长文，主题=端午自驾游+缤果，目标读者=30-40 岁带娃家庭，1200 字左右，要有开头钩子和结尾试驾邀约」
+> 「品宣部帮我把社群舆情风险做成预警表，含负面稀释动作和升级提醒」
 """,
     },
     "planning": {
-        "name": "策划",
-        "body": """## 策划 · 4 个常用场景
+        "name": "策略部",
+        "body": """## 策略部 · 4 个常用场景
 
 ### 1. 🔍 竞品洞察简报
 **竞品材料 + `#超深`**，输出证据链 / 机会点 / 行动建议。
@@ -1355,8 +1285,8 @@ _DEPT_LESSON_BODIES: dict[str, dict[str, str]] = {
 """,
     },
     "execution_ops": {
-        "name": "执行运营",
-        "body": """## 执行运营 · 4 个常用场景
+        "name": "活动统筹部",
+        "body": """## 活动统筹部 · 4 个常用场景
 
 ### 1. 🗓 活动排期
 **任务清单 + 时间窗 + 负责人 + `#高`**，拆出每日动作 + 风险预案。
@@ -1378,6 +1308,81 @@ _DEPT_LESSON_BODIES: dict[str, dict[str, str]] = {
 把现场照片 / 视频丢给小助手，**问问题在哪 + 怎么改**。
 
 > （发现场照片）「这个布展有什么问题？哪些地方可以改进？按照视觉冲击力 / 客户动线 / 拍照效果 三个维度说」
+""",
+    },
+    "design_dept": {
+        "name": "设计部",
+        "body": """## 设计部 · 4 个常用场景
+
+### 1. 🎨 设计稿检查
+围绕 VI、色调、字体、背景、尺寸比例做交付前检查。
+
+> 「这版设计稿帮我检查 VI、字体、尺寸比例和制作风险，列修改清单」
+
+### 2. 🧾 制作文件交付清单
+把设计源文件、尺寸、工艺、导出格式和入库要求整理成清单。
+
+> 「帮我整理这批物料的制作文件交付清单，按源文件 / 导出图 / 尺寸 / 工艺拆」
+
+### 3. 🔁 甲方修改意见归纳
+把零散修改意见整理成优先级、改动项和待确认问题。
+
+> 「这是甲方对海报 V3 的修改意见，帮我整理成设计修改清单和待确认项」
+
+### 4. 📦 物料设计对接
+把物料规格、安装位置、制作工艺和验收照片要求对齐。
+
+> 「端午活动这些物料要给工厂制作，帮我列设计对接和验收注意事项」
+""",
+    },
+    "film_production": {
+        "name": "影视制作部",
+        "body": """## 影视制作部 · 4 个常用场景
+
+### 1. 🎬 拍摄通告
+把需求、时间地点、人员、机位和道化服整理成拍摄通告。
+
+> 「帮我把这次活动视频需求整理成拍摄通告，含机位、人员和道化服」
+
+### 2. 📷 现场拍摄清单
+拆出必拍镜头、拍摄重点、风险点和现场交接事项。
+
+> 「这场用户共创会帮我列现场拍摄清单和拍摄重点」
+
+### 3. ✂️ 后期交付计划
+整理粗剪、精剪、字幕、音乐、审稿、成片交付节点。
+
+> 「帮我把这条活动视频拆成后期剪辑排期和交付节点」
+
+### 4. ✅ 成片验收材料
+汇总成片、花絮、源素材、成本和验收材料清单。
+
+> 「活动结束后需要交市场验收，帮我列成片交付和验收材料清单」
+""",
+    },
+    "ai_application": {
+        "name": "AI应用部",
+        "body": """## AI应用部 · 4 个常用场景
+
+### 1. 🤖 部门小助手配置
+把部门场景、资料来源、权限边界和输出样例整理成配置方案。
+
+> 「帮我设计策略部小助手的工作流，含知识库、权限边界和常用输出」
+
+### 2. 🔗 知识库接入
+梳理文件来源、审核状态、可用范围和更新机制。
+
+> 「这些飞书文档要接入知识库，帮我列审核字段、权限风险和更新流程」
+
+### 3. ⚙️ 自动化流程
+把重复任务拆成触发条件、输入、处理步骤、输出和人工确认点。
+
+> 「活动验收材料每次都要整理，帮我设计一个自动化工作流」
+
+### 4. 🧪 AI 工具试用评估
+按业务场景评估工具效果、成本、权限和失败风险。
+
+> 「帮我比较两个生图工具在品宣海报场景里的效果、成本和风险」
 """,
     },
     "general_affairs": {
@@ -1435,14 +1440,17 @@ _DEPT_LESSON_BODIES: dict[str, dict[str, str]] = {
     },
 }
 
-# 历史 dept_code alias（跟 employee_onboarding DEPT_DISPLAY 对齐）
+# Legacy dept_code aliases kept for historical card rendering compatibility.
 _DEPT_LESSON_ALIASES = {
     "marketing": "client_dept",
     "strategy": "planning",
     "branding": "brand_publicity",
     "exec_office": "executive_office",
     "operations": "execution_ops",
-    "film": "brand_publicity",
+    "film": "film_production",
+    "design": "design_dept",
+    "digital": "ai_application",
+    "ai": "ai_application",
     "client": "client_dept",
     "planning_dept": "planning",
     "general": "general_affairs",
@@ -1581,18 +1589,18 @@ QUIZ_QUESTIONS_BY_DEPT: dict[str, dict[str, Any]] = {
         "lesson_id": "lesson_dept_common",
     },
     "brand_publicity": {
-        "question": "618 大促要做种草海报，怎么让小助手帮你出方案？",
+        "question": "品宣部要做直播账号复盘和媒介 KOC 任务闭环，怎么让小助手更准确？",
         "options": [
-            ("A", "直接说「画一张海报」"),
+            ("A", "直接说「帮我看一下运营」"),
             (
                 "B",
-                "提供产品卖点 + 目标人群，用 #高 出 3 个创意方向 + 文案备选，再选定后生图",
+                "提供账号/平台、周期目标、现有数据、媒介/KOC名单和截止时间，让小助手拆表和复盘动作",
             ),
-            ("C", "让小助手自己看着办"),
-            ("D", "跳过小助手，找设计师从零开始"),
+            ("C", "让小助手自己编 KOC 名单和投放效果"),
+            ("D", "只发一句「柳汽那边你安排」"),
         ],
         "correct": "B",
-        "explain": "创意类任务先用 #高 出方向（卖点/人群/调性），再用 Dreamina 生图，效率最高也最不踩坑。",
+        "explain": "品宣部公司内团队承接直播/账号运营、媒介/KOC、用户故事和社群舆情；柳汽是外派独立分支，暂不自动派活。",
         "lesson_id": "lesson_dept_common",
     },
     "planning": {
@@ -1620,6 +1628,48 @@ QUIZ_QUESTIONS_BY_DEPT: dict[str, dict[str, Any]] = {
         ],
         "correct": "B",
         "explain": "执行类任务靠拆解。给任务清单 + 时间窗 + 负责人 + #高，小助手能输出每日动作 + 风险预案。",
+        "lesson_id": "lesson_dept_common",
+    },
+    "design_dept": {
+        "question": "设计稿要交付制作前，怎么让小助手检查最稳？",
+        "options": [
+            ("A", "只说「帮我看看」"),
+            (
+                "B",
+                "提供设计稿说明 + 品牌口径 + 尺寸/工艺要求，让小助手列视觉检查和制作风险",
+            ),
+            ("C", "让小助手直接代表甲方通过"),
+            ("D", "只让它夸设计好看"),
+        ],
+        "correct": "B",
+        "explain": "设计交付要看 VI、字体、色调、尺寸和工艺。小助手能列风险和修改清单，但不能替甲方或负责人最终通过。",
+        "lesson_id": "lesson_dept_common",
+    },
+    "film_production": {
+        "question": "影视制作部要出拍摄通告，怎么让小助手更有用？",
+        "options": [
+            ("A", "直接说「写个通告」"),
+            (
+                "B",
+                "提供需求 brief、时间地点、人员、机位和交付标准，让小助手拆拍摄通告和现场清单",
+            ),
+            ("C", "让小助手自己安排人员和地点"),
+            ("D", "只让它写一句开场白"),
+        ],
+        "correct": "B",
+        "explain": "拍摄执行必须基于确认材料。给时间、地点、人员和交付标准，小助手才能拆出可执行的拍摄通告。",
+        "lesson_id": "lesson_dept_common",
+    },
+    "ai_application": {
+        "question": "AI应用部要给一个部门配置小助手，第一步应该让小助手输出什么？",
+        "options": [
+            ("A", "直接承诺所有飞书文档都能自动读取"),
+            ("B", "梳理部门场景、资料来源、权限边界、输出样例和上线检查清单"),
+            ("C", "先写一堆宣传文案"),
+            ("D", "跳过权限审核直接上线"),
+        ],
+        "correct": "B",
+        "explain": "AI 应用落地先看场景、资料、权限和数据边界，不能承诺未验证的接口能力或数据访问权限。",
         "lesson_id": "lesson_dept_common",
     },
     "finance": {
@@ -1652,14 +1702,17 @@ QUIZ_QUESTIONS_BY_DEPT: dict[str, dict[str, Any]] = {
 }
 
 
-# 历史 dept_code 兼容（与 employee_onboarding/main.py 的 DEPT_DISPLAY 对齐）
+# Legacy dept_code compatibility for archived training/card payloads.
 _DEPT_CODE_ALIASES = {
     "marketing": "client_dept",
     "strategy": "planning",
     "branding": "brand_publicity",
     "exec_office": "executive_office",
     "operations": "execution_ops",
-    "film": "brand_publicity",  # 影视部已下线，归并到品宣部
+    "film": "film_production",
+    "design": "design_dept",
+    "digital": "ai_application",
+    "ai": "ai_application",
     "client": "client_dept",
     "planning_dept": "planning",
     "general": "general_affairs",
@@ -2499,6 +2552,95 @@ def build_kb_archive_card(
     )
 
 
+def _format_bytes(size_bytes: int) -> str:
+    size = max(int(size_bytes or 0), 0)
+    if size >= 1024 * 1024:
+        return f"{size / 1024 / 1024:.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size} B"
+
+
+def build_document_intake_card(
+    *,
+    status: str,
+    files: list[dict[str, Any]],
+    kb_name: str = "",
+    inbox_path: str = "",
+    summary_note: str = "",
+    imported_count: int = 0,
+    failed_count: int = 0,
+    unsupported_count: int = 0,
+    elapsed_sec: float = 0,
+) -> dict[str, Any]:
+    """Document upload intake status card for copied, parsed, and imported files."""
+    template = _status_template(status)
+    total_count = len(files)
+    parsed_count = sum(
+        1
+        for item in files
+        if str(item.get("status", "")) in {"parsed", "parsed_empty", "copied"}
+    )
+    fields: list[tuple[str, str]] = [
+        ("状态", _font(status, _status_color(status))),
+        ("文件", f"{total_count} 个"),
+    ]
+    if parsed_count:
+        fields.append(("已解析", f"{parsed_count} 个"))
+    if imported_count:
+        fields.append(("已入库", f"{imported_count} 个"))
+    if failed_count:
+        fields.append(("失败", _font(f"{failed_count} 个", "red")))
+    if unsupported_count:
+        fields.append(("不支持", _font(f"{unsupported_count} 个", WARNING_RED)))
+    if kb_name:
+        fields.append(("知识库", kb_name))
+
+    file_lines: list[str] = []
+    for item in files[:8]:
+        name = _compact(
+            item.get("name") or item.get("original_name") or "attachment", 48
+        )
+        item_status = str(item.get("status", "") or "pending")
+        size_text = _format_bytes(int(item.get("size_bytes") or 0))
+        line = f"**{name}**：{_font(item_status, _status_color(item_status))}"
+        if size_text != "0 B":
+            line += f" · {_muted(size_text)}"
+        error = str(item.get("error", "") or "").strip()
+        if error:
+            line += f"\n  {_muted(_compact(error, 90))}"
+        file_lines.append(line)
+    if len(files) > 8:
+        file_lines.append(_muted(f"还有 {len(files) - 8} 个文件未在卡片展开"))
+
+    elements: list[dict[str, Any]] = [
+        _md("**批量文档上传**", "heading_2"),
+        _md(_status_dot("文档接收与入库状态", _status_color(status)), "notation"),
+        _md(_aligned_fields(fields)),
+        _md(f"**文件列表**\n{_field_list(file_lines)}"),
+    ]
+    if status in {"接收中", "解析中", "入库中", "处理中"}:
+        elements.extend(
+            [
+                {"tag": "hr"},
+                _md(
+                    f"{waiting_pulse(elapsed_sec)} {_font('处理中', WARNING_RED)} · "
+                    f"{_muted('正在复制、解析或写入知识库')}",
+                    "heading_3",
+                ),
+            ]
+        )
+    if inbox_path:
+        elements.append(_display_panel("NAS 收件路径", inbox_path, "notation"))
+    if summary_note:
+        elements.append(_md(f"**说明**：{_muted(summary_note)}", "notation"))
+    return _business_card(
+        title=f"文档上传 · {status}",
+        template=template,
+        elements=elements,
+    )
+
+
 def build_employee_pending_card(
     *,
     task_title: str,
@@ -2552,11 +2694,28 @@ def build_employee_pending_card(
 
 
 def _status_template(status: str) -> str:
-    if status in {"已完成", "已生成", "已理解", "已通过", "正常"}:
+    if status in {"已完成", "已生成", "已理解", "已通过", "正常", "已入库", "已解析"}:
         return "green"
-    if status in {"进行中", "生成中", "理解中", "处理中", "排队中"}:
+    if status in {
+        "进行中",
+        "生成中",
+        "理解中",
+        "处理中",
+        "排队中",
+        "接收中",
+        "解析中",
+        "入库中",
+    }:
         return "blue"
-    if status in {"需要补充", "待确认", "已逾期", "阻塞", "失败", "执行失败"}:
+    if status in {
+        "需要补充",
+        "待确认",
+        "已逾期",
+        "阻塞",
+        "失败",
+        "执行失败",
+        "入库失败",
+    }:
         return "red"
     if status in {"已降级", "部分完成", "部分待确认"}:
         return "orange"
@@ -2625,6 +2784,61 @@ def build_media_generation_card(
         elements.append(_md(f"**失败诊断**：{_muted(error_hint)}", "notation"))
     return _business_card(
         title=f"{type_label} · {status}",
+        template=template,
+        elements=elements,
+    )
+
+
+def build_source_image_edit_card(
+    *,
+    task_title: str,
+    status: str,
+    operation: str,
+    engine: str = "",
+    task_id: str = "",
+    source_summary: str = "",
+    output_hint: str = "",
+    error_hint: str = "",
+    elapsed_sec: float = 0,
+) -> dict[str, Any]:
+    """源图编辑卡片：抠图/去背景等确定性图片处理，不进入生图队列。"""
+    template = _status_template(status)
+    fields: list[tuple[str, str]] = [
+        ("类型", "源图编辑"),
+        ("操作", operation or "去背景/抠图"),
+        ("状态", _font(status, _status_color(status))),
+    ]
+    if engine:
+        fields.append(("引擎", engine))
+    if task_id:
+        fields.append(("编号", f"`#{task_id}`"))
+
+    elements: list[dict[str, Any]] = [
+        _md(f"**{_compact(task_title, 48) or '源图编辑'}**", "heading_2"),
+        _md(_status_dot("源图编辑状态", _status_color(status)), "notation"),
+        _md(_aligned_fields(fields)),
+    ]
+    if source_summary:
+        elements.append(_display_panel("处理边界", source_summary, "notation"))
+    if status in {"处理中", "进行中"}:
+        elements.extend(
+            [
+                {"tag": "hr"},
+                _md(
+                    f"{waiting_pulse(elapsed_sec)} {_font('处理中', WARNING_RED)} · "
+                    f"**{progress_bar(elapsed_sec, 90)}** · "
+                    f"{_muted('⏱️已等待 ' + _format_elapsed(elapsed_sec))}",
+                    "heading_3",
+                ),
+            ]
+        )
+    if output_hint:
+        elements.append({"tag": "hr"})
+        elements.append(_display_panel("输出", output_hint, "notation"))
+    if error_hint:
+        elements.append(_md(f"**失败诊断**：{_muted(error_hint)}", "notation"))
+    return _business_card(
+        title=f"源图编辑 · {status}",
         template=template,
         elements=elements,
     )

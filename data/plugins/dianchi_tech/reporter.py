@@ -3,7 +3,7 @@
 被 ``scripts-tools/dianchi-tech-report.sh`` 在 cron 09:30 调用。
 
 流程：
-1. 读 ``data/dianchi_tech/{DATE}/report.md``（夜间 agy 产出）
+1. 读 ``data/dianchi_tech/{DATE}/report.md``（夜间任务产出）
 2. 飞书 IM：interactive card（markdown）发蔡挺
 3. Wiki：在『DC-Agent 运维』空间下建子页（**空间需用户手动预先创建并把机器人加为成员**，
    因为 wiki space 创建只支持 user_access_token，机器人 tenant token 没权限自动建空间）
@@ -116,6 +116,7 @@ def load_report(day_dir: Path, date_str: str) -> tuple[str, bool]:
         try:
             meta = json.loads(run_meta_path.read_text(encoding="utf-8"))
             analysis = meta.get("analysis") or meta.get("claude") or {}
+            stage_a = meta.get("stage_a") or meta.get("scan") or {}
             attempts = analysis.get("attempts") or []
             attempt_hint = ""
             if isinstance(attempts, list) and attempts:
@@ -134,7 +135,7 @@ def load_report(day_dir: Path, date_str: str) -> tuple[str, bool]:
                 if parts:
                     attempt_hint = "\n重试记录：" + "；".join(parts)
             meta_hint = (
-                f"\n\n夜间任务退出码：agy={meta['agy']['exit']}, "
+                f"\n\n夜间任务退出码：stage_a={stage_a.get('exit', '?')}, "
                 f"analysis={analysis.get('exit', '?')}"
                 f"\n阶段 B 总耗时：{analysis.get('duration_seconds', '?')}s"
                 f"\n硬超时：{analysis.get('hard_timeout_seconds', '?')}s；"

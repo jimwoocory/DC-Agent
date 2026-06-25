@@ -1,7 +1,7 @@
-"""Card action handler — antigravity queue card + governed-memory cards.
+"""Card action handler — disabled legacy CLI cards + governed-memory cards.
 
 统一处理 ``event.message_str.startswith("__card_action__:")`` 路径：
-1. 先尝试 agy (antigravity) 排队卡（与现有 logic 完全一致）
+1. 先吞掉旧 CLI 排队卡（只取消/关闭，不再执行）
 2. 再尝试 department_memory_prompt 卡片（confirm / dismiss）
 3. 再尝试 sop_signal_confirmation 卡片（remember / once / dismiss）
 3. 都不是 → 返回 False 让 dispatch 让其他 plugin 接管
@@ -130,15 +130,15 @@ async def try_handle_card_action(
             return CardActionResult(handled=True, stop=True)
         return CardActionResult(handled=result.handled, stop=result.stop)
 
-    # 3) Antigravity 排队卡 (agy_quota)
+    # 3) Disabled legacy CLI queue card
     try:
-        from ..cli_handlers import handle_antigravity_queue_card_action
+        from ..cli_handlers import handle_disabled_legacy_cli_card_action
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[dc_router] import antigravity card handler failed: %s", exc)
+        logger.warning("[dc_router] import legacy CLI card handler failed: %s", exc)
         return CardActionResult(handled=False)
 
     try:
-        handled = await handle_antigravity_queue_card_action(context, event)
+        handled = await handle_disabled_legacy_cli_card_action(context, event)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[dc_router] 排队卡按钮处理失败: %s", exc)
         # 异常时直接退出 — 避免把异常状态带入下游 LLM 路由
@@ -154,10 +154,10 @@ async def try_handle_card_action(
     if handled:
         return CardActionResult(handled=True, stop=True)
 
-    # 非 antigravity 卡片 (pet / 自定义卡) — 让其他 plugin 接管，绝不让卡片回调
+    # 非 router 卡片 (pet / 自定义卡) — 让其他 plugin 接管，绝不让卡片回调
     # 进入 LLM 路由
     logger.debug(
-        "[dc_router] 非 antigravity 卡片回调，让其他 plugin 接管: %s",
+        "[dc_router] 非 router 卡片回调，让其他 plugin 接管: %s",
         text[:80],
     )
     return CardActionResult(handled=True, stop=False)

@@ -39,7 +39,14 @@ _DISMISS_RE: Final[re.Pattern] = re.compile(
     re.IGNORECASE,
 )
 _EXPLICIT_MEMORY_LOOKUP_RE: Final[re.Pattern] = re.compile(
-    r"(记忆|历史|之前|查一下|找一下|有没有|是谁|是什么|负责人|资料|文件|来源|引用)",
+    r"(记忆|历史|之前|上次|过往|沉淀|查一下|找一下|负责人|资料|文件|来源|引用|"
+    r"知识库|公司库|NAS|Obsidian|沿用|复用)",
+    re.IGNORECASE,
+)
+_VISUAL_MEDIA_REQUEST_RE: Final[re.Pattern] = re.compile(
+    r"(\[image\]|这张图|那张图|这张图片|那张图片|图片|图像|截图|照片|原图|"
+    r"主图|页面图|店铺图|海报|封面|视觉|素材图|生图|文生图|画图|改图|修图|抠图|"
+    r"生成.{0,12}图|设计.{0,12}图|做.{0,12}图)",
     re.IGNORECASE,
 )
 _METACONV_PATTERNS: Final[tuple[re.Pattern, ...]] = (
@@ -198,6 +205,16 @@ def _pending_key(event: Any) -> str:
 def _is_meta_conversation(text: str) -> bool:
     t = text or ""
     return any(pat.search(t) for pat in _METACONV_PATTERNS)
+
+
+def _should_skip_proactive_department_memory(text: str) -> bool:
+    """Avoid interrupting low-context visual tasks with department memory.
+
+    Image understanding, image generation, and image editing are driven by the
+    current attachment and prompt. Department memory is still available through
+    the explicit memory lookup branch that runs before this guard.
+    """
+    return bool(_VISUAL_MEDIA_REQUEST_RE.search(text or ""))
 
 
 def _has_dominant_profile(profiles: list, text: str) -> bool:
@@ -403,6 +420,14 @@ def try_handle_department_memory(
             effective_text=text,
             memory_query_text=query_text,
         )
+
+    # 4) 图片理解 / 生图 / 改图默认依赖当前图和当前指令，不弹部门记忆卡。
+    if _should_skip_proactive_department_memory(text):
+        logger.info(
+            "[dc_router] dept memory prompt skipped for visual media request platform=%s",
+            _safe_platform(event),
+        )
+        return DepartmentMemoryDecision(effective_text=text)
 
     # 4) 找 profile — 找到多个且不够 dominant 时不打扰用户
     try:

@@ -16,9 +16,12 @@ def test_default_registry_covers_required_departments() -> None:
     assert names == {
         "总经办",
         "客户部",
-        "策划",
+        "策略部",
         "品宣部",
-        "执行运营",
+        "活动统筹部",
+        "设计部",
+        "影视制作部",
+        "AI应用部",
         "综合部",
         "财务部",
     }
@@ -73,6 +76,9 @@ def test_legacy_department_ids_resolve_to_current_workflows() -> None:
 
     assert "client_dept" in ids
     assert "planning" in ids
+    assert "design_dept" in ids
+    assert "film_production" in ids
+    assert "ai_application" in ids
     assert "general_affairs" in ids
 
     match = match_department_workflow(
@@ -82,6 +88,82 @@ def test_legacy_department_ids_resolve_to_current_workflows() -> None:
 
     assert match is not None
     assert match.department_id == "planning"
+
+
+def test_execution_leaf_department_workflows_are_split() -> None:
+    cases = [
+        ("设计部", "帮我检查这个设计稿的VI、字体和尺寸比例", "design_dept"),
+        (
+            "影视制作部",
+            "帮我整理拍摄通告、机位安排和成片交付验收材料",
+            "film_production",
+        ),
+        (
+            "AI应用部",
+            "帮我设计部门小助手的AI工具工作流和知识库接入方案",
+            "ai_application",
+        ),
+        ("数字化应用部", "帮我梳理机器人配置和自动化工作流", "ai_application"),
+    ]
+
+    for department, text, expected_department_id in cases:
+        match = match_department_workflow(employee_department=department, text=text)
+
+        assert match is not None
+        assert match.department_id == expected_department_id
+
+
+def test_middle_office_subdepartment_aliases_resolve_separately() -> None:
+    client_match = match_department_workflow(
+        employee_department="中台客户部",
+        text="帮我写客户活动邀约话术，用在微信私域",
+    )
+    planning_match = match_department_workflow(
+        employee_department="中台策略部",
+        text="帮我搭一个活动方案框架，先给目录和每页PPT小标题",
+    )
+
+    assert client_match is not None
+    assert client_match.department_id == "client_dept"
+    assert planning_match is not None
+    assert planning_match.department_id == "planning"
+
+
+def test_execution_department_leaf_aliases_resolve_to_execution_ops() -> None:
+    match = match_department_workflow(
+        employee_department="活动统筹部",
+        text="帮我把这场线下活动做执行分工表和落地沟通会清单",
+    )
+
+    assert match is not None
+    assert match.department_id == "execution_ops"
+    assert match.scenario_id == "execution_plan"
+
+
+def test_brand_publicity_keeps_internal_ops_as_one_workflow() -> None:
+    cases = [
+        ("直播账号运营周复盘和KPI动作", "live_account_ops"),
+        ("媒介KOC任务下发和日报复盘", "media_koc_management"),
+        ("用户故事库沟通脚本和成片审核", "user_story_campaign"),
+        ("社群舆情风险预警和负面稀释", "community_public_opinion_ops"),
+    ]
+
+    for text, expected_scenario_id in cases:
+        match = match_department_workflow(employee_department="运营部", text=text)
+
+        assert match is not None
+        assert match.department_id == "brand_publicity"
+        assert match.scenario_id == expected_scenario_id
+
+
+def test_liuqi_branch_is_org_placeholder_not_department_workflow() -> None:
+    catalog_ids = {item["department_id"] for item in workflow_catalog()}
+    match = match_department_workflow(
+        employee_department="柳汽", text="你好，今天辛苦了"
+    )
+
+    assert "liuqi" not in catalog_ids
+    assert match is None
 
 
 def test_build_request_payload_contains_harness_requirements() -> None:
@@ -193,7 +275,7 @@ def test_request_payload_records_material_loop_state() -> None:
 def test_workflow_catalog_is_json_ready() -> None:
     catalog = workflow_catalog()
 
-    assert len(catalog) == 7
+    assert len(catalog) == 10
     client = next(item for item in catalog if item["department_id"] == "client_dept")
     assert client["department_name"] == "客户部"
     assert client["scenarios"][0]["required_inputs"][0]["key"]
@@ -305,6 +387,21 @@ def test_planning_video_visual_brief_matches_mixed_request() -> None:
     assert match.scenario_id == "short_video_visual_brief"
 
 
+def test_planning_framework_outline_requires_toc_and_slide_titles() -> None:
+    match = match_department_workflow(
+        employee_department="策划部",
+        text="帮我搭一个活动方案框架，先给目录和每页PPT小标题",
+    )
+
+    assert match is not None
+    assert match.department_id == "planning"
+    assert match.scenario_id == "proposal_framework_outline"
+    output_keys = {item.key for item in match.scenario.expected_outputs}
+    assert {"framework_toc", "slide_titles", "page_details", "logic_loop"}.issubset(
+        output_keys
+    )
+
+
 def test_planning_p0_scenarios_match_storyboard_and_brand_review() -> None:
     cases = [
         (
@@ -350,6 +447,32 @@ def test_planning_brand_review_requires_material_and_guidelines() -> None:
     assert request.payload["generation_allowed"] is False
     assert request.payload["auto_complete_on_response"] is False
     assert missing_keys >= {"review_material", "brand_guideline", "usage_context"}
+
+
+def test_execution_venue_material_acceptance_matches_dedicated_workflow() -> None:
+    match = match_department_workflow(
+        employee_department="执行部门",
+        text="整理场地物料安装点检和拍照验收材料清单",
+    )
+
+    assert match is not None
+    assert match.department_id == "execution_ops"
+    assert match.scenario_id == "venue_material_acceptance"
+    output_keys = {item.key for item in match.scenario.expected_outputs}
+    assert {"site_checklist", "acceptance_photo_list", "safety_risks"}.issubset(
+        output_keys
+    )
+
+
+def test_execution_gift_production_inventory_matches_dedicated_workflow() -> None:
+    match = match_department_workflow(
+        employee_department="执行部门",
+        text="帮我做礼品打样生产跟踪和入库出库库存清单",
+    )
+
+    assert match is not None
+    assert match.department_id == "execution_ops"
+    assert match.scenario_id == "gift_production_inventory"
 
 
 def test_content_sop_payload_blocks_generation_when_materials_are_missing() -> None:

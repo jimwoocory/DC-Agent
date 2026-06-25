@@ -104,8 +104,7 @@ if str(_PLUGINS_PARENT) not in sys.path:
 
 
 # Stub out ``dc_router.__init__`` so it does NOT execute the real
-# package init (which imports ``plugin.py`` → ``health.py`` →
-# ``antigravity_health.py`` → ``qwen_health.py``, all of which depend
+# package init (which imports ``plugin.py`` → ``health.py`` and depends
 # on the live AstrBot runtime). We provide the bare minimum surface
 # (``__path__`` and ``__file__``) that sub-imports need, then let
 # Python's normal import machinery populate the submodules.
@@ -167,6 +166,15 @@ def _make_event(
     event.set_result = MagicMock()
     event._extras = extras_state
     return event
+
+
+class _ReplyComponent:
+    def __init__(self, message_str: str) -> None:
+        self.message_str = message_str
+        self.text = message_str
+        self.sender_id = "bot"
+        self.sender_nickname = "巅池-Agent小助手"
+        self.chain = []
 
 
 def _make_context() -> MagicMock:
@@ -240,6 +248,7 @@ def patched_dispatch(_spy: _StageSpy):
     - ``dc_router.dispatch.try_handle_chitchat``
     - ``dc_router.dispatch.try_handle_card_action``
     - ``dc_router.dispatch.try_apply_feishu_channel_route``
+    - ``dc_router.dispatch.try_handle_source_image_edit``
     - ``dc_router.dispatch.try_handle_media_route``
     - ``dc_router.dispatch.try_handle_department_memory``
     - ``dc_router.dispatch.try_inject_assistant_tone``
@@ -274,6 +283,7 @@ def patched_dispatch(_spy: _StageSpy):
     chitchat_mock = am(return_value=types.SimpleNamespace(handled=False))
     card_mock = am(return_value=types.SimpleNamespace(handled=False, stop=False))
     feishu_mock = am(return_value=False)
+    source_image_edit_mock = am(return_value=False)
     media_mock = am(return_value=False)
     sop_mock = MagicMock(return_value=types.SimpleNamespace(stop=False))
     dept_mock = MagicMock(return_value=DepartmentMemoryDecision(effective_text=""))
@@ -299,8 +309,19 @@ def patched_dispatch(_spy: _StageSpy):
     patches["feishu"] = patch.object(
         _dispatch, "try_apply_feishu_channel_route", feishu_mock
     )
+    patches["source_image_edit"] = patch.object(
+        _dispatch, "try_handle_source_image_edit", source_image_edit_mock
+    )
     patches["media"] = patch.object(_dispatch, "try_handle_media_route", media_mock)
     patches["sop"] = patch.object(_dispatch, "try_capture_sop_signal", sop_mock)
+    context_alignment_mock = MagicMock(
+        return_value=types.SimpleNamespace(stop=False, reason="")
+    )
+    patches["context_alignment"] = patch.object(
+        _dispatch,
+        "try_handle_context_alignment",
+        context_alignment_mock,
+    )
     patches["dept"] = patch.object(_dispatch, "try_handle_department_memory", dept_mock)
     patches["tone"] = patch.object(_dispatch, "try_inject_assistant_tone", tone_mock)
     patches["truth"] = patch.object(_dispatch, "_maybe_truth_intake", truth_mock)
@@ -331,8 +352,10 @@ def patched_dispatch(_spy: _StageSpy):
         "chitchat": chitchat_mock,
         "card": card_mock,
         "feishu": feishu_mock,
+        "source_image_edit": source_image_edit_mock,
         "media": media_mock,
         "sop": sop_mock,
+        "context_alignment": context_alignment_mock,
         "dept": dept_mock,
         "tone": tone_mock,
         "truth": truth_mock,
@@ -716,7 +739,113 @@ class TestStage5FeishuChannel:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# 6. Stage 6 — truth_intake
+# 6. Stage 6 — context alignment
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestStage6ContextAlignment:
+    """Stage 6 stops stale quoted failure/internal context before routing."""
+
+    @pytest.mark.asyncio
+    async def test_context_alignment_stops_before_truth_intake(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(
+            text="帮我生成一张新的活动海报",
+            platform_id="巅池-Agent小助手",
+        )
+        ctx = _make_context()
+        cfg = _make_config()
+
+        patched_dispatch["context_alignment"].return_value = types.SimpleNamespace(
+            stop=True,
+            reason="quoted_failed_context",
+        )
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.handled is True
+        assert result.source == "context_alignment"
+        assert result.decision_intent == "quoted_failed_context"
+        patched_dispatch["truth"].assert_not_awaited()
+        patched_dispatch["media"].assert_not_awaited()
+        patched_dispatch["dc"].assert_not_awaited()
+
+    def test_quoted_failed_context_with_new_task_gets_prompt(self) -> None:
+        from dc_router.preprocessing.context_alignment import (
+            try_handle_context_alignment,
+        )
+
+        event = _make_event(
+            text="帮我生成一张新的活动海报",
+            platform_id="巅池-Agent小助手",
+            components=[
+                _ReplyComponent(
+                    "这条问题需要真实联网检索，但本轮回复没有通过证据校验，所以我已拦截发送。"
+                )
+            ],
+        )
+
+        decision = try_handle_context_alignment(
+            event,
+            raw_text="帮我生成一张新的活动海报",
+        )
+
+        assert decision.stop is True
+        assert decision.reason == "quoted_failed_context"
+        event.should_call_llm.assert_called_once_with(False)
+        result = event.set_result.call_args.args[0]
+        assert result.is_stopped()
+        assert "上下文" in result.chain[0].text
+        assert "IM 只有一个固定聊天窗口" in result.chain[0].text
+        assert "新任务：" in result.chain[0].text
+
+    def test_quoted_failed_context_with_explicit_retry_is_allowed(self) -> None:
+        from dc_router.preprocessing.context_alignment import (
+            try_handle_context_alignment,
+        )
+
+        event = _make_event(
+            text="继续重试上一条",
+            platform_id="巅池-Agent小助手",
+            components=[
+                _ReplyComponent(
+                    "这条问题需要真实联网检索，但本轮回复没有通过证据校验，所以我已拦截发送。"
+                )
+            ],
+        )
+
+        decision = try_handle_context_alignment(event, raw_text="继续重试上一条")
+
+        assert decision.stop is False
+        event.set_result.assert_not_called()
+
+    def test_quoted_failed_context_with_explicit_new_task_is_allowed(self) -> None:
+        from dc_router.preprocessing.context_alignment import (
+            try_handle_context_alignment,
+        )
+
+        event = _make_event(
+            text="新任务：帮我生成一张新的活动海报",
+            platform_id="巅池-Agent小助手",
+            components=[
+                _ReplyComponent(
+                    "这条问题需要真实联网检索，但本轮回复没有通过证据校验，所以我已拦截发送。"
+                )
+            ],
+        )
+
+        decision = try_handle_context_alignment(
+            event,
+            raw_text="新任务：帮我生成一张新的活动海报",
+        )
+
+        assert decision.stop is False
+        event.set_result.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 7. Stage 7 — truth_intake
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -1010,6 +1139,44 @@ class TestStage7DepartmentMemory:
         result = await _dispatch.dispatch(ctx, event, cfg)
         assert result.source != "dept_memory_prompt"
 
+    def test_visual_image_question_does_not_prompt_dept_memory(self) -> None:
+        from dc_router.preprocessing import department_memory as dept_memory
+
+        dept_memory._PENDING.clear()
+        text = "那张图片是什么？"
+        event = _make_event(text=text, platform_id="巅池-Agent小助手")
+
+        with patch.object(dept_memory, "_is_system_tester_event", return_value=False):
+            decision = dept_memory.try_handle_department_memory(
+                event,
+                raw_text=text,
+                query_text=text,
+                send_prompt_response=False,
+            )
+
+        assert decision.stop is False
+        assert decision.inject_memory is False
+        assert decision.effective_text == text
+
+    def test_visual_request_with_explicit_history_still_allows_memory(self) -> None:
+        from dc_router.preprocessing import department_memory as dept_memory
+
+        dept_memory._PENDING.clear()
+        text = "查一下这张图片之前有没有相关资料"
+        event = _make_event(text=text, platform_id="巅池-Agent小助手")
+
+        with patch.object(dept_memory, "_is_system_tester_event", return_value=False):
+            decision = dept_memory.try_handle_department_memory(
+                event,
+                raw_text=text,
+                query_text=text,
+                send_prompt_response=False,
+            )
+
+        assert decision.stop is False
+        assert decision.inject_memory is True
+        assert decision.effective_text == text
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # 8. Stage 8 — memory injection
@@ -1141,6 +1308,28 @@ class TestStage10MediaRoute:
     """Stage 10 must handle image / video generation triggers."""
 
     @pytest.mark.asyncio
+    async def test_source_image_edit_runs_before_truth_intake(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(
+            text="[image] 帮我把这张图片去掉背景，人物抠出来",
+            platform_id="巅池-Agent小助手",
+        )
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["source_image_edit"].return_value = True
+        patched_dispatch["truth"].return_value = True
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.handled is True
+        assert result.source == "source_image_edit"
+        patched_dispatch["source_image_edit"].assert_awaited()
+        patched_dispatch["truth"].assert_not_awaited()
+        patched_dispatch["media"].assert_not_awaited()
+        patched_dispatch["dc"].assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_media_route_handles_image_request(
         self, patched_dispatch: dict
     ) -> None:
@@ -1266,6 +1455,64 @@ class TestStage11DCRouterDecision:
         result = await _dispatch.dispatch(ctx, event, cfg)
         assert result.handled is True
         assert result.source == "v1.0"
+
+    @pytest.mark.asyncio
+    async def test_run_dc_router_captures_observation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        event = _make_event(text="帮我看一下这个问题")
+        ctx = _make_context()
+        cfg = _make_config(enabled=True, dry_run=False)
+        envelope = types.SimpleNamespace(
+            text=event.message_str,
+            metadata={"platform_id": event.get_platform_id()},
+        )
+        decision = types.SimpleNamespace(
+            intent="fallback",
+            provider_id="aihubmix/qwen3.7-max",
+            source="fallback",
+            metadata={"queue_allowed": "false"},
+        )
+
+        class FakeDCRouter:
+            def __init__(self, **_kwargs: Any) -> None:
+                pass
+
+            async def decide(self, _envelope: Any) -> Any:
+                return decision
+
+        import dc_router_core.entrypoint as entrypoint
+
+        monkeypatch.setattr(entrypoint, "DCRouter", FakeDCRouter)
+        monkeypatch.setattr(
+            _dispatch, "build_envelope", MagicMock(return_value=envelope)
+        )
+        monkeypatch.setattr(
+            _dispatch, "_build_classifier", MagicMock(return_value=None)
+        )
+        monkeypatch.setattr(_dispatch, "_build_arbiter", AsyncMock(return_value=None))
+        monkeypatch.setattr(_dispatch, "apply_decision", AsyncMock(return_value=True))
+        monkeypatch.setattr(_dispatch, "record_router_pet_event", MagicMock())
+        capture_mock = MagicMock()
+        monkeypatch.setattr(_dispatch, "_capture_router_observation", capture_mock)
+
+        handled, intent, provider = await _dispatch._run_dc_router(
+            ctx,
+            event,
+            cfg,
+            dry_run=False,
+        )
+
+        assert handled is True
+        assert intent == "fallback"
+        assert provider == "aihubmix/qwen3.7-max"
+        capture_mock.assert_called_once_with(
+            event=event,
+            envelope=envelope,
+            decision=decision,
+            handled=True,
+            dry_run=False,
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────

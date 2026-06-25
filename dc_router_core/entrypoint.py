@@ -22,6 +22,8 @@ from typing import ClassVar, Protocol
 from dc_router_core.classifier import NoopRouterClassifier, RouterClassifier
 from dc_router_core.content_sop import infer_content_sop_metadata
 from dc_router_core.decision import RouterDecision
+from dc_router_core.decision_framework import build_decision_context
+from dc_router_core.department_requirements import match_department_requirement
 from dc_router_core.ops_provider_map import get_ops_provider_route
 from dc_router_core.ops_rules import OpsRuleMatch, match_ops_keywords, match_ops_prefix
 from dc_router_core.ops_taxonomy import OpsIntent
@@ -153,10 +155,25 @@ class DCRouter:
 
         keyword = match_keywords(envelope.combined_text)
         if keyword and keyword.intent in {
-            RouterIntent.PUBLIC_OPINION,
             RouterIntent.DEEP_CREATIVE,
             RouterIntent.DEEP_INSIGHT,
             RouterIntent.SIMPLE_CODE,
+        }:
+            return keyword
+
+        department_requirement = match_department_requirement(
+            envelope.combined_text,
+            metadata=envelope.metadata,
+        )
+        if department_requirement:
+            return RuleMatch(
+                intent=department_requirement.intent,
+                reason=department_requirement.reason,
+                source="department_workflow",
+            )
+
+        if keyword and keyword.intent in {
+            RouterIntent.PUBLIC_OPINION,
             RouterIntent.REALTIME,
         }:
             return keyword
@@ -320,12 +337,29 @@ class DCRouter:
     ) -> dict[str, str]:
         metadata = dict(envelope.metadata)
         metadata.update(
+            build_decision_context(
+                envelope.text,
+                metadata=metadata,
+                attachment_kinds=tuple(
+                    str(kind.value if isinstance(kind, AttachmentKind) else kind)
+                    for kind in envelope.attachment_kinds
+                ),
+                attachment_summary=envelope.attachment_summary,
+            ).to_metadata()
+        )
+        metadata.update(
             infer_content_sop_metadata(
                 envelope.text,
                 attachment_summary=envelope.attachment_summary,
                 has_attachments=envelope.has_attachments,
             ).to_metadata()
         )
+        department_requirement = match_department_requirement(
+            envelope.combined_text,
+            metadata=metadata,
+        )
+        if department_requirement:
+            metadata.update(department_requirement.metadata)
         if envelope.user_id:
             metadata["user_id"] = envelope.user_id
         if envelope.session_id:

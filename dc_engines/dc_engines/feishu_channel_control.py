@@ -46,6 +46,9 @@ class ChannelDecision:
     pairing_code: str = ""
     reply_text: str = ""
     stop_event: bool = False
+    chat_entry_mode: str = ""
+    identity_status: str = ""
+    fallback_policy: str = ""
 
     def metadata(self) -> dict[str, str | bool]:
         return {
@@ -55,6 +58,12 @@ class ChannelDecision:
             "feishu_channel_agent_id": self.agent_id,
             "feishu_channel_workspace": self.workspace,
             "feishu_channel_policy_reason": self.reason,
+            "dc_chat_entry_allowed": self.allowed,
+            "dc_chat_entry_mode": self.chat_entry_mode
+            or ("normal_chat" if self.allowed else "blocked"),
+            "dc_chat_entry_identity_status": self.identity_status,
+            "dc_chat_entry_reason": self.reason,
+            "dc_chat_entry_fallback_policy": self.fallback_policy,
         }
 
 
@@ -69,9 +78,10 @@ class RouteBinding:
 @dataclass(slots=True)
 class FeishuChannelConfig:
     enabled: bool = True
-    dm_policy: Policy = "pairing"
+    dm_policy: Policy = "open"
     group_policy: Policy = "allowlist"
     allow_from: list[str] = field(default_factory=list)
+    auto_approve_employee_directory: bool = True
     owners: list[str] = field(default_factory=list)
     group_allow_from: list[str] = field(default_factory=list)
     require_mention: bool = True
@@ -103,11 +113,17 @@ class FeishuChannelConfig:
             )
         return cls(
             enabled=bool(data.get("enabled", True)),
-            dm_policy=_policy(data.get("dm_policy", data.get("dmPolicy")), "pairing"),
+            dm_policy=_policy(data.get("dm_policy", data.get("dmPolicy")), "open"),
             group_policy=_policy(
                 data.get("group_policy", data.get("groupPolicy")), "allowlist"
             ),
             allow_from=_list(data.get("allow_from", data.get("allowFrom"))),
+            auto_approve_employee_directory=bool(
+                data.get(
+                    "auto_approve_employee_directory",
+                    data.get("autoApproveEmployeeDirectory", True),
+                )
+            ),
             owners=_list(data.get("owners")),
             group_allow_from=_list(
                 data.get("group_allow_from", data.get("groupAllowFrom"))
@@ -158,6 +174,24 @@ class FeishuChannelState:
 
     def is_approved(self, open_id: str) -> bool:
         return open_id in self.approved
+
+    def remember_approved(
+        self,
+        open_id: str,
+        *,
+        approver: str = "",
+        source: str = "auto",
+    ) -> bool:
+        open_id = normalize_id(open_id)
+        if not open_id or open_id in self.approved:
+            return False
+        self.approved[open_id] = {
+            "approved_at": utc_now().isoformat(),
+            "approver": approver,
+            "source": source,
+        }
+        self.save()
+        return True
 
     def create_pairing_code(
         self,
@@ -252,7 +286,13 @@ class FeishuChannelController:
             and peer.message_text.startswith("__card_action__:")
             and not peer.trusted_card_action
         ):
-            return self._block(peer, "forged_card_action", reply=False)
+            return self._block(
+                peer,
+                "forged_card_action",
+                reply=False,
+                chat_entry_mode="sensitive_action_candidate",
+                fallback_policy="fail_closed",
+            )
         if peer.kind == "direct":
             return self._decide_direct(peer)
         if peer.kind == "group":
@@ -263,8 +303,16 @@ class FeishuChannelController:
         policy = self.config.dm_policy
         if policy == "disabled":
             return self._block(peer, "dm_disabled")
-        if self._is_static_allowed(peer.sender_id) or policy == "open":
-            return self._allow(peer, "dm_allowed")
+        is_static_allowed = self._is_static_allowed(peer.sender_id)
+        if is_static_allowed or policy == "open":
+            source = "dm_static_allow" if is_static_allowed else "dm_open_auto"
+            self.state.remember_approved(peer.sender_id, source=source)
+            return self._allow(
+                peer,
+                "dm_allowed",
+                identity_status=self._identity_status(peer.sender_id),
+                fallback_policy="normal_chat",
+            )
         if policy == "allowlist":
             return self._block(peer, "dm_not_allowlisted")
         if policy == "pairing":
@@ -286,6 +334,9 @@ class FeishuChannelController:
                     f"管理员执行：/feishu-control pairing approve {code}"
                 ),
                 stop_event=True,
+                chat_entry_mode="normal_chat",
+                identity_status="unknown",
+                fallback_policy="fail_closed_explicit_pairing",
             )
         return self._block(peer, "dm_policy_invalid")
 
@@ -313,6 +364,8 @@ class FeishuChannelController:
         reason: str,
         *,
         binding: RouteBinding | None = None,
+        identity_status: str = "verified",
+        fallback_policy: str = "normal_chat",
     ) -> ChannelDecision:
         active_binding = binding or self._binding_for(peer)
         agent_id = active_binding.agent_id if active_binding else ""
@@ -340,6 +393,9 @@ class FeishuChannelController:
             peer_id=peer.peer_id,
             agent_id=agent_id,
             workspace=workspace,
+            chat_entry_mode="normal_chat",
+            identity_status=identity_status,
+            fallback_policy=fallback_policy,
         )
 
     def _block(
@@ -348,6 +404,9 @@ class FeishuChannelController:
         reason: str,
         *,
         reply: bool = True,
+        chat_entry_mode: str = "blocked",
+        identity_status: str = "",
+        fallback_policy: str = "fail_closed",
     ) -> ChannelDecision:
         return ChannelDecision(
             allowed=False,
@@ -356,6 +415,9 @@ class FeishuChannelController:
             peer_id=peer.peer_id,
             reply_text="当前飞书入口未开放，请联系管理员。" if reply else "",
             stop_event=True,
+            chat_entry_mode=chat_entry_mode,
+            identity_status=identity_status,
+            fallback_policy=fallback_policy,
         )
 
     def _is_static_allowed(self, open_id: str) -> bool:
@@ -372,6 +434,15 @@ class FeishuChannelController:
         if peer.kind == "group":
             return self.config.groups.get(peer.peer_id)
         return None
+
+    def _identity_status(self, open_id: str) -> str:
+        item = self.state.approved.get(open_id)
+        if not isinstance(item, dict):
+            return "unknown"
+        source = str(item.get("source") or "")
+        if source in {"employee_directory", "pairing", "dm_static_allow"}:
+            return "verified"
+        return "partial"
 
 
 def _policy(value: Any, default: str) -> str:

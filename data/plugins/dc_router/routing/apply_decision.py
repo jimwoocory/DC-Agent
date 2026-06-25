@@ -6,8 +6,8 @@ Decoupling: 这个模块是唯一允许调 ``context.set_provider`` + ``event.se
 任何异常都被吞掉并返回 False — 调用方根据 R5 fallback_on_error 决定是否回退 v1.0。
 
 CLI 路径 (``cli/...`` provider_id) 在这里统一分发到
-``cli_handlers.dispatch_cli_provider``, 集中处理 antigravity / codex / grok
-的 QuotaGate / circuit breaker / 卡片渲染 / fallback 逻辑.
+``cli_handlers.dispatch_cli_provider``. Codex and Grok remain executable;
+legacy disabled CLI ids stop before any queue or subprocess call.
 """
 
 from __future__ import annotations
@@ -160,7 +160,7 @@ async def apply_decision(
     reason = str(getattr(decision, "reason", "") or "")
     metadata = getattr(decision, "metadata", None)
 
-    # CLI 路径: 委托给 cli_handlers (antigravity / codex / grok)
+    # CLI 路径: 委托给 cli_handlers (disabled legacy CLI / Codex / Grok)
     if provider_id.startswith("cli/"):
         try:
             from ..cli_handlers import dispatch_cli_provider

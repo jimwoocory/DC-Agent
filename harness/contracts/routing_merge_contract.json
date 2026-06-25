@@ -69,16 +69,16 @@
     {
       "id": "R5",
       "title": "CLI provider 路径统一走 cli_handlers",
-      "text": "RouterDecision.provider_id 以 cli/ 开头 (antigravity / codex / grok) 时，routing.apply_decision 必须委托给 cli_handlers.dispatch_cli_provider，禁止在 routing 层内联任何 subprocess / pexpect / QuotaGate.admit 调用。所有 antigravity / codex / grok 的 circuit-breaker / QuotaGate 队列 / fallback 逻辑只在 cli_handlers 内部实现。",
+      "text": "RouterDecision.provider_id 以 cli/ 开头时，routing.apply_decision 必须委托给 cli_handlers.dispatch_cli_provider，禁止在 routing 层内联任何 subprocess / pexpect / QuotaGate.admit 调用。Codex / Grok 的 CLI 执行只在 cli_handlers 内部实现；legacy cli/antigravity ids must stop as disabled_legacy_cli before queue or subprocess execution.",
       "enforcement": [
         "cli_handlers._is_cli_provider 是唯一 provider_id 判定入口",
-        "antigravity_health / qwen_health / dc_quota_runtime 只允许被 cli_handlers 导入"
+        "qwen_health / dc_quota_runtime 只允许被 cli_handlers 导入"
       ]
     },
     {
       "id": "R6",
       "title": "QuotaGate admit/complete/fail 状态机",
-      "text": "CLI 任务 (antigravity / codex) 必须先调 harness.quota_gate.admit() 才能跑；admit 命中冷却 (cooldown_after_completion_seconds) 或资源占用 (concurrent_slots) 时返回 QUEUED，由 cli_handlers 给用户发排队卡；队列持久化到 SQLite (queue_store) 之后由 background queue_recovery_loop 接管。",
+      "text": "Queued CLI tasks must use harness.quota_gate.admit() before execution. Legacy disabled CLI pending jobs are cancelled by recovery instead of resumed.",
       "enforcement": [
         "cli_handlers.start_queue_recovery / stop_queue_recovery 由 plugin.py 在 enabled && !dry_run 时挂载",
         "config.queue_recovery_interval_seconds 默认 60s"
@@ -86,10 +86,10 @@
     },
     {
       "id": "R7",
-      "title": "antigravity / qwen3.6-flash circuit breaker 串联",
-      "text": "antigravity 走 antigravity_health.* (auth=30min, timeout=3min, transient=5min)；qwen3.6-flash 走 qwen_health.*。两个 health 模块独立状态，cli_handlers 命中 circuit-open 时自动切换 ANTIGRAVITY_FALLBACK_PROVIDER_ID / QWEN_FALLBACK_PROVIDER_ID。任何业务路径不得绕过 health 直接调 CliRunner。",
+      "title": "qwen3.6-flash circuit breaker",
+      "text": "qwen3.6-flash 走 qwen_health.*。任何业务路径不得绕过 health 直接调 CliRunner。",
       "enforcement": [
-        "antigravity_health.antigravity_allowed() / qwen_health.qwen3_6_flash_allowed() 是唯一入口",
+        "qwen_health.qwen3_6_flash_allowed() 是 qwen health 唯一入口",
         "health_snapshot() 是 dashboard / cli 唯一读取接口"
       ]
     },
@@ -175,9 +175,9 @@
     },
     {
       "id": "A8",
-      "title": "antigravity circuit-open 时自动 fallback",
+      "title": "legacy CLI provider ids are disabled",
       "covers": ["R7"],
-      "test_path": "tests/dc_router/test_antigravity_circuit_tuning.py::test_antigravity_timeout_opens_circuit_immediately"
+      "test_path": "tests/dc_router/test_cli_handlers.py::TestDispatchCliProviderBackend::test_legacy_cli_backend_is_disabled_without_starting_cli"
     },
     {
       "id": "A9",

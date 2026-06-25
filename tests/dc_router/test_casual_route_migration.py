@@ -1,10 +1,10 @@
-"""Regression tests for the 2026-06-08 casual / ops_writing route migration.
+"""Regression tests for retiring legacy CLI from default business routes.
 
-P2: 把 aihubmix/qwen3.6-flash 退出闲聊兜底主选 + 失败 N 次切 antigravity。
+P2: 把 aihubmix/qwen3.6-flash 退出闲聊兜底主选。
+P3: 2026-06-25 取消旧本地 CLI 默认业务入口。
 落地动作：
-  - CASUAL 与 OPS_WRITING 的 ProviderRoute.provider_id 改为 ANTIGRAVITY_CLI_FLASH
-  - 失败 N 次（默认 threshold=2）→ antigravity circuit open →
-    adapter 自动切到 ANTIGRAVITY_FALLBACK_PROVIDER_ID = aihubmix/gemini-3.5-flash
+  - CASUAL / WORK_PREFLIGHT / OPS_WRITING 改为 aihubmix/qwen3.7-max
+  - 旧本地 CLI 只保留历史 provider id 与旧卡片取消 surface
   - qwen3.6-flash 不再出现在 CASUAL/OPS_WRITING 主选路径上
 
 测试运行方式（走工程化 pytest）::
@@ -15,10 +15,7 @@ P2: 把 aihubmix/qwen3.6-flash 退出闲聊兜底主选 + 失败 N 次切 antigr
 
 from __future__ import annotations
 
-# ruff: noqa: E402, I001
-
-import importlib.util
-import os
+# ruff: noqa: E402
 import sys
 from pathlib import Path
 
@@ -33,55 +30,54 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from data.plugins.dc_router.cli_handlers import ANTIGRAVITY_FALLBACK_PROVIDER_ID
+from data.plugins.dc_router.cli_handlers import (
+    DISABLED_LEGACY_CLI_BACKEND,
+    DISABLED_LEGACY_CLI_PROVIDER_ID,
+    parse_cli_provider,
+)
 from dc_router_core.provider_map import (
     AIHUBMIX_QWEN_FLASH,
-    ANTIGRAVITY_CLI_FLASH,
+    AIHUBMIX_QWEN_MAX,
     get_provider_route,
 )
 from dc_router_core.taxonomy import RouteAction, RouteDepth, RouterIntent
 
 
-def test_casual_route_uses_antigravity_as_primary() -> None:
-    """CASUAL 主选必须迁到 Antigravity CLI，qwen3.6-flash 不能出现在主选。"""
+def test_casual_route_uses_qwen_max_as_primary() -> None:
+    """CASUAL 主选必须是 Qwen Max，不能回到 旧 CLI 或 qwen3.6-flash。"""
     route = get_provider_route(RouterIntent.CASUAL)
 
-    assert route.provider_id == ANTIGRAVITY_CLI_FLASH, (
-        f"CASUAL 主选应为 {ANTIGRAVITY_CLI_FLASH}，实际 {route.provider_id}"
-    )
+    assert route.provider_id == AIHUBMIX_QWEN_MAX
     assert route.provider_id != AIHUBMIX_QWEN_FLASH, (
         "qwen3.6-flash 必须退出 CASUAL 兜底主选"
     )
+    assert not route.provider_id.startswith("cli/antigravity/")
     assert route.depth is RouteDepth.DIRECT
     assert route.action is RouteAction.ANSWER
 
 
-def test_ops_writing_route_uses_antigravity_as_primary() -> None:
-    """OPS_WRITING 顺手迁到 Antigravity（与 CASUAL 保持一致）。"""
+def test_ops_writing_route_uses_qwen_max_as_primary() -> None:
+    """OPS_WRITING 默认不再走旧本地 CLI。"""
     route = get_provider_route(RouterIntent.OPS_WRITING)
 
-    assert route.provider_id == ANTIGRAVITY_CLI_FLASH
+    assert route.provider_id == AIHUBMIX_QWEN_MAX
     assert route.provider_id != AIHUBMIX_QWEN_FLASH, (
         "qwen3.6-flash 必须退出 OPS_WRITING 主选"
     )
+    assert not route.provider_id.startswith("cli/antigravity/")
 
 
-def test_realtime_and_work_preflight_remain_on_antigravity() -> None:
-    """WORK_PREFLIGHT / REALTIME 之前就已经在 Antigravity 上，P2 改完保持不变。"""
-    for intent in (RouterIntent.WORK_PREFLIGHT, RouterIntent.REALTIME):
-        route = get_provider_route(intent)
-        assert route.provider_id == ANTIGRAVITY_CLI_FLASH, (
-            f"{intent.value} 应该继续走 {ANTIGRAVITY_CLI_FLASH}，"
-            f"实际 {route.provider_id}"
-        )
+def test_work_preflight_uses_qwen_max() -> None:
+    """WORK_PREFLIGHT 默认不再走旧本地 CLI。"""
+    route = get_provider_route(RouterIntent.WORK_PREFLIGHT)
+    assert route.provider_id == AIHUBMIX_QWEN_MAX
+    assert not route.provider_id.startswith("cli/antigravity/")
 
 
-def test_casual_fallback_provider_id_is_aihubmix_gemini_flash() -> None:
-    """CLI handler fallback must be aihubmix/gemini-3.5-flash."""
-    assert ANTIGRAVITY_FALLBACK_PROVIDER_ID == "aihubmix/gemini-3.5-flash", (
-        "Antigravity 跳闸时必须降级到 aihubmix/gemini-3.5-flash，"
-        f"实际 {ANTIGRAVITY_FALLBACK_PROVIDER_ID}"
-    )
+def test_legacy_cli_provider_id_is_disabled() -> None:
+    """Legacy CLI ids must parse as disabled, not executable."""
+    backend, _, _ = parse_cli_provider(DISABLED_LEGACY_CLI_PROVIDER_ID)
+    assert backend == DISABLED_LEGACY_CLI_BACKEND
 
 
 def test_active_dispatch_path_does_not_import_legacy_routing_adapter() -> None:
@@ -96,28 +92,6 @@ def test_active_dispatch_path_does_not_import_legacy_routing_adapter() -> None:
     ]
     for path in active_files:
         assert "routing_adapter" not in path.read_text(encoding="utf-8")
-
-
-def test_antigravity_health_threshold_is_at_most_three() -> None:
-    """失败 N 次切 antigravity：默认 N ≤ 3（避免让员工等太久）。
-
-    阶段 5H: antigravity_health.py 已迁到 ``data/plugins/dc_router/``.
-    """
-    plugin_dir = _ROOT / "data" / "plugins" / "dc_router"
-    spec = importlib.util.spec_from_file_location(
-        "antigravity_health_under_test", plugin_dir / "antigravity_health.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-
-    # 临时清空相关 env，避免 CI 改过默认
-    os.environ.pop("DC_ANTIGRAVITY_TRANSIENT_FAILURE_THRESHOLD", None)
-    threshold = module._env_int("DC_ANTIGRAVITY_TRANSIENT_FAILURE_THRESHOLD", 2)
-    assert 1 <= threshold <= 3, (
-        f"Antigravity 跳闸阈值应在 [1,3]，实际 {threshold}（P2 期望 N 次=2）"
-    )
 
 
 @pytest.mark.parametrize(

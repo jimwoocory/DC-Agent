@@ -52,12 +52,6 @@ def test_high_risk_plugins_have_machine_readable_roles_and_engine_owners() -> No
     assert harness_sensor.boundary_status == "thin_adapter"
     assert "dc_engines.harness.runtime_hooks" in harness_sensor.engine_modules
 
-    god_mode = registry.get("god_mode_plugin")
-    assert god_mode.role == "ops_plugin"
-    assert god_mode.boundary_status == "thin_adapter"
-    assert "dc_engines.god_mode" in god_mode.engine_modules
-    assert "feishu_card_action:god_mode_approval" in god_mode.adapter_entrypoints
-
 
 def test_plugin_boundary_runtime_data_stays_outside_plugin_source_tree() -> None:
     registry = PluginBoundaryRegistry.default()
@@ -79,7 +73,6 @@ def test_plugin_boundary_contract_payload_is_stable_and_serializable() -> None:
         "department_workflow_plugin",
         "feishu_channel_control",
         "feishu_resource_plugin",
-        "god_mode_plugin",
         "harness_runtime_plugin",
         "harness_sensor_plugin",
         "harness_state_injector",

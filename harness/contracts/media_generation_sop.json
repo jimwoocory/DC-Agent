@@ -26,6 +26,26 @@
       "id": "media-generation-sop-005",
       "description": "LLM router, GPT Image, and Dreamina runtime paths finalize with media_generation cards and media generation records.",
       "verification": "uv run pytest tests/test_media_generation_runtime_paths.py -q"
+    },
+    {
+      "id": "media-generation-sop-006",
+      "description": "Chinese marketing poster/image requests keep GPT Image 2 as the primary provider through the media_sop provider prompt compiler registry, versioned prompt module library, and composable prompt recipe library, compile an English automotive marketing visual prompt for Image 2, preserve Chinese brand/text tokens verbatim, include brand asset, vehicle model, color, trim, and VI guardrails, accept source-grounded brand visual profiles, and use Dreamina as fallback or explicit opt-in.",
+      "verification": "uv run pytest dc_engines/tests/test_media_sop.py::test_gpt_image2_prompt_compiles_marketing_visual_in_english dc_engines/tests/test_media_sop.py::test_dreamina_prompt_keeps_chinese_marketing_visual_direction dc_engines/tests/test_media_sop.py::test_image_prompt_accepts_source_grounded_brand_visual_profile dc_engines/tests/test_media_sop.py::test_media_prompt_module_library_exposes_provider_modules dc_engines/tests/test_media_sop.py::test_media_prompt_recipe_library_exposes_composable_module_sets dc_engines/tests/test_media_sop.py::test_image_prompt_can_select_a_specific_prompt_recipe dc_engines/tests/test_media_sop.py::test_image_prompt_compiler_registry_keeps_image2_primary_with_dreamina_fallback -q && uv run pytest tests/dc_router/test_media_route_policy.py -q"
+    },
+    {
+      "id": "media-generation-sop-007",
+      "description": "Low-friction prompt catalog presets follow the user-provided reference direction first, expose automotive WeChat cover, Rednote cover, festival poster, and launch key visual options so employees can choose outcomes without manually writing long prompts, and keep internal proposal changes behind feedback.",
+      "verification": "uv run pytest dc_engines/tests/test_media_prompt_catalog.py dc_engines/tests/test_media_sop.py::test_image_prompt_accepts_low_friction_prompt_catalog_selection -q"
+    },
+    {
+      "id": "media-generation-sop-008",
+      "description": "Source image edit requests such as background removal or cutout with an attached image must not be routed to text-to-image generation and should return a transparent PNG when a processable image is attached.",
+      "verification": "uv run pytest tests/dc_router/test_media_route_policy.py::test_source_image_cutout_request_does_not_route_to_generation tests/dc_router/test_media_route_policy.py::test_source_image_cutout_request_without_file_returns_clear_reply tests/dc_router/test_media_route_policy.py::test_source_image_cutout_request_returns_transparent_png -q"
+    },
+    {
+      "id": "media-generation-sop-009",
+      "description": "GPT Image, Dreamina, and router media-generation success paths finalize media_generation cards through the runtime gateway and schedule retractable task cards after the generated media is sent separately.",
+      "verification": "uv run pytest tests/test_media_generation_runtime_paths.py::test_media_generation_runtime_paths_retract_success_task_cards -q"
     }
   ],
   "verification": {

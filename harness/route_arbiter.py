@@ -4,7 +4,7 @@ DCRouter L1 classifies intent, L2 selects a ProviderRoute, and this L3 arbiter
 keeps the intent unchanged while adapting execution to live scarce-resource
 state:
 
-- Circuit open, such as Antigravity CLI failure, swaps to the fallback provider.
+- Circuit open swaps to the fallback provider when a circuit checker is configured.
 - Busy quota, such as in-flight or cooldown resources, upgrades light intents to
   FRONT queueing and heavy intents to HERMES deep-task execution.
 - Healthy resources pass through unchanged, matching PassThroughArbiter.
@@ -22,7 +22,7 @@ from dc_router_core.entrypoint import ArbitrationResult, MessageEnvelope
 from dc_router_core.taxonomy import RouteAction, RouteDepth
 from harness.quota_gate import QuotaGate
 
-# Same shape as antigravity_health.antigravity_allowed.
+# Generic circuit-checker shape: (allowed, reason, state).
 CircuitChecker = Callable[[], tuple[bool, str, dict]]
 
 DEFAULT_HEAVY_INTENTS = frozenset({"deep_creative", "deep_insight"})
@@ -34,9 +34,9 @@ class QuotaGateArbiter:
 
     quota_gate: QuotaGate | None = None
     circuit_checker: CircuitChecker | None = None
-    circuit_provider_prefix: str = "cli/antigravity/"
-    fallback_provider_id: str = "aihubmix/gemini-3.5-flash"
-    fallback_target_model: str = "gemini-3.5-flash"
+    circuit_provider_prefix: str = ""
+    fallback_provider_id: str = "aihubmix/qwen3.7-max"
+    fallback_target_model: str = "qwen3.7-max"
     heavy_intents: frozenset[str] = DEFAULT_HEAVY_INTENTS
 
     async def arbitrate(
@@ -73,6 +73,8 @@ class QuotaGateArbiter:
         metadata: dict[str, str],
     ) -> ArbitrationResult | None:
         if self.circuit_checker is None:
+            return None
+        if not self.circuit_provider_prefix:
             return None
         provider_id = getattr(route, "provider_id", "")
         if not provider_id.startswith(self.circuit_provider_prefix):

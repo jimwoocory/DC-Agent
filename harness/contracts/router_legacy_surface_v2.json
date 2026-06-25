@@ -1,0 +1,57 @@
+{
+  "contract_id": "router_legacy_surface_v2",
+  "version": "2.0.0",
+  "status": "active",
+  "goal": "Inventory legacy router decision surfaces before migrating them into observation slots, replay expectations, and deterministic rule gates.",
+  "required_surfaces": [
+    "business_prefix_rules",
+    "business_document_link_rule",
+    "business_keyword_rules",
+    "business_department_workflow_rules",
+    "business_content_sop_rule",
+    "business_classifier_fallback",
+    "business_provider_map",
+    "ops_prefix_rules",
+    "ops_keyword_rules",
+    "ops_provider_map",
+    "route_arbiter"
+  ],
+  "high_risk_surfaces": [
+    "business_keyword_rules",
+    "business_department_workflow_rules",
+    "business_provider_map",
+    "route_arbiter"
+  ],
+  "migration_policy": [
+    "No new legacy decision surface may be added without an inventory entry.",
+    "High-risk surfaces must require replay coverage before behavior changes.",
+    "High-risk surfaces must appear in daily review packs as migration priorities.",
+    "Provider or queue-affecting surfaces must preserve Router Decision Framework rule_gate metadata.",
+    "Department workflow surfaces must remain context-constrained unless an approved replay locks active workflow dispatch."
+  ],
+  "acceptance_tests": [
+    {
+      "id": "RLS-001",
+      "title": "Legacy surface inventory covers all contract-required surfaces",
+      "verification": "uv run pytest tests/dc_router/test_router_legacy_surface.py::test_legacy_surface_inventory_covers_contract_required_surfaces -q"
+    },
+    {
+      "id": "RLS-002",
+      "title": "High-risk surfaces require replay before migration",
+      "verification": "uv run pytest tests/dc_router/test_router_legacy_surface.py::test_high_risk_surfaces_require_replay_migration -q"
+    },
+    {
+      "id": "RLS-003",
+      "title": "Inventory counts stay aligned with current router tables",
+      "verification": "uv run pytest tests/dc_router/test_router_legacy_surface.py::test_legacy_surface_counts_match_router_tables -q"
+    },
+    {
+      "id": "RLS-004",
+      "title": "Daily review packs include high-risk legacy surface priorities",
+      "verification": "uv run pytest tests/dc_router/test_router_observation_capture.py::test_review_pack_is_redacted_and_review_only -q"
+    }
+  ],
+  "verification": {
+    "targeted": "uv run pytest tests/dc_router/test_router_legacy_surface.py tests/dc_router/test_router_decision_framework.py -q"
+  }
+}

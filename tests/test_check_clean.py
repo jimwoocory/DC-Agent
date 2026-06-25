@@ -16,10 +16,7 @@ def test_workspace_uv_cache_is_allowed_for_sandboxed_checks() -> None:
 
 
 def test_runtime_event_and_state_files_are_forbidden() -> None:
-    assert (
-        violation_for("data/antigravity_health_events.jsonl")
-        == "runtime event/state file"
-    )
+    assert violation_for("data/qwen_health_events.jsonl") == "runtime event/state file"
     assert violation_for("data/grok_worker_state.json") == "runtime event/state file"
     assert (
         violation_for("nas_sync/sync_latest.failstate") == "runtime event/state file"

@@ -14,21 +14,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import pexpect
-
 try:
     from .paths import data_path
 except ImportError:  # pragma: no cover - direct file-load compatibility
     from data.plugins.dc_router.paths import data_path
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07")
-AGY_AUTH_PATTERNS = (
-    "Authentication required",
-    "authorization code",
-    "Visit the URL",
-    "oauth2/auth",
-    "Please visit",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,10 +42,7 @@ class CliRunner:
     """Run approved local AI CLIs without invoking a shell."""
 
     ALLOWED_BINS = {
-        "Antigravity",
         "Claude",
-        "agy",
-        "antigravity",
         "claude",
         "codex",
         "gemini",
@@ -110,205 +98,6 @@ class CliRunner:
             args,
             timeout=timeout,
             text_field="response",
-        )
-
-    async def run_antigravity(
-        self,
-        prompt: str,
-        *,
-        model: str = "gemini-3.5-flash",
-        timeout: float = 90,
-        attachment_paths: list[str] | None = None,
-    ) -> CliResult:
-        """Run Antigravity CLI via agy print mode."""
-        bin_path = os.environ.get("DC_ANTIGRAVITY_CLI_BIN", "agy").strip()
-        try:
-            max_timeout = float(os.environ.get("DC_ANTIGRAVITY_MAX_TIMEOUT", "90"))
-        except ValueError:
-            max_timeout = 90.0
-        effective_timeout = min(float(timeout), max_timeout)
-        full_prompt = prompt
-        if attachment_paths:
-            refs = "\n".join(f"- {path}" for path in attachment_paths if path)
-            if refs:
-                full_prompt = (
-                    f"{prompt}\n\n<local_attachments>\n{refs}\n</local_attachments>"
-                )
-
-        args_template = os.environ.get("DC_ANTIGRAVITY_CLI_ARGS")
-        if args_template:
-            try:
-                extra_args = [
-                    part.format(
-                        model=model,
-                        prompt=full_prompt,
-                        timeout_seconds=int(effective_timeout),
-                    )
-                    for part in shlex.split(args_template)
-                    if part.strip()
-                ]
-            except ValueError as exc:
-                return CliResult(
-                    elapsed_sec=0.0,
-                    error_code="bad_cli_args",
-                    error=f"Invalid DC_ANTIGRAVITY_CLI_ARGS: {exc}",
-                    command_preview=bin_path,
-                )
-            args = [bin_path, *extra_args]
-            if "{prompt}" not in args_template:
-                args.append(full_prompt)
-            return await self._run_stdout_cli(
-                args,
-                prompt="",
-                timeout=effective_timeout,
-                text_fields=("response", "result", "text", "content"),
-            )
-        else:
-            with tempfile.NamedTemporaryFile(
-                mode="w+",
-                suffix=".log",
-                encoding="utf-8",
-                delete=True,
-            ) as log_file:
-                return await asyncio.to_thread(
-                    self._run_antigravity_pty,
-                    bin_path,
-                    [
-                        "--log-file",
-                        log_file.name,
-                        "--print",
-                        full_prompt,
-                        "--dangerously-skip-permissions",
-                        "--print-timeout",
-                        f"{int(effective_timeout)}s",
-                    ],
-                    effective_timeout,
-                    Path(log_file.name),
-                )
-
-    def _classify_antigravity_failure(self, output: str) -> tuple[str | None, str]:
-        if any(pattern in output for pattern in AGY_AUTH_PATTERNS):
-            return "auth_required", "agy requires OAuth authorization"
-        if (
-            "User location is not supported" in output
-            or "not eligible for Antigravity" in output
-        ):
-            return "unsupported_location", "agy account/location is not eligible"
-        return None, ""
-
-    def _run_antigravity_pty(
-        self,
-        bin_path: str,
-        args: list[str],
-        timeout: float,
-        log_path: Path | None = None,
-    ) -> CliResult:
-        started_at = time.perf_counter()
-        command_preview = shlex.join([bin_path, *args])
-        bin_name = Path(bin_path).name
-        if bin_name not in self.ALLOWED_BINS:
-            return CliResult(
-                elapsed_sec=0.0,
-                error_code="bin_not_allowed",
-                error=f"CLI binary is not allowed: {bin_name}",
-                command_preview=command_preview,
-            )
-
-        try:
-            child = pexpect.spawn(
-                bin_path,
-                args,
-                cwd=str(self.cwd),
-                encoding="utf-8",
-                timeout=timeout,
-                codec_errors="replace",
-            )
-        except Exception as exc:  # noqa: BLE001
-            return CliResult(
-                elapsed_sec=time.perf_counter() - started_at,
-                error_code="cli_spawn_failed",
-                error=f"{type(exc).__name__}: {exc}",
-                command_preview=command_preview,
-            )
-
-        output = ""
-        auth_hit = False
-        timed_out = False
-        try:
-            while True:
-                try:
-                    chunk = child.read_nonblocking(size=4096, timeout=2)
-                    if chunk:
-                        output += chunk
-                        error_code, _error = self._classify_antigravity_failure(output)
-                        if error_code == "auth_required":
-                            auth_hit = True
-                            break
-                except pexpect.exceptions.TIMEOUT:
-                    if time.perf_counter() - started_at > timeout:
-                        timed_out = True
-                        break
-                    continue
-                except pexpect.exceptions.EOF:
-                    break
-        finally:
-            if child.isalive():
-                try:
-                    child.close(force=True)
-                except Exception:  # noqa: BLE001
-                    pass
-
-        elapsed = time.perf_counter() - started_at
-        text = ANSI_RE.sub("", output).strip()
-        log_text = ""
-        if log_path:
-            try:
-                log_text = log_path.read_text(encoding="utf-8", errors="replace")
-            except Exception:  # noqa: BLE001
-                log_text = ""
-        combined = f"{text}\n{log_text}".strip()
-        exit_code = child.exitstatus
-
-        error_code, error = self._classify_antigravity_failure(combined)
-        if error_code == "unsupported_location" and text and exit_code == 0:
-            error_code = None
-            error = ""
-        if error_code or auth_hit:
-            return CliResult(
-                text=text,
-                raw={"stdout": text, "log_tail": log_text[-4000:]},
-                elapsed_sec=elapsed,
-                error_code=error_code or "auth_required",
-                error=error or "agy requires OAuth authorization",
-                exit_code=exit_code,
-                command_preview=command_preview,
-            )
-        if timed_out:
-            return CliResult(
-                text=text,
-                raw={"stdout": text, "log_tail": log_text[-4000:]},
-                elapsed_sec=elapsed,
-                error_code="timeout",
-                error=f"CLI timed out after {timeout:.0f}s",
-                exit_code=exit_code,
-                command_preview=command_preview,
-            )
-        if not text:
-            return CliResult(
-                raw={"stdout": text, "log_tail": log_text[-4000:]},
-                elapsed_sec=elapsed,
-                error_code="empty_response",
-                error="empty CLI response",
-                exit_code=exit_code,
-                command_preview=command_preview,
-            )
-
-        return CliResult(
-            text=text,
-            raw={"stdout": text, "log_tail": log_text[-4000:]},
-            elapsed_sec=elapsed,
-            exit_code=exit_code,
-            command_preview=command_preview,
         )
 
     async def run_claude(

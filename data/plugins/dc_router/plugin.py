@@ -26,6 +26,7 @@ class DCRouterPlugin(Star):
     def __init__(self, context: Context) -> None:
         super().__init__(context)
         self._dc_queue_recovery_running = False
+        self._dc_media_recovery_running = False
 
     def _start_dc_queue_recovery(self) -> None:
         try:
@@ -56,11 +57,39 @@ class DCRouterPlugin(Star):
         finally:
             self._dc_queue_recovery_running = False
 
+    def _start_dc_media_recovery(self) -> None:
+        try:
+            from .preprocessing.media_route import start_media_task_recovery
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[dc_router] 启动 media_task_recovery 失败: %s", exc)
+            return
+        try:
+            start_media_task_recovery(self.context)
+            self._dc_media_recovery_running = True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[dc_router] media_task_recovery 启动异常: %s", exc)
+
+    def _stop_dc_media_recovery(self) -> None:
+        if not self._dc_media_recovery_running:
+            return
+        try:
+            from .preprocessing.media_route import stop_media_task_recovery
+        except Exception:  # noqa: BLE001
+            self._dc_media_recovery_running = False
+            return
+        try:
+            stop_media_task_recovery()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[dc_router] media_task_recovery 停止忽略异常: %s", exc)
+        finally:
+            self._dc_media_recovery_running = False
+
     async def initialize(self) -> None:
         """Plugin 启动时只挂载 background helpers；不读取任何业务配置。"""
         cfg = load_config()
         if cfg.is_active and not cfg.is_dry_run:
             self._start_dc_queue_recovery()
+            self._start_dc_media_recovery()
         logger.info(
             "[dc_router] initialize · enabled=%s dry_run=%s",
             cfg.enabled,
@@ -69,3 +98,4 @@ class DCRouterPlugin(Star):
 
     async def terminate(self) -> None:
         self._stop_dc_queue_recovery()
+        self._stop_dc_media_recovery()

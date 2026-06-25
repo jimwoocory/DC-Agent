@@ -46,6 +46,11 @@
       "id": "card-system-009",
       "description": "The card template asset matrix is generated from the reusable runtime registry and gates runtime gateway card_type call sites, dynamic forwarders, sample payloads, and grey evidence without relying on a one-off script.",
       "verification": "scripts-tools/card-system-health.py --strict-gate && scripts-tools/card-system-health.py --matrix && scripts-tools/card-system-health.py --manifest --json"
+    },
+    {
+      "id": "card-system-010",
+      "description": "The shared Feishu card runtime can schedule best-effort message deletion for retractable task cards after successful finalize without deleting final-answer cards by default.",
+      "verification": "uv run pytest dc_engines/tests/test_card_dedup_2026_06_11.py::test_streamer_schedule_retract_deletes_message dc_engines/tests/test_card_system_dedup.py::test_runtime_finalize_can_schedule_retractable_task_card -q"
     }
   ],
   "verification": {

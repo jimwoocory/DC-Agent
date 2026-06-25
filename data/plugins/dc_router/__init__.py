@@ -6,9 +6,8 @@
   media / feishu channel)
 - ``routing/``       — 纯路由逻辑 (envelope / reasoning prefix / apply decision
   / legacy v1.0 fallback)
-- ``cli_handlers.py`` — CLI provider 编排 (antigravity / codex / grok) — 走
-  QuotaGate + circuit breaker + 卡片渲染, 失败时自动 fallback
-- ``health.py``      — antigravity / qwen circuit breaker 统一快照
+- ``cli_handlers.py`` — CLI provider 编排 (codex / grok); legacy CLI ids are disabled
+- ``health.py``      — routed provider health snapshot
 - ``config.py``      — 单一来源 (data/config/dc_router_config.json)
 - ``dispatch.py``    — 编排层 (顺序敏感: card → slash → chitchat → reasoning
   prefix → feishu → truth intake → dept memory → memory injection → tone →

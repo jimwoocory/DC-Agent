@@ -1,0 +1,155 @@
+{
+  "contract_id": "router_decision_framework",
+  "version": "1.0.0",
+  "status": "active",
+  "goal": "Move DC router decisions toward observable employee chat behavior loops instead of fixed keyword patching, while keeping final execution deterministic.",
+  "observation_slots": [
+    "speaker_context",
+    "conversation_state",
+    "object_reference",
+    "action_force",
+    "department_signal",
+    "resource_need",
+    "risk_gate",
+    "next_action"
+  ],
+  "llm_label_policy": {
+    "allowed": "LLM output may create candidate labels and evidence for offline review or low-confidence annotation.",
+    "forbidden": "LLM labels must not directly set tool_execute, queue, provider pinning, or task creation.",
+    "default_label_model": "aihubmix/qwen3.7-max",
+    "offline_review_models": [
+      "aihubmix/qwen3.7-max",
+      "aihubmix/claude-sonnet-4-6",
+      "aihubmix/claude-opus-4-7",
+      "aihubmix/claude-opus-4-8"
+    ],
+    "rejected_label_models": [
+      "aihubmix/doubao-seed-2-1-pro"
+    ],
+    "parser": "dc_router_core/llm_annotation.py"
+  },
+  "rule_gate": [
+    "Legacy cli/antigravity provider ids are disabled tombstones; no router path may execute them, call a local binary, or switch providers through a legacy fallback path.",
+    "Legacy cli/antigravity provider ids must parse as disabled_legacy_cli and stop before QuotaGate.admit or any CliRunner subprocess call.",
+    "Old legacy CLI queue card actions are cancel-only and must not switch to another provider as a fallback.",
+    "Pending legacy CLI jobs discovered during recovery must be cancelled rather than resumed.",
+    "Feedback and follow-up questions must not auto-queue.",
+    "Department signals constrain context only and must not be the first entry gate.",
+    "Cross-department coordination questions must not hard-route to a single department workflow.",
+    "Liuqi branch context is organization-interface context only and must not auto-dispatch brand publicity work.",
+    "Media and attachment handling is evaluated before department routing."
+  ],
+  "replay_dataset": "harness/replay/router_decision_framework_v1.json",
+  "replay_expectation_policy": "Approved replay samples must define expected_slots, expected_rule_gate, and expected_final. These expectations are executable contract checks and must be updated only through human-reviewed replay promotion.",
+  "runtime_observation": {
+    "module": "data/plugins/dc_router/observation_capture.py",
+    "default_path": "data/runtime/router_decision_observations.jsonl",
+    "privacy_policy": "Runtime records must not include raw employee message text; use text_hash, text_shape, hashed user/session ids, slots, rule_gate, final route, and side-effect flags only.",
+    "side_effect_policy": "Observation capture is best-effort and must never alter provider selection, queue admission, task creation, or user-visible replies."
+  },
+  "offline_proposal": {
+    "script": "scripts-tools/router_replay_proposals.py",
+    "review_pack_script": "scripts-tools/router_review_pack.py",
+    "promotion_script": "scripts-tools/router_promote_replay_candidate.py",
+    "default_output": "harness/replay/proposals/router_decision_framework_proposals.json",
+    "default_review_pack_output": "harness/replay/proposals/router_decision_framework_review_pack.json",
+    "review_policy": "Generated proposals are review_required only. They must not directly modify router rules or the approved replay dataset.",
+    "replay_candidate_policy": "Replay candidates generated from observations must omit raw message text, require human reconstruction from private context, and remain review_required until manually promoted into the approved replay dataset.",
+    "review_pack_policy": "Review packs aggregate redacted observations, proposals, and high-risk legacy surface priorities for daily human review only. They must not include raw message text or mutate router rules, queues, providers, or replay datasets.",
+    "promotion_policy": "Only approved replay candidates with human-supplied message_text, matching source_observation_hash, and complete expected slots/gates/final behavior may be appended to the approved replay dataset."
+  },
+  "replay_coverage": [
+    "cutout_followup_blocks_queue",
+    "brand_middle_platform_conflict_is_context",
+    "liuqi_branch_placeholder_only",
+    "department_assignment_context_only",
+    "ordinary_employee_chat_enters",
+    "disabled_legacy_cli_false_queue_blocks",
+    "direct_image_generation_media_first"
+  ],
+  "acceptance_tests": [
+    {
+      "id": "RDF-001",
+      "title": "Observation slots are present and serialized to metadata",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_observation_slots_are_contract_metadata -q"
+    },
+    {
+      "id": "RDF-002",
+      "title": "LLM candidates are evidence only",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_llm_candidate_cannot_execute_or_queue_by_itself -q"
+    },
+    {
+      "id": "RDF-003",
+      "title": "Replay samples cover the required employee chat scenarios",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_replay_samples_cover_contract_required_cases -q"
+    },
+    {
+      "id": "RDF-004",
+      "title": "Replay dataset is externalized and loadable",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_contract_replay_dataset_is_loadable -q"
+    },
+    {
+      "id": "RDF-005",
+      "title": "Legacy CLI provider ids are disabled before backend execution",
+      "verification": "uv run pytest tests/dc_router/test_cli_handlers.py::TestParseCliProvider::test_legacy_cli_provider_is_disabled_backend tests/dc_router/test_cli_handlers.py::TestDispatchCliProviderBackend::test_legacy_cli_backend_is_disabled_without_starting_cli -q"
+    },
+    {
+      "id": "RDF-006",
+      "title": "Runtime observation capture is redacted and append-only",
+      "verification": "uv run pytest tests/dc_router/test_router_observation_capture.py::test_observation_record_excludes_raw_text tests/dc_router/test_router_observation_capture.py::test_capture_appends_jsonl -q"
+    },
+    {
+      "id": "RDF-007",
+      "title": "Offline proposal generation is review-only",
+      "verification": "uv run pytest tests/dc_router/test_router_observation_capture.py::test_replay_proposals_are_review_only tests/dc_router/test_router_observation_capture.py::test_proposal_script_writes_review_file -q"
+    },
+    {
+      "id": "RDF-008",
+      "title": "Cross-department and Liuqi context do not hard-route to department workflows",
+      "verification": "uv run pytest tests/dc_router/test_router_core.py::test_brand_middle_platform_coordination_is_context_only tests/dc_router/test_router_core.py::test_liuq_brand_context_keeps_org_interface_context_only -q"
+    },
+    {
+      "id": "RDF-009",
+      "title": "Observation proposals export sanitized replay review candidates only",
+      "verification": "uv run pytest tests/dc_router/test_router_observation_capture.py::test_replay_candidate_is_sanitized_and_human_promoted -q"
+    },
+    {
+      "id": "RDF-010",
+      "title": "Approved replay samples lock expected slots, gates, and final routing behavior",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_replay_samples_have_expected_gates tests/dc_router/test_router_decision_framework.py::test_replay_samples_lock_expected_final_router_behavior -q"
+    },
+    {
+      "id": "RDF-011",
+      "title": "Every approved replay sample defines executable expectations",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_approved_replay_samples_define_executable_expectations -q"
+    },
+    {
+      "id": "RDF-012",
+      "title": "Replay promotion only accepts approved human-reviewed candidates",
+      "verification": "uv run pytest tests/dc_router/test_router_observation_capture.py::test_replay_candidate_promotion_requires_approval tests/dc_router/test_router_observation_capture.py::test_promote_replay_candidate_appends_approved_sample tests/dc_router/test_router_observation_capture.py::test_promotion_script_appends_approved_candidate -q"
+    },
+    {
+      "id": "RDF-013",
+      "title": "Offline LLM annotations parse as candidate evidence only",
+      "verification": "uv run pytest tests/dc_router/test_router_decision_framework.py::test_offline_llm_annotation_parses_candidate_evidence_only tests/dc_router/test_router_decision_framework.py::test_offline_llm_annotation_rejects_final_decision_fields tests/dc_router/test_router_decision_framework.py::test_offline_llm_annotation_rejects_doubao_router_labeler -q"
+    },
+    {
+      "id": "RDF-014",
+      "title": "Daily review packs are redacted and review-only",
+      "verification": "uv run pytest tests/dc_router/test_router_observation_capture.py::test_review_pack_is_redacted_and_review_only tests/dc_router/test_router_observation_capture.py::test_review_pack_script_writes_redacted_pack -q"
+    },
+    {
+      "id": "RDF-015",
+      "title": "Old legacy CLI queue cards are cancel-only",
+      "verification": "uv run pytest tests/dc_router/test_cli_handlers.py::TestQueueRecoveryFiltering::test_old_legacy_cli_queue_card_is_disabled_without_provider_switch -q"
+    },
+    {
+      "id": "RDF-016",
+      "title": "Legacy CLI is not a default business provider and old pending legacy jobs are cancelled",
+      "verification": "uv run pytest tests/dc_router/test_casual_route_migration.py::test_casual_route_uses_qwen_max_as_primary tests/dc_router/test_casual_route_migration.py::test_ops_writing_route_uses_qwen_max_as_primary tests/dc_router/test_casual_route_migration.py::test_work_preflight_uses_qwen_max tests/dc_router/test_cli_handlers.py::TestQueueRecoveryFiltering::test_recovery_cancels_retired_legacy_cli_pending_job -q"
+    }
+  ],
+  "verification": {
+    "targeted": "uv run pytest tests/dc_router/test_router_decision_framework.py tests/dc_router/test_router_observation_capture.py tests/dc_router/test_cli_handlers.py::TestDispatchCliProviderBackend::test_legacy_cli_backend_is_disabled_without_starting_cli -q"
+  }
+}

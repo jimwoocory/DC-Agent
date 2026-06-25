@@ -9,12 +9,13 @@ from dc_router_core.taxonomy import RouteAction, RouteDepth, RouterIntent
 AIHUBMIX_GEMINI_FLASH = "aihubmix/gemini-3.5-flash"
 AIHUBMIX_GEMINI_PRO = "aihubmix/gemini-3.1-pro-preview"
 AIHUBMIX_QWEN_FLASH = "aihubmix/qwen3.6-flash"
+AIHUBMIX_QWEN_MAX = "aihubmix/qwen3.7-max"
 AIHUBMIX_DEEPSEEK_PRO = "aihubmix/deepseek-v4-pro"
+AIHUBMIX_DOUBAO_SEED_2_1_PRO = "aihubmix/doubao-seed-2-1-pro"
 AIHUBMIX_GROK = "aihubmix/grok-4.3"
 AIHUBMIX_CLAUDE_SONNET_4_6 = "aihubmix/claude-sonnet-4-6"
 AIHUBMIX_CLAUDE_OPUS_4_7 = "aihubmix/claude-opus-4-7"
 AIHUBMIX_CLAUDE_OPUS_4_8 = "aihubmix/claude-opus-4-8"
-ANTIGRAVITY_CLI_FLASH = "cli/antigravity/gemini-3.5-flash"
 CLI_GROK_BUILD = "cli/grok-build"
 CLI_CODEX_GPT_5_4 = "cli/codex/gpt-5.4"
 CODEX_GPT_5_5_FALLBACK = "codex/gpt-5.5-xhigh"
@@ -36,32 +37,31 @@ class ProviderRoute:
 
 
 DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
-    # 2026-06-08 修订：qwen3.6-flash 长期空内容，退回 Antigravity CLI 作为 CASUAL 主选。
-    # - 主选：cli/antigravity/gemini-3.5-flash（Antigravity 健康检查通过时）
-    # - 兜底：aihubmix/gemini-3.5-flash（Antigravity circuit open 时由 adapter 切过去）
+    # 2026-06-25: local Gemini CLI is retired from default business routing.
+    # Ordinary chat and lightweight work now use Qwen Max directly.
     RouterIntent.CASUAL: ProviderRoute(
         intent=RouterIntent.CASUAL,
-        provider_id=ANTIGRAVITY_CLI_FLASH,
-        target_model="gemini-3.5-flash",
+        provider_id=AIHUBMIX_QWEN_MAX,
+        target_model="qwen3.7-max",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Casual chat through Antigravity CLI; AIHubMix Gemini Flash is the fallback when Antigravity circuit opens.",
+        description="Casual chat through AIHubMix Qwen 3.7 Max.",
     ),
     RouterIntent.WORK_PREFLIGHT: ProviderRoute(
         intent=RouterIntent.WORK_PREFLIGHT,
-        provider_id=ANTIGRAVITY_CLI_FLASH,
-        target_model="gemini-3.5-flash",
+        provider_id=AIHUBMIX_QWEN_MAX,
+        target_model="qwen3.7-max",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Work preflight and lightweight copy through Antigravity CLI, with AIHubMix fallback.",
+        description="Work preflight and lightweight copy through AIHubMix Qwen 3.7 Max.",
     ),
     RouterIntent.OPS_WRITING: ProviderRoute(
         intent=RouterIntent.OPS_WRITING,
-        provider_id=ANTIGRAVITY_CLI_FLASH,
-        target_model="gemini-3.5-flash",
+        provider_id=AIHUBMIX_QWEN_MAX,
+        target_model="qwen3.7-max",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Office writing and routine operational drafts through Antigravity CLI (qwen3.6-flash retired from this slot on 2026-06-08).",
+        description="Office writing and routine operational drafts through AIHubMix Qwen 3.7 Max.",
     ),
     RouterIntent.MULTIMODAL: ProviderRoute(
         intent=RouterIntent.MULTIMODAL,
@@ -73,11 +73,11 @@ DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
     ),
     RouterIntent.REALTIME: ProviderRoute(
         intent=RouterIntent.REALTIME,
-        provider_id=ANTIGRAVITY_CLI_FLASH,
-        target_model="gemini-3.5-flash",
+        provider_id=AIHUBMIX_QWEN_MAX,
+        target_model="qwen3.7-max",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Realtime and search-like questions through Antigravity CLI, with AIHubMix Gemini fallback.",
+        description="Realtime and search-like questions through AIHubMix Qwen 3.7 Max; Brave remains the factual search source.",
     ),
     RouterIntent.PUBLIC_OPINION: ProviderRoute(
         intent=RouterIntent.PUBLIC_OPINION,
@@ -97,11 +97,11 @@ DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
     ),
     RouterIntent.CREATIVE: ProviderRoute(
         intent=RouterIntent.CREATIVE,
-        provider_id=AIHUBMIX_DEEPSEEK_PRO,
-        target_model="deepseek-v4-pro",
+        provider_id=AIHUBMIX_DOUBAO_SEED_2_1_PRO,
+        target_model="doubao-seed-2-1-pro",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="High-value marketing copy, slogans, and scripts through AIHubMix DeepSeek Pro.",
+        description="High-value planning, marketing copy, slogans, and scripts through AIHubMix Doubao Seed 2.1 Pro.",
     ),
     RouterIntent.INSIGHT: ProviderRoute(
         intent=RouterIntent.INSIGHT,
@@ -129,11 +129,11 @@ DEFAULT_PROVIDER_MAP: dict[RouterIntent, ProviderRoute] = {
     ),
     RouterIntent.FALLBACK: ProviderRoute(
         intent=RouterIntent.FALLBACK,
-        provider_id=ANTIGRAVITY_CLI_FLASH,
-        target_model="gemini-3.5-flash",
+        provider_id=AIHUBMIX_QWEN_MAX,
+        target_model="qwen3.7-max",
         depth=RouteDepth.DIRECT,
         action=RouteAction.ANSWER,
-        description="Fallback for unclear non-garbage messages through Antigravity CLI, with AIHubMix Gemini fallback.",
+        description="Fallback for unclear non-garbage messages through AIHubMix Qwen 3.7 Max.",
     ),
 }
 

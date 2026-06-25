@@ -32,7 +32,7 @@ def test_legacy_routing_adapter_is_only_a_compatibility_shim() -> None:
 def test_legacy_routing_adapter_reexports_new_router_boundaries() -> None:
     module = _load_routing_adapter()
 
-    assert module.ANTIGRAVITY_FALLBACK_PROVIDER_ID == "aihubmix/gemini-3.5-flash"
+    assert module.DISABLED_LEGACY_CLI_BACKEND == "disabled_legacy_cli"
     assert module.is_cli_provider("cli/antigravity/gemini-3.5-flash") is True
     assert module.parse_cli_provider("aihubmix/gemini-3.5-flash") == (
         "",

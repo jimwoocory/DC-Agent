@@ -93,8 +93,8 @@ _ensure_components_module()
 
 # Import after stubbing so the module-level imports succeed. We import
 # the routing.event_envelope module via importlib.util so we do not
-# trigger ``dc_router.__init__`` (which pulls in plugin.py → health.py
-# → antigravity_health.py, all of which depend on AstrBot runtime).
+# trigger ``dc_router.__init__`` (which pulls in plugin.py / health.py and
+# depends on AstrBot runtime).
 _EVENT_ENVELOPE_PATH = (
     Path(__file__).resolve().parents[2]
     / "data"

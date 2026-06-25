@@ -1,4 +1,4 @@
-"""巅池-技术 日报阶段 B：用 agy 完成分析、学习和巡检 → report.md。"""
+"""巅池-技术 日报阶段 B：生成分析、学习和巡检 → report.md。"""
 
 from __future__ import annotations
 
@@ -11,13 +11,17 @@ from datetime import date as _date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from agy_runner import run_agy  # noqa: E402
+from searcher import (  # noqa: E402
+    GEMINI_MODEL,
+    _load_aihubmix_key,
+    gemini_openai_compat,
+)
 
 DC_ROOT = Path("/Users/dianchi/DC-Agent")
 PLUGIN_DIR = DC_ROOT / "data/plugins/dianchi_tech"
 DATA_ROOT = DC_ROOT / "data/dianchi_tech"
 LEARNING_LOG = DATA_ROOT / "learning_log.json"
-PROMPT_PATH = PLUGIN_DIR / "prompts/agy_analyze.md"
+PROMPT_PATH = PLUGIN_DIR / "prompts/analysis.md"
 
 LOG_RE = re.compile(r"LEARNING_LOG_JSON\s*:\s*(\{.*?\})\s*(?:$|\n)", re.DOTALL)
 
@@ -98,22 +102,35 @@ def run(date_str: str, day_dir: Path, timeout: int) -> int:
     day_dir.mkdir(parents=True, exist_ok=True)
     prompt = build_prompt(date_str, day_dir)
     started = time.monotonic()
-    result = run_agy(prompt, timeout=timeout)
+    key = _load_aihubmix_key()
+    if not key:
+        meta = {
+            "channel": "aihubmix_openai_compat",
+            "provider": GEMINI_MODEL,
+            "error": "missing aihubmix key",
+            "ok": False,
+        }
+        (day_dir / "analysis_meta.json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(meta, ensure_ascii=False))
+        return 1
+    ok, text, result_meta = gemini_openai_compat(key, prompt)
     meta = {
-        "channel": "agy",
-        "kind": result.get("kind"),
-        "elapsed_sec": result.get("elapsed_sec"),
-        "error": result.get("error", ""),
-        "ok": bool(result.get("ok")),
+        "channel": "aihubmix_openai_compat",
+        "provider": GEMINI_MODEL,
+        "elapsed_sec": result_meta.get("elapsed_sec"),
+        "error": result_meta.get("error", ""),
+        "ok": ok,
     }
     (day_dir / "analysis_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    if not result.get("ok") or not result.get("text", "").strip():
+    if not ok or not text.strip():
         print(json.dumps(meta, ensure_ascii=False))
         return 1
 
-    raw_text = str(result["text"])
+    raw_text = text
     report_text = _clean_report_text(raw_text)
     (day_dir / "report.md").write_text(report_text, encoding="utf-8")
     learning = _append_learning_log(raw_text, date_str)

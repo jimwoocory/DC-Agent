@@ -47,7 +47,13 @@ _SKILLS_ROOT: Path | None = None
 # 关键词匹配或 attachment 检测.
 _INTENT_ALLOWED_SKILLS: dict[RouterIntent, frozenset[str]] = {
     RouterIntent.DEEP_CREATIVE: frozenset(
-        {"brand-marketing", "creative-copywriting", "creative-design", "event-planning"}
+        {
+            "brand-marketing",
+            "creative-copywriting",
+            "creative-design",
+            "event-planning",
+            "planning-writing",
+        }
     ),
     RouterIntent.DEEP_INSIGHT: frozenset(
         {
@@ -57,7 +63,9 @@ _INTENT_ALLOWED_SKILLS: dict[RouterIntent, frozenset[str]] = {
             "client-project-management",
         }
     ),
-    RouterIntent.CREATIVE: frozenset({"creative-copywriting", "creative-design"}),
+    RouterIntent.CREATIVE: frozenset(
+        {"creative-copywriting", "creative-design", "planning-writing"}
+    ),
     RouterIntent.INSIGHT: frozenset({"data-analytics"}),
     RouterIntent.WORK_PREFLIGHT: frozenset(
         {"client-project-management", "pr-management"}

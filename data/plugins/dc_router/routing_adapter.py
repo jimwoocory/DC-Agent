@@ -16,13 +16,13 @@ from typing import Any
 
 try:  # pragma: no cover - exercised by direct file-load tests via fallback
     from .cli_handlers import (
-        ANTIGRAVITY_FALLBACK_PROVIDER_ID,
-        ANTIGRAVITY_PROVIDER_ID,
-        ANTIGRAVITY_RESOURCE_KEY,
         CLI_PROVIDER_PREFIX,
+        DISABLED_LEGACY_CLI_BACKEND,
+        DISABLED_LEGACY_CLI_PROVIDER_ID,
+        DISABLED_LEGACY_CLI_REASON,
         GROK_BUILD_FALLBACK_PROVIDER_ID,
         build_cli_prompt,
-        handle_antigravity_queue_card_action,
+        handle_disabled_legacy_cli_card_action,
         is_cli_provider,
         parse_cli_provider,
         start_queue_recovery,
@@ -39,13 +39,13 @@ try:  # pragma: no cover - exercised by direct file-load tests via fallback
     )
 except ImportError:  # pragma: no cover - direct importlib file loading
     from data.plugins.dc_router.cli_handlers import (
-        ANTIGRAVITY_FALLBACK_PROVIDER_ID,
-        ANTIGRAVITY_PROVIDER_ID,
-        ANTIGRAVITY_RESOURCE_KEY,
         CLI_PROVIDER_PREFIX,
+        DISABLED_LEGACY_CLI_BACKEND,
+        DISABLED_LEGACY_CLI_PROVIDER_ID,
+        DISABLED_LEGACY_CLI_REASON,
         GROK_BUILD_FALLBACK_PROVIDER_ID,
         build_cli_prompt,
-        handle_antigravity_queue_card_action,
+        handle_disabled_legacy_cli_card_action,
         is_cli_provider,
         parse_cli_provider,
         start_queue_recovery,
@@ -89,11 +89,11 @@ async def route_via_dc_router(
 
 
 __all__ = [
-    "ANTIGRAVITY_FALLBACK_PROVIDER_ID",
-    "ANTIGRAVITY_PROVIDER_ID",
-    "ANTIGRAVITY_RESOURCE_KEY",
     "AstrBotRouterClassifier",
     "CLI_PROVIDER_PREFIX",
+    "DISABLED_LEGACY_CLI_BACKEND",
+    "DISABLED_LEGACY_CLI_PROVIDER_ID",
+    "DISABLED_LEGACY_CLI_REASON",
     "GROK_BUILD_FALLBACK_PROVIDER_ID",
     "apply_decision",
     "apply_provider_pin",
@@ -101,7 +101,7 @@ __all__ = [
     "build_envelope",
     "create_dc_router",
     "event_to_envelope",
-    "handle_antigravity_queue_card_action",
+    "handle_disabled_legacy_cli_card_action",
     "is_cli_provider",
     "parse_classifier_json",
     "parse_cli_provider",

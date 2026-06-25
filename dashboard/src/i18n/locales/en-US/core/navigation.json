@@ -51,5 +51,6 @@
   "configTabs": {
     "normal": "Normal Config",
     "system": "System Config"
-  }
+  },
+  "pluginWebui": "Plugin Pages"
 }

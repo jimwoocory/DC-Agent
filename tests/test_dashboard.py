@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
+import pyotp
 import pytest
 import pytest_asyncio
 from quart import Quart, jsonify
@@ -29,6 +30,10 @@ from astrbot.core.utils.auth_password import (
     verify_dashboard_password,
 )
 from astrbot.core.utils.pip_installer import PipInstallError
+from astrbot.core.utils.totp import (
+    TOTP_TRUSTED_DEVICE_COOKIE_NAME,
+    generate_recovery_code,
+)
 from astrbot.dashboard.password_state import (
     get_dashboard_password_hash,
     is_password_change_required,
@@ -55,6 +60,34 @@ PLUGIN_PAGE_DEMO_PAGE_NAME = "bridge-demo"
 def _strip_query(url: str) -> str:
     parsed = urlsplit(url)
     return urlunsplit(("", "", parsed.path, "", parsed.fragment))
+
+
+async def _wait_for_update_progress(
+    test_client,
+    authenticated_header: dict,
+    progress_id: str,
+) -> dict:
+    """Wait until an update task reaches a terminal status.
+
+    Args:
+        test_client: Quart test client.
+        authenticated_header: Headers for authenticated dashboard requests.
+        progress_id: Update progress id to poll.
+
+    Returns:
+        The update progress response payload.
+    """
+
+    for _ in range(100):
+        response = await test_client.get(
+            f"/api/update/progress?id={progress_id}",
+            headers=authenticated_header,
+        )
+        data = await response.get_json()
+        if data["data"].get("status") in {"success", "error"}:
+            return data
+        await asyncio.sleep(0.01)
+    pytest.fail(f"Update task did not finish: {progress_id}")
 
 
 @pytest.fixture
@@ -205,6 +238,7 @@ def app(core_lifecycle_td: AstrBotCoreLifecycle):
     shutdown_event = asyncio.Event()
     # The db instance is already part of the core_lifecycle_td
     server = AstrBotDashboard(core_lifecycle_td, core_lifecycle_td.db, shutdown_event)
+    server.app._dashboard_server = server  # expose for test cleanup
     return server.app
 
 
@@ -249,6 +283,36 @@ def _resolve_dashboard_password(core_lifecycle_td: AstrBotCoreLifecycle) -> str:
     if isinstance(password, str) and password.startswith("pbkdf2_sha256$"):
         return "astrbot"
     return password
+
+
+def test_dashboard_uses_bundled_dist_when_data_dist_is_stale(
+    core_lifecycle_td: AstrBotCoreLifecycle,
+    monkeypatch,
+    tmp_path,
+):
+    data_dir = tmp_path / "data"
+    user_dist = data_dir / "dist"
+    bundled_dist = tmp_path / "bundled-dist"
+    user_dist.mkdir(parents=True)
+    bundled_dist.mkdir()
+
+    monkeypatch.setattr(
+        "astrbot.dashboard.server.get_astrbot_data_path",
+        lambda: str(data_dir),
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.server.get_bundled_dashboard_dist_path",
+        lambda: bundled_dist,
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.server.should_use_bundled_dashboard_dist",
+        lambda *_args, **_kwargs: True,
+    )
+
+    shutdown_event = asyncio.Event()
+    server = AstrBotDashboard(core_lifecycle_td, core_lifecycle_td.db, shutdown_event)
+
+    assert server.data_path == str(bundled_dist)
 
 
 async def _set_dashboard_password_change_required(
@@ -359,6 +423,539 @@ async def test_auth_login_secure_cookie_override(
     assert jwt_cookie_header
     assert "Secure" in jwt_cookie_header
     assert "SameSite=Strict" in jwt_cookie_header
+
+
+@pytest.mark.asyncio
+async def test_auth_rate_limit_uses_same_bucket_across_paths(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Same client IP shares a rate-limit bucket across different auth endpoints."""
+    monkeypatch.setenv("ASTRBOT_TEST_MODE", "false")
+    app._dashboard_server._rate_limiter_registry.clear()
+    cfg = core_lifecycle_td.astrbot_config["dashboard"]
+    rl_original = cfg.get("auth_rate_limit", {})
+    tp_original = cfg.get("trust_proxy_headers", False)
+    cfg["auth_rate_limit"] = {
+        "enable": True,
+        "average_interval": 3600.0,
+        "max_burst": 1,
+    }
+    cfg["trust_proxy_headers"] = True
+
+    try:
+        client = app.test_client()
+        h = {"X-Forwarded-For": "198.51.100.10"}
+        r1 = await client.post(
+            "/api/auth/login", json={"username": "u", "password": "p"}, headers=h
+        )
+        assert r1.status_code != 429, "first request from IP should not be rate limited"
+
+        r2 = await client.post("/api/auth/totp/setup", json={}, headers=h)
+        assert r2.status_code == 429, (
+            "second request from same IP should be rate limited"
+        )
+    finally:
+        cfg["auth_rate_limit"] = rl_original
+        cfg["trust_proxy_headers"] = tp_original
+
+
+@pytest.mark.asyncio
+async def test_auth_rate_limit_separates_different_client_ips(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Different client IPs have independent rate-limit buckets."""
+    monkeypatch.setenv("ASTRBOT_TEST_MODE", "false")
+    app._dashboard_server._rate_limiter_registry.clear()
+    cfg = core_lifecycle_td.astrbot_config["dashboard"]
+    rl_original = cfg.get("auth_rate_limit", {})
+    tp_original = cfg.get("trust_proxy_headers", False)
+    cfg["auth_rate_limit"] = {
+        "enable": True,
+        "average_interval": 3600.0,
+        "max_burst": 1,
+    }
+    cfg["trust_proxy_headers"] = True
+
+    try:
+        client = app.test_client()
+        r_a = await client.post(
+            "/api/auth/login",
+            json={"username": "u", "password": "p"},
+            headers={"X-Forwarded-For": "198.51.100.10"},
+        )
+        assert r_a.status_code != 429
+
+        r_b = await client.post(
+            "/api/auth/login",
+            json={"username": "u", "password": "p"},
+            headers={"X-Forwarded-For": "198.51.100.10"},
+        )
+        assert r_b.status_code == 429, (
+            "second request from same IP should be rate limited"
+        )
+
+        r_c = await client.post(
+            "/api/auth/login",
+            json={"username": "u", "password": "p"},
+            headers={"X-Forwarded-For": "198.51.100.11"},
+        )
+        assert r_c.status_code != 429, "different IP has its own bucket"
+    finally:
+        cfg["auth_rate_limit"] = rl_original
+        cfg["trust_proxy_headers"] = tp_original
+
+
+@pytest.mark.asyncio
+async def test_auth_rate_limit_ignores_proxy_headers_by_default(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """When trust_proxy_headers is False, all proxy-spoofed IPs fall back to the connection IP."""
+    monkeypatch.setenv("ASTRBOT_TEST_MODE", "false")
+    app._dashboard_server._rate_limiter_registry.clear()
+    cfg = core_lifecycle_td.astrbot_config["dashboard"]
+    rl_original = cfg.get("auth_rate_limit", {})
+    tp_original = cfg.get("trust_proxy_headers", False)
+    cfg["auth_rate_limit"] = {
+        "enable": True,
+        "average_interval": 3600.0,
+        "max_burst": 1,
+    }
+    cfg["trust_proxy_headers"] = False
+
+    try:
+        client = app.test_client()
+        r1 = await client.post(
+            "/api/auth/login",
+            json={"username": "u", "password": "p"},
+            headers={"X-Forwarded-For": "198.51.100.20"},
+        )
+        assert r1.status_code != 429
+
+        r2 = await client.post(
+            "/api/auth/login",
+            json={"username": "u", "password": "p"},
+            headers={"X-Forwarded-For": "198.51.100.21"},
+        )
+        assert r2.status_code == 429, (
+            "same connection IP, same bucket despite proxy headers"
+        )
+    finally:
+        cfg["auth_rate_limit"] = rl_original
+        cfg["trust_proxy_headers"] = tp_original
+
+
+@pytest.mark.asyncio
+async def test_auth_login_requires_totp_when_enabled_and_not_trusted(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        response = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+            },
+        )
+        data = await response.get_json()
+        assert response.status_code == 401
+        assert data["status"] == "error"
+        assert data["data"]["totp_required"] is True
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_auth_login_accepts_valid_totp_code(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        response = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+                "code": pyotp.TOTP(secret).now(),
+            },
+        )
+        data = await response.get_json()
+        assert data["status"] == "ok"
+        assert "token" in data["data"]
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_auth_login_rejects_invalid_totp_code(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        valid_code = pyotp.TOTP(secret).now()
+        invalid_code = str((int(valid_code) + 1) % 1_000_000).zfill(6)
+        response = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+                "code": invalid_code,
+            },
+        )
+        data = await response.get_json()
+        assert response.status_code == 401
+        assert data["status"] == "error"
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_auth_login_with_recovery_code_disables_totp(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    recovery_code, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        response = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+                "code": recovery_code,
+            },
+        )
+        data = await response.get_json()
+        assert data["status"] == "ok"
+        assert core_lifecycle_td.astrbot_config["dashboard"]["totp"] == {
+            "enable": False,
+            "secret": "",
+            "recovery_code_hash": "",
+        }
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_auth_login_sets_trusted_device_cookie_when_flag_true(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        response = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+                "code": pyotp.TOTP(secret).now(),
+                "trust_device_flag": True,
+            },
+        )
+        data = await response.get_json()
+        assert data["status"] == "ok"
+        set_cookie_headers = response.headers.getlist("Set-Cookie")
+        trusted_cookie_header = next(
+            (
+                value
+                for value in set_cookie_headers
+                if TOTP_TRUSTED_DEVICE_COOKIE_NAME in value
+            ),
+            "",
+        )
+        assert trusted_cookie_header
+        assert "HttpOnly" in trusted_cookie_header
+        assert "SameSite=Strict" in trusted_cookie_header
+        assert "Path=/api/auth" in trusted_cookie_header
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_auth_login_skips_totp_when_trusted_cookie_valid(
+    app: Quart,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        first_login = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+                "code": pyotp.TOTP(secret).now(),
+                "trust_device_flag": True,
+            },
+        )
+        first_data = await first_login.get_json()
+        assert first_data["status"] == "ok"
+
+        second_login = await test_client.post(
+            "/api/auth/login",
+            json={
+                "username": core_lifecycle_td.astrbot_config["dashboard"]["username"],
+                "password": _resolve_dashboard_password(core_lifecycle_td),
+            },
+        )
+        second_data = await second_login.get_json()
+        assert second_login.status_code == 200
+        assert second_data["status"] == "ok"
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_config_save_requires_two_factor_for_protected_totp_changes(
+    app: Quart,
+    authenticated_header: dict,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        post_config = copy.deepcopy(dict(core_lifecycle_td.astrbot_config))
+        post_config["dashboard"]["totp"] = {
+            "enable": False,
+            "secret": "",
+            "recovery_code_hash": "",
+        }
+        response = await test_client.post(
+            "/api/config/astrbot/update",
+            headers=authenticated_header,
+            json={"conf_id": "default", "config": post_config},
+        )
+        data = await response.get_json()
+        assert response.status_code == 401
+        assert data["status"] == "error"
+        assert data["data"]["totp_required"] is True
+        assert core_lifecycle_td.astrbot_config["dashboard"]["totp"] == {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_config_save_accepts_totp_code_for_protected_totp_changes(
+    app: Quart,
+    authenticated_header: dict,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    _, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        post_config = copy.deepcopy(dict(core_lifecycle_td.astrbot_config))
+        post_config["dashboard"]["totp"] = {
+            "enable": False,
+            "secret": "",
+            "recovery_code_hash": "",
+        }
+        response = await test_client.post(
+            "/api/config/astrbot/update",
+            headers={
+                **authenticated_header,
+                "X-2FA-Code": pyotp.TOTP(secret).now(),
+            },
+            json={"conf_id": "default", "config": post_config},
+        )
+        data = await response.get_json()
+        assert data["status"] == "ok"
+        assert core_lifecycle_td.astrbot_config["dashboard"]["totp"] == {
+            "enable": False,
+            "secret": "",
+            "recovery_code_hash": "",
+        }
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_config_save_rejects_recovery_code_for_protected_totp_changes(
+    app: Quart,
+    authenticated_header: dict,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+):
+    original_dashboard_config = copy.deepcopy(
+        core_lifecycle_td.astrbot_config["dashboard"]
+    )
+    test_client = app.test_client()
+    recovery_code, recovery_code_hash = generate_recovery_code()
+    secret = pyotp.random_base32()
+
+    try:
+        core_lifecycle_td.astrbot_config["dashboard"]["totp"] = {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+        post_config = copy.deepcopy(dict(core_lifecycle_td.astrbot_config))
+        post_config["dashboard"]["totp"] = {
+            "enable": False,
+            "secret": "",
+            "recovery_code_hash": recovery_code_hash,
+        }
+        response = await test_client.post(
+            "/api/config/astrbot/update",
+            headers={
+                **authenticated_header,
+                "X-2FA-Code": recovery_code,
+            },
+            json={"conf_id": "default", "config": post_config},
+        )
+        data = await response.get_json()
+        assert response.status_code == 401
+        assert data["status"] == "error"
+        assert data["data"]["totp_required"] is True
+        assert core_lifecycle_td.astrbot_config["dashboard"]["totp"] == {
+            "enable": True,
+            "secret": secret,
+            "recovery_code_hash": recovery_code_hash,
+        }
+    finally:
+        await _restore_dashboard_password_state(
+            core_lifecycle_td,
+            original_dashboard_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_auth_totp_setup_with_valid_code_returns_recovery_code(
+    app: Quart,
+    authenticated_header: dict,
+):
+    test_client = app.test_client()
+    secret = pyotp.random_base32()
+    response = await test_client.post(
+        "/api/auth/totp/setup",
+        headers=authenticated_header,
+        json={"secret": secret, "code": pyotp.TOTP(secret).now()},
+    )
+    data = await response.get_json()
+    assert data["status"] == "ok"
+    assert isinstance(data["data"]["recovery_code"], str)
+    assert isinstance(data["data"]["recovery_code_hash"], str)
+    assert data["data"]["recovery_code"]
+    assert data["data"]["recovery_code_hash"]
 
 
 @pytest.mark.asyncio
@@ -874,7 +1471,9 @@ async def test_plugin_get_excludes_scanned_pages(
     )
     assert plugin["activated"] is True
     assert "page" not in plugin
-    assert "pages" not in plugin
+    assert "pages" in plugin
+    assert isinstance(plugin["pages"], list)
+    assert PLUGIN_PAGE_DEMO_PAGE_NAME in plugin["pages"]
 
 
 @pytest.mark.asyncio
@@ -906,6 +1505,7 @@ async def test_plugin_detail_includes_scanned_page_component(
             "i18n_key": f"pages.{PLUGIN_PAGE_DEMO_PAGE_NAME}",
             "description": "Plugin Page entry",
             "plugin_name": PLUGIN_PAGE_DEMO_NAME,
+            "plugin_marketplace_name": PLUGIN_PAGE_DEMO_NAME.replace("_", "-"),
         }
     ]
 
@@ -1166,6 +1766,119 @@ async def test_plugin_page_content_issues_scoped_asset_token(
         f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/another-page/app.js?asset_token={asset_token}"
     )
     assert cross_page_response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_plugin_page_bridge_sdk_includes_is_dark_when_theme_param_provided(
+    app: Quart,
+    authenticated_header: dict,
+    registered_plugin_page: StarMetadata,
+):
+    """Bridge SDK initial context should include isDark based on ?theme= query param."""
+    authorized_client = app.test_client()
+    response = await authorized_client.get(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    html_text = (await response.get_data()).decode("utf-8")
+    bridge_sdk_url = re.search(
+        r'src="([^"]+/bridge-sdk\.js[^"]*)"',
+        html_text,
+    )
+    assert bridge_sdk_url is not None
+
+    anonymous_client = app.test_client()
+
+    # theme=dark → isDark: true
+    dark_response = await anonymous_client.get(bridge_sdk_url.group(1) + "&theme=dark")
+    assert dark_response.status_code == 200
+    dark_js = (await dark_response.get_data()).decode("utf-8")
+    assert '"isDark": true' in dark_js
+
+    # theme=light → isDark: false
+    light_response = await anonymous_client.get(
+        bridge_sdk_url.group(1) + "&theme=light"
+    )
+    assert light_response.status_code == 200
+    light_js = (await light_response.get_data()).decode("utf-8")
+    assert '"isDark": false' in light_js
+
+    # no theme param → isDark: false (default)
+    base_response = await anonymous_client.get(bridge_sdk_url.group(1))
+    assert base_response.status_code == 200
+    base_js = (await base_response.get_data()).decode("utf-8")
+    assert '"isDark": false' in base_js
+
+    # invalid theme value → should NOT be treated as dark
+    invalid_response = await anonymous_client.get(
+        bridge_sdk_url.group(1) + "&theme=invalid"
+    )
+    assert invalid_response.status_code == 200
+    invalid_js = (await invalid_response.get_data()).decode("utf-8")
+    assert '"isDark": false' in invalid_js
+
+
+@pytest.mark.asyncio
+async def test_plugin_page_content_propagates_theme_in_rewritten_urls(
+    app: Quart,
+    authenticated_header: dict,
+    registered_plugin_page: StarMetadata,
+):
+    """Theme query param should be propagated through rewritten asset and bridge URLs."""
+    test_client = app.test_client()
+    response = await test_client.get(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
+        "?asset_token=&theme=dark",
+        headers=authenticated_header,
+    )
+    assert response.status_code == 200
+    html_text = (await response.get_data()).decode("utf-8")
+
+    # Verify theme=dark appears in bridge SDK URL in rewritten HTML
+    bridge_sdk_url_match = re.search(
+        r'src="([^"]+/bridge-sdk\.js[^"]*)"',
+        html_text,
+    )
+    assert bridge_sdk_url_match is not None
+    bridge_query = parse_qs(urlsplit(bridge_sdk_url_match.group(1)).query)
+    assert bridge_query.get("theme") == ["dark"]
+
+    # Verify theme=dark appears in CSS asset URL in rewritten HTML
+    css_url_match = re.search(
+        r'href="([^"]+/base\.css[^"]*)"',
+        html_text,
+    )
+    assert css_url_match is not None
+    css_query = parse_qs(urlsplit(css_url_match.group(1)).query)
+    assert css_query.get("theme") == ["dark"]
+
+    # Verify data-theme is injected on <html> tag to prevent flash
+    assert 'data-theme="dark"' in html_text
+    # Verify color-scheme meta tag is injected for browser-level default styles
+    assert '<meta name="color-scheme" content="dark">' in html_text
+
+    # theme=light → data-theme="light" on <html> and color-scheme meta
+    light_response = await test_client.get(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
+        "?asset_token=&theme=light",
+        headers=authenticated_header,
+    )
+    assert light_response.status_code == 200
+    light_html = (await light_response.get_data()).decode("utf-8")
+    assert 'data-theme="light"' in light_html
+    assert '<meta name="color-scheme" content="light">' in light_html
+
+    # no theme param → no data-theme or color-scheme meta on <html>
+    no_theme_response = await test_client.get(
+        f"/api/plugin/page/content/{PLUGIN_PAGE_DEMO_NAME}/{PLUGIN_PAGE_DEMO_PAGE_NAME}/"
+        "?asset_token=",
+        headers=authenticated_header,
+    )
+    assert no_theme_response.status_code == 200
+    no_theme_html = (await no_theme_response.get_data()).decode("utf-8")
+    assert "data-theme=" not in no_theme_html
+    assert "color-scheme" not in no_theme_html
 
 
 @pytest.mark.asyncio
@@ -1561,9 +2274,14 @@ async def test_plugins(
         assert response.status_code == 200
         data = await response.get_json()
         assert data["status"] == "ok"
-        assert len(data["data"]) == 1
-        assert "components" not in data["data"][0]
-        installed_at = data["data"][0]["installed_at"]
+        assert len(data["data"]) >= 1
+        target = next(
+            (item for item in data["data"] if item["name"] == test_plugin_name),
+            None,
+        )
+        assert target is not None
+        assert "components" not in target
+        installed_at = target["installed_at"]
         assert installed_at is not None
         datetime.fromisoformat(installed_at)
 
@@ -1931,39 +2649,76 @@ async def test_do_update(
     authenticated_header: dict,
     core_lifecycle_td: AstrBotCoreLifecycle,
     monkeypatch,
-    tmp_path_factory,
+    tmp_path,
 ):
     test_client = app.test_client()
 
-    # Use a temporary path for the mock update to avoid side effects
-    temp_release_dir = tmp_path_factory.mktemp("release")
-    release_path = temp_release_dir / "astrbot"
-    calls = []
+    release_path = tmp_path / "astrbot"
+    calls: list[str] = []
 
-    async def mock_update(*args, **kwargs):
-        """Mocks the update process by creating a directory in the temp path."""
-        calls.append("core")
+    async def mock_download_update_package(*args, **kwargs):
+        """Mock the core package download by writing a valid ZIP archive."""
+        calls.append("download-core")
         callback = kwargs.get("progress_callback")
         if callback:
             callback({"downloaded": 10, "total": 10, "percent": 1, "speed": 1})
+        zip_path = Path(kwargs["path"])
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("AstrBot-v3.4.0/README.md", "core")
+        return zip_path
+
+    def mock_apply_update_package(zip_path):
+        """Mock applying the core package."""
+        calls.append("apply-core")
+        assert zipfile.is_zipfile(zip_path)
         os.makedirs(release_path, exist_ok=True)
 
     async def mock_download_dashboard(*args, **kwargs):
-        """Mocks the dashboard download to prevent network access."""
-        calls.append("dashboard")
+        """Mock the dashboard download by writing a valid ZIP archive."""
+        calls.append("download-dashboard")
         callback = kwargs.get("progress_callback")
         if callback:
             callback({"downloaded": 10, "total": 10, "percent": 1, "speed": 1})
-        return
+        zip_path = Path(kwargs["path"])
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("dist/index.html", "dashboard")
+
+    def mock_extract_dashboard(zip_path, extract_path):
+        """Mock applying the dashboard package."""
+        calls.append("apply-dashboard")
+        assert zipfile.is_zipfile(zip_path)
+        assert Path(extract_path) == tmp_path / "data"
 
     async def mock_pip_install(*args, **kwargs):
         """Mocks pip install to prevent actual installation."""
+        calls.append("pip")
         return
 
-    monkeypatch.setattr(core_lifecycle_td.astrbot_updator, "update", mock_update)
+    monkeypatch.setattr(
+        core_lifecycle_td.astrbot_updator,
+        "download_update_package",
+        mock_download_update_package,
+    )
+    monkeypatch.setattr(
+        core_lifecycle_td.astrbot_updator,
+        "apply_update_package",
+        mock_apply_update_package,
+    )
     monkeypatch.setattr(
         "astrbot.dashboard.routes.update.download_dashboard",
         mock_download_dashboard,
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.routes.update.extract_dashboard",
+        mock_extract_dashboard,
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.routes.update.get_astrbot_system_tmp_path",
+        lambda: str(tmp_path / "tmp"),
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.routes.update.get_astrbot_data_path",
+        lambda: str(tmp_path / "data"),
     )
     monkeypatch.setattr(
         "astrbot.dashboard.routes.update.pip_installer.install",
@@ -1978,17 +2733,99 @@ async def test_do_update(
     assert response.status_code == 200
     data = await response.get_json()
     assert data["status"] == "ok"
-    assert os.path.exists(release_path)
-    assert calls[:2] == ["dashboard", "core"]
+    assert data["data"]["id"] == "test-progress"
+    assert data["data"]["status"] == "running"
 
-    progress_response = await test_client.get(
-        "/api/update/progress?id=test-progress",
-        headers=authenticated_header,
+    progress_data = await _wait_for_update_progress(
+        test_client,
+        authenticated_header,
+        "test-progress",
     )
-    progress_data = await progress_response.get_json()
+    assert os.path.exists(release_path)
+    assert calls == [
+        "download-dashboard",
+        "download-core",
+        "apply-core",
+        "apply-dashboard",
+        "pip",
+    ]
     assert progress_data["status"] == "ok"
     assert progress_data["data"]["status"] == "success"
     assert progress_data["data"]["overall_percent"] == 100
+
+
+@pytest.mark.asyncio
+async def test_do_update_does_not_apply_files_when_core_download_fails(
+    app: Quart,
+    authenticated_header: dict,
+    core_lifecycle_td: AstrBotCoreLifecycle,
+    monkeypatch,
+    tmp_path,
+):
+    test_client = app.test_client()
+    calls: list[str] = []
+
+    async def mock_download_dashboard(*args, **kwargs):
+        """Mock the dashboard download by writing a valid ZIP archive."""
+        calls.append("download-dashboard")
+        zip_path = Path(kwargs["path"])
+        with zipfile.ZipFile(zip_path, "w") as archive:
+            archive.writestr("dist/index.html", "dashboard")
+
+    async def mock_download_update_package(*args, **kwargs):
+        """Mock a core package download failure."""
+        calls.append("download-core")
+        raise RuntimeError("core download failed")
+
+    def fail_apply_update_package(*args, **kwargs):
+        """Ensure core files are not applied after a download failure."""
+        calls.append("apply-core")
+        raise AssertionError("core package should not be applied")
+
+    def fail_extract_dashboard(*args, **kwargs):
+        """Ensure dashboard files are not applied after a download failure."""
+        calls.append("apply-dashboard")
+        raise AssertionError("dashboard package should not be applied")
+
+    monkeypatch.setattr(
+        "astrbot.dashboard.routes.update.get_astrbot_system_tmp_path",
+        lambda: str(tmp_path / "tmp"),
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.routes.update.download_dashboard",
+        mock_download_dashboard,
+    )
+    monkeypatch.setattr(
+        "astrbot.dashboard.routes.update.extract_dashboard",
+        fail_extract_dashboard,
+    )
+    monkeypatch.setattr(
+        core_lifecycle_td.astrbot_updator,
+        "download_update_package",
+        mock_download_update_package,
+    )
+    monkeypatch.setattr(
+        core_lifecycle_td.astrbot_updator,
+        "apply_update_package",
+        fail_apply_update_package,
+    )
+
+    response = await test_client.post(
+        "/api/update/do",
+        headers=authenticated_header,
+        json={"version": "v3.4.0", "reboot": False, "progress_id": "atomic-fail"},
+    )
+    data = await response.get_json()
+
+    assert response.status_code == 200
+    assert data["status"] == "ok"
+    progress_data = await _wait_for_update_progress(
+        test_client,
+        authenticated_header,
+        "atomic-fail",
+    )
+    assert progress_data["data"]["status"] == "error"
+    assert calls == ["download-dashboard", "download-core"]
 
 
 @pytest.mark.asyncio

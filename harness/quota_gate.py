@@ -20,6 +20,8 @@ from harness.task_state import (
     QueueStatus,
 )
 
+DEFAULT_RUNNING_LEASE_SECONDS = 15 * 60
+
 
 @dataclass(frozen=True, slots=True)
 class QuotaRequest:
@@ -36,9 +38,11 @@ class QuotaGate:
         self,
         db_path: str | Path,
         resource_configs: dict[str, ResourceConfig] | None = None,
+        running_lease_seconds: int = DEFAULT_RUNNING_LEASE_SECONDS,
     ) -> None:
         self.store = QueueStore(db_path)
         self.resource_configs = resource_configs or DEFAULT_RESOURCE_CONFIGS
+        self.running_lease_seconds = max(int(running_lease_seconds), 1)
 
     async def admit(self, request: QuotaRequest) -> AdmissionDecision:
         await self.store.init()
@@ -140,7 +144,8 @@ class QuotaGate:
                 UPDATE dc_llm_queue_jobs
                 SET status = ?,
                     result_json = ?,
-                    completed_at = ?
+                    completed_at = ?,
+                    lease_until = NULL
                 WHERE job_id = ?
                 """,
                 (
@@ -193,10 +198,17 @@ class QuotaGate:
                 UPDATE dc_llm_queue_jobs
                 SET status = ?,
                     started_at = ?,
-                    eta_at = ?
+                    eta_at = ?,
+                    lease_until = ?
                 WHERE job_id = ?
                 """,
-                (QueueStatus.RUNNING.value, now, now, job_id),
+                (
+                    QueueStatus.RUNNING.value,
+                    now,
+                    now,
+                    now + self.running_lease_seconds,
+                    job_id,
+                ),
             )
             await self._mark_resources_running(db, resource_keys, job_id)
             await db.commit()
@@ -204,6 +216,7 @@ class QuotaGate:
             job.status = QueueStatus.RUNNING
             job.started_at = now
             job.eta_at = now
+            job.lease_until = now + self.running_lease_seconds
             return job
         finally:
             await db.close()
@@ -225,6 +238,99 @@ class QuotaGate:
             )
             rows = await cursor.fetchall()
             return [self.store._job_from_row(row) for row in rows]
+        finally:
+            await db.close()
+
+    async def heartbeat(self, job_id: str, *, lease_seconds: int | None = None) -> bool:
+        """Extend the lease for a running job.
+
+        Args:
+            job_id: Queue job identifier.
+            lease_seconds: Optional lease duration from the current time.
+
+        Returns:
+            True when a running job lease was extended.
+        """
+        await self.store.init()
+        now = time.time()
+        duration = max(int(lease_seconds or self.running_lease_seconds), 1)
+        db = await self.store.connect()
+        try:
+            cursor = await db.execute(
+                """
+                UPDATE dc_llm_queue_jobs
+                SET lease_until = MAX(COALESCE(lease_until, 0), ?)
+                WHERE job_id = ? AND status = ?
+                """,
+                (now + duration, job_id, QueueStatus.RUNNING.value),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+        finally:
+            await db.close()
+
+    async def reap_expired_running_jobs(self, *, limit: int = 50) -> list[str]:
+        """Fail expired running jobs and release their owned resources.
+
+        Legacy running jobs with no lease are considered expired. Resource
+        release is ownership-checked, so a stale job cannot release a resource
+        that has already been reassigned.
+
+        Args:
+            limit: Maximum number of expired jobs to reclaim per scan.
+
+        Returns:
+            Reclaimed queue job identifiers.
+        """
+        await self.store.init()
+        now = time.time()
+        db = await self.store.connect()
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                SELECT *
+                FROM dc_llm_queue_jobs
+                WHERE status = ?
+                  AND (lease_until IS NULL OR lease_until <= ?)
+                ORDER BY started_at ASC
+                LIMIT ?
+                """,
+                (QueueStatus.RUNNING.value, now, limit),
+            )
+            rows = await cursor.fetchall()
+            reclaimed: list[str] = []
+            for row in rows:
+                job_id = str(row["job_id"])
+                await db.execute(
+                    """
+                    UPDATE dc_llm_queue_jobs
+                    SET status = ?,
+                        completed_at = ?,
+                        lease_until = NULL,
+                        error = ?
+                    WHERE job_id = ? AND status = ?
+                    """,
+                    (
+                        QueueStatus.FAILED.value,
+                        now,
+                        "running lease expired",
+                        job_id,
+                        QueueStatus.RUNNING.value,
+                    ),
+                )
+                await self._release_resources_to_cooldown(
+                    db,
+                    tuple(json.loads(row["resource_keys_json"])),
+                    job_id,
+                    now=now,
+                    cooldown_seconds=0,
+                    last_success_at=None,
+                    last_error="running lease expired",
+                )
+                reclaimed.append(job_id)
+            await db.commit()
+            return reclaimed
         finally:
             await db.close()
 
@@ -250,7 +356,8 @@ class QuotaGate:
                 UPDATE dc_llm_queue_jobs
                 SET status = ?,
                     completed_at = ?,
-                    error = ?
+                    error = ?,
+                    lease_until = NULL
                 WHERE job_id = ?
                 """,
                 (
@@ -262,6 +369,72 @@ class QuotaGate:
             )
             await db.commit()
             return True
+        finally:
+            await db.close()
+
+    async def cancel_session_jobs(self, session_id: str, *, reason: str) -> list[str]:
+        """Cancel pending and running queue jobs for one conversation session.
+
+        Args:
+            session_id: Unified message origin stored on queue admission.
+            reason: Cancellation reason persisted with every matched job.
+
+        Returns:
+            Queue job identifiers moved to ``cancelled``.
+        """
+        await self.store.init()
+        now = time.time()
+        db = await self.store.connect()
+        try:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """
+                SELECT *
+                FROM dc_llm_queue_jobs
+                WHERE session_id = ? AND status IN (?, ?)
+                ORDER BY enqueue_at ASC
+                """,
+                (
+                    session_id,
+                    QueueStatus.PENDING.value,
+                    QueueStatus.RUNNING.value,
+                ),
+            )
+            rows = await cursor.fetchall()
+            cancelled: list[str] = []
+            for row in rows:
+                job_id = str(row["job_id"])
+                await db.execute(
+                    """
+                    UPDATE dc_llm_queue_jobs
+                    SET status = ?,
+                        completed_at = ?,
+                        lease_until = NULL,
+                        error = ?
+                    WHERE job_id = ? AND status IN (?, ?)
+                    """,
+                    (
+                        QueueStatus.CANCELLED.value,
+                        now,
+                        reason or "cancelled",
+                        job_id,
+                        QueueStatus.PENDING.value,
+                        QueueStatus.RUNNING.value,
+                    ),
+                )
+                if row["status"] == QueueStatus.RUNNING.value:
+                    await self._release_resources_to_cooldown(
+                        db,
+                        tuple(json.loads(row["resource_keys_json"])),
+                        job_id,
+                        now=now,
+                        cooldown_seconds=0,
+                        last_success_at=None,
+                        last_error=reason or "cancelled",
+                    )
+                cancelled.append(job_id)
+            await db.commit()
+            return cancelled
         finally:
             await db.close()
 
@@ -290,7 +463,8 @@ class QuotaGate:
                 UPDATE dc_llm_queue_jobs
                 SET status = ?,
                     completed_at = ?,
-                    error = ?
+                    error = ?,
+                    lease_until = NULL
                 WHERE job_id = ?
                 """,
                 (QueueStatus.FAILED.value, now, error, job_id),
@@ -390,6 +564,11 @@ class QuotaGate:
             priority=request.priority,
             enqueue_at=now,
             eta_at=eta_at,
+            lease_until=(
+                now + self.running_lease_seconds
+                if status is QueueStatus.RUNNING
+                else None
+            ),
             started_at=started_at,
         )
         await db.execute(
@@ -405,9 +584,10 @@ class QuotaGate:
                 payload_json,
                 enqueue_at,
                 eta_at,
+                lease_until,
                 started_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job.job_id,
@@ -420,6 +600,7 @@ class QuotaGate:
                 to_json_payload(job.payload),
                 job.enqueue_at,
                 job.eta_at,
+                job.lease_until,
                 job.started_at,
             ),
         )

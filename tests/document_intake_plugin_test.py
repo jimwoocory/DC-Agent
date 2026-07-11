@@ -10,6 +10,7 @@ from data.plugins.document_intake_plugin.main import (
     _build_context_block,
     _copy_component_to_inbox,
     _finalize_document_intake_card,
+    _requests_kb_import,
 )
 
 
@@ -89,6 +90,11 @@ def test_build_context_block_contains_document_excerpt(tmp_path):
     assert block.startswith("<dc_document_intake>")
     assert "training.txt" in block
     assert "新人培训第一步" in block
+
+
+def test_document_intake_requires_explicit_knowledge_base_intent() -> None:
+    assert _requests_kb_import("帮我总结这两份方案") is False
+    assert _requests_kb_import("把这两份方案归档到知识库") is True
 
 
 @pytest.mark.asyncio

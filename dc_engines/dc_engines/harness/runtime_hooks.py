@@ -115,6 +115,14 @@ INSUFFICIENT_MATERIAL_SUCCESS_EXCEPTIONS: tuple[str, ...] = (
     "not found fallback",
     "fixed the not found",
 )
+NONTERMINAL_ACK_PREFIXES: tuple[str, ...] = (
+    "已进入生图任务",
+    "已进入图片转视频任务",
+    "已进入文生视频任务",
+    "任务已进入队列",
+    "任务已创建，正在处理",
+    "请求已接收，正在处理",
+)
 
 MD_HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
 MD_QUOTE_RE = re.compile(r"^\s{0,3}>\s*", re.MULTILINE)
@@ -273,6 +281,8 @@ def classify_response_quality(resp: Any, text: str) -> str:
     for pattern in INSUFFICIENT_MATERIAL_PATTERNS:
         if pattern.lower() in lowered:
             return "insufficient_materials"
+    if any(head.strip().startswith(prefix) for prefix in NONTERMINAL_ACK_PREFIXES):
+        return "acknowledged"
     return "success"
 
 
@@ -444,6 +454,34 @@ class HarnessSensorRuntime:
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "[harness_sensor] block_task %s failed",
+                        task.task_id,
+                        exc_info=True,
+                    )
+            return
+
+        if quality == "acknowledged":
+            for task in tasks:
+                try:
+                    await self._record_loop_response_observation(
+                        harness_engine,
+                        task,
+                        text=text,
+                        quality=quality,
+                        source=source,
+                    )
+                    await self._update_inbox(
+                        task.task_id,
+                        status="in_progress",
+                        event_type="task_acknowledged",
+                        source=source,
+                    )
+                    logger.debug(
+                        "[harness_sensor] Task %s remains active after acknowledgement",
+                        task.task_id[:8],
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "[harness_sensor] acknowledge task %s failed",
                         task.task_id,
                         exc_info=True,
                     )

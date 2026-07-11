@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from PIL import Image as PILImage
@@ -9,6 +10,15 @@ from PIL import ImageDraw
 
 from astrbot.api.message_components import Image as ImageComp
 from data.plugins.dc_router.preprocessing import media_route
+
+
+@pytest.fixture(autouse=True)
+def _clear_active_media_task_state():
+    media_route._ACTIVE_MEDIA_TASKS.clear()
+    media_route._ACTIVE_MEDIA_CONTEXT.clear()
+    yield
+    media_route._ACTIVE_MEDIA_TASKS.clear()
+    media_route._ACTIVE_MEDIA_CONTEXT.clear()
 
 
 class _Event:
@@ -466,3 +476,58 @@ async def test_pending_media_tasks_resume_after_restart(monkeypatch, tmp_path) -
     assert len(scheduled) == 1
     await scheduled[0]
     assert scheduled[1] == ("test-session", "image", "future city", None, task_id)
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_media_tasks_stops_worker_and_clears_record(
+    monkeypatch, tmp_path
+) -> None:
+    pending_path = tmp_path / "media_route_pending.json"
+    monkeypatch.setattr(media_route, "_MEDIA_TASKS_PATH", pending_path)
+    task_id = "task_media_cancel"
+    route = media_route.MediaRoute(kind="image", prompt="future city")
+    card = SimpleNamespace(message_id="om_cancel")
+
+    class FakeTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    worker = FakeTask()
+    media_route._upsert_pending_media_task(
+        {
+            "task_id": task_id,
+            "created_at": 1.0,
+            "updated_at": 1.0,
+            "umo": "test-session",
+            "platform_id": "lark",
+            "route": media_route._route_to_dict(route),
+            "card": {"message_id": "om_cancel"},
+        }
+    )
+    media_route._ACTIVE_MEDIA_TASKS[task_id] = worker
+    media_route._ACTIVE_MEDIA_CONTEXT[task_id] = ("test-session", route, card)
+    finalized = AsyncMock(return_value=True)
+    monkeypatch.setattr(media_route, "_finalize_waiting_card", finalized)
+
+    cancelled = await media_route.cancel_session_media_tasks(
+        SimpleNamespace(),
+        "test-session",
+        reason="user requested stop",
+    )
+
+    assert cancelled == 1
+    assert worker.cancelled is True
+    assert media_route._load_pending_media_tasks() == []
+    assert task_id not in media_route._ACTIVE_MEDIA_TASKS
+    assert task_id not in media_route._ACTIVE_MEDIA_CONTEXT
+    finalized.assert_awaited_once_with(
+        SimpleNamespace(),
+        card,
+        route=route,
+        success=False,
+        detail="user requested stop",
+        cancelled=True,
+    )

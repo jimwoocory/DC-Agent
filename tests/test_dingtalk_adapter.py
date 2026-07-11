@@ -8,6 +8,7 @@ from astrbot.core.platform.sources.dingtalk.dingtalk_adapter import (
     DINGTALK_RECONNECT_INITIAL_DELAY,
     DINGTALK_RECONNECT_MAX_DELAY,
     DingtalkPlatformAdapter,
+    ManagedDingTalkStreamClient,
     _dingtalk_reconnect_delay,
 )
 
@@ -28,6 +29,44 @@ def test_dingtalk_reconnect_delay_has_minimum_delay():
 
 def test_dingtalk_reconnect_delay_is_capped():
     assert _dingtalk_reconnect_delay(20) == DINGTALK_RECONNECT_MAX_DELAY
+
+
+@pytest.mark.asyncio
+async def test_managed_dingtalk_client_propagates_cancellation(monkeypatch):
+    class FakeWebSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            await asyncio.sleep(3600)
+
+    credential = type("Credential", (), {})()
+    client = ManagedDingTalkStreamClient(credential)
+    monkeypatch.setattr(
+        client,
+        "open_connection",
+        lambda: {"endpoint": "wss://example.test", "ticket": "ticket"},
+    )
+    monkeypatch.setattr(
+        dingtalk_adapter.websockets,
+        "connect",
+        lambda _: FakeWebSocket(),
+    )
+
+    task = asyncio.create_task(client.start())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.websocket is None
 
 
 @pytest.mark.asyncio
@@ -76,3 +115,19 @@ async def test_dingtalk_reconnect_delay_wakes_on_terminate(monkeypatch):
             await adapter.terminate()
             run_task.cancel()
             await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_terminate_cancels_tracked_keepalive_tasks() -> None:
+    adapter = DingtalkPlatformAdapter.__new__(DingtalkPlatformAdapter)
+    adapter._terminated_event = threading.Event()
+    adapter._shutdown_event = threading.Event()
+    adapter.client_ = type("Client", (), {"websocket": None})()
+    keepalive = asyncio.create_task(asyncio.sleep(3600))
+    adapter._sdk_keepalive_tasks = {keepalive}
+
+    await adapter.terminate()
+
+    assert keepalive.done()
+    assert keepalive.cancelled()
+    assert adapter._sdk_keepalive_tasks == set()

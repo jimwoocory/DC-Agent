@@ -51,6 +51,16 @@ MEMORY_HINT_RE = re.compile(
     r"之光EV|长尾期|长尾|查一下|找一下|有没有|是什么|是谁)",
     re.IGNORECASE,
 )
+FRESH_CREATIVE_RE = re.compile(
+    r"(帮我|请|需要|想要|生成|制作|设计|搭建|写|起草|策划|做).{0,18}"
+    r"(新|新的|一份|一个|一张|框架|方案|海报|文案|脚本|主视觉|创意)",
+    re.IGNORECASE,
+)
+EXPLICIT_MEMORY_RE = re.compile(
+    r"(查一下|找一下|检索|调用记忆|参考.{0,6}(历史|之前|过往)|之前|历史|"
+    r"过往|复盘|记忆|知识库|资料库|已有资料|原有方案)",
+    re.IGNORECASE,
+)
 
 STOP_WORDS = {
     "帮我",
@@ -166,6 +176,8 @@ def _should_retrieve(text: str) -> bool:
     clean = _clean_text(text)
     if len(clean) < 2:
         return False
+    if FRESH_CREATIVE_RE.search(clean) and not EXPLICIT_MEMORY_RE.search(clean):
+        return False
     return bool(MEMORY_HINT_RE.search(clean))
 
 
@@ -240,9 +252,20 @@ def retrieve_governed_memory_context(text: str, *, limit: int = 5) -> dict[str, 
     store = MemoryGovernanceStore(GOVERNED_MEMORY_DB)
     clean_text = _clean_text(text)
     terms = _candidate_terms(text)
+    if not terms:
+        return {"governed_memories": [], "documents": [], "project_items": []}
+    candidates: dict[str, Any] = {}
+    candidate_limit = min(max(limit * 2, 10), 20)
+    for term in terms:
+        for memory in list_recall_memories(
+            store=store,
+            query=term,
+            limit=candidate_limit,
+        ):
+            candidates[memory.memory_id] = memory
     scored_memories = [
         (score, memory)
-        for memory in list_recall_memories(store=store, query="", limit=10000)
+        for memory in candidates.values()
         if (score := _governed_memory_score(memory, clean_text, terms)) > 0
     ]
     scored_memories.sort(key=lambda item: (-item[0], item[1].memory_id))

@@ -1,0 +1,261 @@
+[
+  {
+    "sample_id": "cutout_followup_blocks_queue",
+    "text": "头发部分不是很理想，能不能再精细一些吗？",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手"
+    },
+    "expected_slots": {
+      "conversation_state": "followup",
+      "object_reference": "generated_object",
+      "action_force": "implicit",
+      "department_signal": "unknown",
+      "resource_need": "resource_not_required",
+      "risk_gate": "block_queue",
+      "next_action": "ask_clarify"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "feedback_or_followup_blocks_queue"
+      ]
+    },
+    "expected_final": {
+      "intent": "fallback",
+      "source": "fallback",
+      "provider_id": "aihubmix/qwen3.7-max",
+      "action": "answer",
+      "depth": "direct",
+      "metadata_absent": [
+        "department_workflow"
+      ],
+      "metadata_equals": {
+        "queue_allowed": "false"
+      }
+    }
+  },
+  {
+    "sample_id": "brand_middle_platform_conflict_is_context",
+    "text": "品宣和中台策略部都提到直播账号运营，这个先怎么分工？",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手"
+    },
+    "expected_slots": {
+      "conversation_state": "new_request",
+      "department_signal": "department_context",
+      "next_action": "answer",
+      "resource_need": "resource_not_required",
+      "risk_gate": "allow"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "department_context_not_entrypoint",
+        "no_real_queue_reason"
+      ]
+    },
+    "expected_final": {
+      "intent": "fallback",
+      "source": "fallback",
+      "provider_id": "aihubmix/qwen3.7-max",
+      "action": "answer",
+      "depth": "direct",
+      "source_not": "department_workflow",
+      "metadata_absent": [
+        "department_workflow"
+      ],
+      "metadata_equals": {
+        "queue_allowed": "false"
+      }
+    }
+  },
+  {
+    "sample_id": "liuqi_branch_placeholder_only",
+    "text": "柳汽这边的品宣账号运营怎么先保留组织接口？",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手"
+    },
+    "expected_slots": {
+      "conversation_state": "new_request",
+      "department_signal": "department_context",
+      "next_action": "answer",
+      "resource_need": "resource_not_required",
+      "risk_gate": "allow"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "department_context_not_entrypoint",
+        "no_real_queue_reason"
+      ]
+    },
+    "expected_final": {
+      "intent": "fallback",
+      "source": "fallback",
+      "provider_id": "aihubmix/qwen3.7-max",
+      "action": "answer",
+      "depth": "direct",
+      "source_not": "department_workflow",
+      "metadata_absent": [
+        "department_workflow"
+      ],
+      "metadata_equals": {
+        "queue_allowed": "false"
+      }
+    }
+  },
+  {
+    "sample_id": "department_assignment_context_only",
+    "text": "设计部和活动统筹部把这次落地执行分工表拆一下",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手"
+    },
+    "expected_slots": {
+      "conversation_state": "new_request",
+      "department_signal": "department_context",
+      "next_action": "answer",
+      "resource_need": "resource_not_required",
+      "risk_gate": "allow"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "department_context_not_entrypoint",
+        "no_real_queue_reason"
+      ]
+    },
+    "expected_final": {
+      "intent": "work_preflight",
+      "source": "department_workflow",
+      "provider_id": "aihubmix/qwen3.7-max",
+      "action": "answer",
+      "depth": "direct",
+      "metadata_equals": {
+        "department": "execution_ops",
+        "department_workflow": "execution_delivery",
+        "queue_allowed": "false"
+      }
+    }
+  },
+  {
+    "sample_id": "ordinary_employee_chat_enters",
+    "text": "你好，我想问一下今天这个事情怎么处理",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手"
+    },
+    "expected_slots": {
+      "conversation_state": "new_request",
+      "department_signal": "unknown",
+      "next_action": "answer",
+      "resource_need": "resource_not_required",
+      "risk_gate": "allow"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "no_real_queue_reason"
+      ]
+    },
+    "expected_final": {
+      "intent": "casual",
+      "source": "keyword",
+      "provider_id": "aihubmix/qwen3.7-max",
+      "action": "answer",
+      "depth": "direct",
+      "metadata_absent": [
+        "department_workflow"
+      ],
+      "metadata_equals": {
+        "queue_allowed": "false"
+      }
+    }
+  },
+  {
+    "sample_id": "disabled_legacy_cli_false_queue_blocks",
+    "text": "刚才那个结果还有点问题，先别排队，我问一下原因",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手"
+    },
+    "candidates": [
+      {
+        "source": "llm",
+        "label": "queue_candidate",
+        "evidence": "ambiguous follow-up",
+        "confidence": 0.72
+      }
+    ],
+    "expected_slots": {
+      "conversation_state": "followup",
+      "object_reference": "generated_object",
+      "action_force": "implicit",
+      "department_signal": "unknown",
+      "resource_need": "resource_not_required",
+      "risk_gate": "block_queue",
+      "next_action": "ask_clarify"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "candidate_only_no_execution",
+        "feedback_or_followup_blocks_queue"
+      ]
+    },
+    "expected_final": {
+      "intent": "fallback",
+      "source": "fallback",
+      "provider_id": "aihubmix/qwen3.7-max",
+      "action": "answer",
+      "depth": "direct",
+      "metadata_absent": [
+        "department_workflow"
+      ],
+      "metadata_equals": {
+        "queue_allowed": "false"
+      }
+    }
+  },
+  {
+    "sample_id": "direct_image_generation_media_first",
+    "text": "帮我直接生成一张缤果夏季主视觉海报",
+    "metadata": {
+      "platform_id": "巅池-Agent小助手",
+      "department": "planning"
+    },
+    "expected_slots": {
+      "conversation_state": "new_request",
+      "action_force": "explicit_execute",
+      "department_signal": "department_context",
+      "next_action": "preprocess_media",
+      "resource_need": "resource_not_required",
+      "risk_gate": "allow"
+    },
+    "expected_rule_gate": {
+      "queue_allowed": "false",
+      "llm_can_execute": "false",
+      "rule_gate_notes_contains": [
+        "department_context_not_entrypoint",
+        "media_before_department",
+        "no_real_queue_reason"
+      ]
+    },
+    "expected_final": {
+      "intent": "creative",
+      "source": "department_workflow",
+      "provider_id": "aihubmix/doubao-seed-2-1-pro",
+      "action": "answer",
+      "depth": "direct",
+      "metadata_equals": {
+        "department": "planning",
+        "department_workflow": "planning_direct_media",
+        "media_policy": "direct_generation",
+        "queue_allowed": "false"
+      }
+    }
+  }
+]

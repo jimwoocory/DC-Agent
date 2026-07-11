@@ -1150,7 +1150,7 @@ class LarkPlatformAdapter(Platform):
     @staticmethod
     def _is_mergeable_multimodal_fragment(abm: AstrBotMessage) -> bool:
         message_str = str(getattr(abm, "message_str", "") or "")
-        if message_str.startswith("__card_action__:"):
+        if message_str.startswith(("__card_action__:", "/")):
             return False
 
         components = list(getattr(abm, "message", []) or [])
@@ -1161,6 +1161,27 @@ class LarkPlatformAdapter(Platform):
             isinstance(comp, (Comp.At, Comp.File, Comp.Image, Comp.Plain, Comp.Reply))
             for comp in components
         )
+
+    @staticmethod
+    def _expects_follow_up_media(abm: AstrBotMessage) -> bool:
+        """Return whether plain text explicitly refers to an adjacent attachment."""
+        if any(isinstance(comp, (Comp.File, Comp.Image)) for comp in abm.message or []):
+            return True
+        text = str(getattr(abm, "message_str", "") or "")
+        return bool(
+            re.search(
+                r"(这张|这幅|这个图片|这份|这些|附件|文件|图片|照片|截图|上传).{0,18}"
+                r"(帮我|分析|总结|提炼|看看|处理|修改|抠|读取|对比|检查)?",
+                text,
+                re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _has_plain_component(abm: AstrBotMessage | None) -> bool:
+        if abm is None:
+            return False
+        return any(isinstance(comp, Comp.Plain) for comp in (abm.message or []))
 
     def _pending_multimodal_key(self, abm: AstrBotMessage) -> str:
         message_type = (
@@ -1215,6 +1236,10 @@ class LarkPlatformAdapter(Platform):
             return False
 
         pending_key = self._pending_multimodal_key(abm)
+        pending = pending_messages.get(pending_key)
+        if pending is None and not self._expects_follow_up_media(abm):
+            return False
+
         previous = pending_messages.pop(pending_key, None)
         if previous:
             previous_abm, previous_task, _previous_window = previous
@@ -1227,6 +1252,24 @@ class LarkPlatformAdapter(Platform):
                 self.meta().id,
                 str(getattr(abm, "session_id", ""))[:24],
             )
+            if (
+                (
+                    self._has_file_component(previous_abm)
+                    or any(
+                        isinstance(comp, Comp.Image) for comp in previous_abm.message
+                    )
+                )
+                and self._has_plain_component(abm)
+                or (
+                    self._has_plain_component(previous_abm)
+                    and any(
+                        isinstance(comp, (Comp.File, Comp.Image))
+                        for comp in abm.message
+                    )
+                )
+            ):
+                await self._enqueue_msg(abm)
+                return True
 
         task = asyncio.create_task(
             self._flush_pending_multimodal_message(pending_key, window)
@@ -1452,6 +1495,10 @@ class LarkPlatformAdapter(Platform):
             self._polling_fallback_task = None
         if self.connection_mode == "socket":
             await self.client._disconnect()
+        cache_cron = getattr(getattr(self.client, "_cache", None), "_cron", None)
+        if cache_cron is not None and not cache_cron.done():
+            cache_cron.cancel()
+            await asyncio.gather(cache_cron, return_exceptions=True)
         logger.info("飞书(Lark) 适配器已关闭")
 
     def get_client(self) -> lark.ws.Client:

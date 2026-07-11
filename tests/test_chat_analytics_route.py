@@ -56,6 +56,19 @@ def _init_inbox_db(db_path: Path) -> None:
                 trusted_card_action INTEGER NOT NULL,
                 payload_json TEXT NOT NULL
             );
+
+            CREATE TABLE feishu_egress_audit (
+                audit_id TEXT PRIMARY KEY,
+                sent_at TEXT NOT NULL,
+                reply_message_id TEXT NOT NULL,
+                receive_id TEXT NOT NULL,
+                receive_id_type TEXT NOT NULL,
+                msg_type TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                response_code TEXT NOT NULL,
+                response_message_id TEXT NOT NULL,
+                content_chars INTEGER NOT NULL
+            );
         """)
 
 
@@ -148,6 +161,38 @@ def _insert_ingress_audit(
                 0,
                 0,
                 json.dumps({"message_id": f"om_{audit_id}"}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+
+
+def _insert_egress_audit(
+    db_path: Path,
+    *,
+    audit_id: str,
+    sent_at: str,
+    reply_message_id: str,
+) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO feishu_egress_audit (
+                audit_id, sent_at, reply_message_id, receive_id,
+                receive_id_type, msg_type, success, response_code,
+                response_message_id, content_chars
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                audit_id,
+                sent_at,
+                reply_message_id,
+                "",
+                "",
+                "post",
+                1,
+                "0",
+                f"om_reply_{audit_id}",
+                120,
             ),
         )
         conn.commit()
@@ -387,6 +432,47 @@ async def test_chat_analytics_includes_blocked_ingress_audit(
     assert summary["data"]["metrics"]["inbox_items"] == 1
     assert summary["data"]["metrics"]["open_items"] == 0
     assert summary["data"]["top_senders"] == [{"name": "李四", "count": 1}]
+
+
+@pytest.mark.asyncio
+async def test_chat_analytics_uses_feishu_egress_as_reply_evidence(
+    tmp_path: Path,
+) -> None:
+    inbox_path = tmp_path / "data" / "ai_inbox.db"
+    employees_path = tmp_path / "data" / "employees.db"
+    _init_inbox_db(inbox_path)
+    _init_employee_db(employees_path)
+    _insert_ingress_audit(
+        inbox_path,
+        audit_id="audit_replied",
+        created_at="2026-06-15T11:00:00+00:00",
+        sender_id="ou_replied",
+        sender_name="同事A",
+        text="帮我看一下这份方案",
+        allowed=True,
+        reason="dm_allowed",
+    )
+    _insert_egress_audit(
+        inbox_path,
+        audit_id="egress_replied",
+        sent_at="2026-06-15T11:00:03+00:00",
+        reply_message_id="om_audit_replied",
+    )
+
+    app = Quart(__name__)
+    ChatAnalyticsRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        messages = await (
+            await client.get(
+                "/api/chat-analytics/messages"
+                "?from=2026-06-15T00:00:00%2B00:00"
+                "&to=2026-06-16T00:00:00%2B00:00"
+            )
+        ).get_json()
+
+    assert messages["status"] == "ok"
+    assert messages["data"]["total"] == 0
 
 
 @pytest.mark.asyncio

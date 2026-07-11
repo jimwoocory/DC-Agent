@@ -128,6 +128,7 @@ class QueueStore:
             priority=row["priority"],
             enqueue_at=row["enqueue_at"],
             eta_at=row["eta_at"],
+            lease_until=row["lease_until"],
             started_at=row["started_at"],
             completed_at=row["completed_at"],
             error=row["error"],

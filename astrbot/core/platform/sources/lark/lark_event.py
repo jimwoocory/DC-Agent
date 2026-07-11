@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import uuid
+from collections.abc import Callable
+from typing import Any
 
 import lark_oapi as lark
 from lark_oapi.api.cardkit.v1 import (
@@ -35,6 +37,30 @@ from astrbot.core.utils.media_utils import (
     get_media_duration,
 )
 from astrbot.core.utils.metrics import Metric
+
+_LARK_EGRESS_AUDITOR: Callable[[dict[str, Any]], None] | None = None
+
+
+def set_lark_egress_auditor(
+    auditor: Callable[[dict[str, Any]], None] | None,
+) -> None:
+    """Register the optional delivery audit sink owned by channel governance.
+
+    Args:
+        auditor: Synchronous sink receiving privacy-light delivery metadata.
+    """
+    global _LARK_EGRESS_AUDITOR
+    _LARK_EGRESS_AUDITOR = auditor
+
+
+def _emit_lark_egress_audit(payload: dict[str, Any]) -> None:
+    auditor = _LARK_EGRESS_AUDITOR
+    if auditor is None:
+        return
+    try:
+        auditor(payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[Lark] egress audit skipped: %s", exc)
 
 
 class LarkMessageEvent(AstrMessageEvent):
@@ -76,49 +102,80 @@ class LarkMessageEvent(AstrMessageEvent):
             logger.error("[Lark] API Client im 模块未初始化")
             return False
 
-        if reply_message_id:
-            request = (
-                ReplyMessageRequest.builder()
-                .message_id(reply_message_id)
-                .request_body(
-                    ReplyMessageRequestBody.builder()
-                    .content(content)
-                    .msg_type(msg_type)
-                    .uuid(str(uuid.uuid4()))
-                    .reply_in_thread(False)
+        try:
+            if reply_message_id:
+                request = (
+                    ReplyMessageRequest.builder()
+                    .message_id(reply_message_id)
+                    .request_body(
+                        ReplyMessageRequestBody.builder()
+                        .content(content)
+                        .msg_type(msg_type)
+                        .uuid(str(uuid.uuid4()))
+                        .reply_in_thread(False)
+                        .build()
+                    )
                     .build()
                 )
-                .build()
-            )
-            response = await lark_client.im.v1.message.areply(request)
-        else:
-            from lark_oapi.api.im.v1 import (
-                CreateMessageRequest,
-                CreateMessageRequestBody,
-            )
-
-            if receive_id_type is None or receive_id is None:
-                logger.error(
-                    "[Lark] 主动发送消息时，receive_id 和 receive_id_type 不能为空",
+                response = await lark_client.im.v1.message.areply(request)
+            else:
+                from lark_oapi.api.im.v1 import (
+                    CreateMessageRequest,
+                    CreateMessageRequestBody,
                 )
-                return False
 
-            request = (
-                CreateMessageRequest.builder()
-                .receive_id_type(receive_id_type)
-                .request_body(
-                    CreateMessageRequestBody.builder()
-                    .receive_id(receive_id)
-                    .content(content)
-                    .msg_type(msg_type)
-                    .uuid(str(uuid.uuid4()))
+                if receive_id_type is None or receive_id is None:
+                    logger.error(
+                        "[Lark] 主动发送消息时，receive_id 和 receive_id_type 不能为空",
+                    )
+                    return False
+
+                request = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type(receive_id_type)
+                    .request_body(
+                        CreateMessageRequestBody.builder()
+                        .receive_id(receive_id)
+                        .content(content)
+                        .msg_type(msg_type)
+                        .uuid(str(uuid.uuid4()))
+                        .build()
+                    )
                     .build()
                 )
-                .build()
+                response = await lark_client.im.v1.message.acreate(request)
+        except Exception as exc:
+            _emit_lark_egress_audit(
+                {
+                    "reply_message_id": reply_message_id or "",
+                    "receive_id": receive_id or "",
+                    "receive_id_type": receive_id_type or "",
+                    "msg_type": msg_type,
+                    "success": False,
+                    "response_code": type(exc).__name__,
+                    "response_message_id": "",
+                    "content_chars": len(content),
+                }
             )
-            response = await lark_client.im.v1.message.acreate(request)
+            raise
 
-        if not response.success():
+        success = bool(response.success())
+        response_data = getattr(response, "data", None)
+        _emit_lark_egress_audit(
+            {
+                "reply_message_id": reply_message_id or "",
+                "receive_id": receive_id or "",
+                "receive_id_type": receive_id_type or "",
+                "msg_type": msg_type,
+                "success": success,
+                "response_code": str(getattr(response, "code", "")),
+                "response_message_id": str(
+                    getattr(response_data, "message_id", "") or ""
+                ),
+                "content_chars": len(content),
+            }
+        )
+        if not success:
             logger.error(f"[Lark] 发送飞书消息失败({response.code}): {response.msg}")
             return False
 

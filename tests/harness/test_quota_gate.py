@@ -101,6 +101,22 @@ async def _set_resource_in_flight(gate: QuotaGate, job_id: str) -> None:
         await db.close()
 
 
+async def _expire_running_job(gate: QuotaGate, job_id: str) -> None:
+    db = await gate.store.connect()
+    try:
+        await db.execute(
+            """
+            UPDATE dc_llm_queue_jobs
+            SET lease_until = 0
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
 async def _reject_release_call(*args: object, **kwargs: object) -> None:
     raise AssertionError("resource release should not be called")
 
@@ -130,6 +146,7 @@ async def test_quota_gate_admits_first_request_run_now(
     stored = await quota_gate.store.get_job(decision.job.job_id)
     assert stored is not None
     assert stored.status is QueueStatus.RUNNING
+    assert stored.lease_until is not None
 
     resource = await _resource_row(quota_gate)
     assert resource["in_flight_job_id"] == decision.job.job_id
@@ -384,3 +401,62 @@ async def test_admit_rejects_empty_resource_key_set(
                 resource_keys=(),
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_extends_running_job_lease(quota_gate: QuotaGate) -> None:
+    admitted = await quota_gate.admit(_request())
+    before = await quota_gate.store.get_job(admitted.job.job_id)
+    assert before is not None
+    assert before.lease_until is not None
+
+    extended = await quota_gate.heartbeat(admitted.job.job_id, lease_seconds=600)
+
+    after = await quota_gate.store.get_job(admitted.job.job_id)
+    assert extended is True
+    assert after is not None
+    assert after.lease_until is not None
+    assert after.lease_until >= before.lease_until
+
+
+@pytest.mark.asyncio
+async def test_reap_expired_running_job_releases_resource(
+    quota_gate: QuotaGate,
+) -> None:
+    admitted = await quota_gate.admit(_request())
+    await _expire_running_job(quota_gate, admitted.job.job_id)
+
+    reaped = await quota_gate.reap_expired_running_jobs()
+
+    stored = await quota_gate.store.get_job(admitted.job.job_id)
+    assert reaped == [admitted.job.job_id]
+    assert stored is not None
+    assert stored.status is QueueStatus.FAILED
+    assert stored.error == "running lease expired"
+    resource = await _resource_row(quota_gate)
+    assert resource["in_flight_job_id"] is None
+    assert await quota_gate.resources_available_now((RESOURCE_KEY,)) is True
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_jobs_cancels_running_and_pending_work(
+    quota_gate: QuotaGate,
+) -> None:
+    running = await quota_gate.admit(_request())
+    pending = await quota_gate.admit(_request())
+
+    cancelled = await quota_gate.cancel_session_jobs(
+        "session-1",
+        reason="user requested stop",
+    )
+
+    assert set(cancelled) == {running.job.job_id, pending.job.job_id}
+    assert (
+        await quota_gate.store.get_job(running.job.job_id)
+    ).status is QueueStatus.CANCELLED
+    assert (
+        await quota_gate.store.get_job(pending.job.job_id)
+    ).status is QueueStatus.CANCELLED
+    resource = await _resource_row(quota_gate)
+    assert resource["in_flight_job_id"] is None
+    assert await quota_gate.resources_available_now((RESOURCE_KEY,)) is True

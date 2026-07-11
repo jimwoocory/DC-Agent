@@ -185,6 +185,7 @@ async def test_inbox_stats_and_latest_open(tmp_path: Path) -> None:
     store = InboxStore(tmp_path / "ai_inbox.db")
     await store.initialize()
     engine = AIInboxEngine(store)
+    assert engine.classify("这个链接正常吗？") == "question"
 
     first = await engine.create_item(
         InboxItemCreateRequest(

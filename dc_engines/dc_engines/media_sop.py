@@ -14,7 +14,7 @@ from dc_engines.media_prompt_catalog import (
 )
 
 MediaKind = Literal["image", "video", "image2video"]
-MediaGenerationStatus = Literal["running", "succeeded", "failed"]
+MediaGenerationStatus = Literal["running", "succeeded", "failed", "cancelled"]
 MediaPromptTarget = Literal["generic", "gpt-image-2", "dreamina"]
 MediaPromptChannel = Literal[
     "generic_media", "image_marketing_visual", "video_storyboard"

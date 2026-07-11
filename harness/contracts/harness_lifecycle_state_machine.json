@@ -26,6 +26,11 @@
       "id": "harness-lifecycle-005",
       "description": "Department workflow plugin tests verify producer-side auto-complete gates without mixing top-level and dc_engines pytest conftests.",
       "verification": "uv run pytest tests/test_department_workflow_plugin_content_sop.py::test_department_workflow_plugin_does_not_override_auto_complete_gate -q"
+    },
+    {
+      "id": "harness-lifecycle-006",
+      "description": "Acknowledgement and waiting messages keep active tasks non-terminal until a real artifact or final response is delivered.",
+      "verification": "uv run pytest dc_engines/tests/test_harness_runtime_hooks.py::test_sensor_classifies_media_ack_as_acknowledged dc_engines/tests/test_harness_sensor_plugin.py::test_sensor_does_not_complete_acknowledged_response -q"
     }
   ],
   "verification": {

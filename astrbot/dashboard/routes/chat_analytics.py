@@ -36,7 +36,11 @@ class ChatAnalyticsRoute(Route):
             items = _fetch_inbox_items(conn, window=window, limit=2000)
             audits = _fetch_ingress_audits(conn, window=window, limit=4000)
             total_events = _count_inbox_events(conn, window)
-        reply_evidence = _load_reply_evidence(chat_path, window)
+        reply_evidence = _load_reply_evidence(
+            chat_path,
+            window,
+            egress_path=inbox_path,
+        )
         merged_items = _problem_messages(
             _merge_ingress_and_inbox(audits, items),
             reply_evidence=reply_evidence,
@@ -125,7 +129,11 @@ class ChatAnalyticsRoute(Route):
         with _connect(db_path) as conn:
             inbox_rows = _fetch_inbox_items(conn, window=window, limit=2000)
             audit_rows = _fetch_ingress_audits(conn, window=window, limit=4000)
-        reply_evidence = _load_reply_evidence(self._chat_db_path(), window)
+        reply_evidence = _load_reply_evidence(
+            self._chat_db_path(),
+            window,
+            egress_path=db_path,
+        )
         merged_rows = _problem_messages(
             _merge_ingress_and_inbox(audit_rows, inbox_rows),
             reply_evidence=reply_evidence,
@@ -378,40 +386,72 @@ def _latest_message_time(conn: sqlite3.Connection) -> str:
 def _load_reply_evidence(
     chat_path: Path,
     window: dict[str, str],
+    *,
+    egress_path: Path | None = None,
 ) -> dict[str, list[str]]:
     """Load assistant reply timestamps keyed by likely conversation/session ids."""
-    if not chat_path.exists():
-        return {}
+    replies: dict[str, list[str]] = {}
+    if chat_path.exists():
+        try:
+            with _connect(chat_path) as conn:
+                clauses, params = _time_clauses(window)
+                rows = conn.execute(
+                    f"""
+                    SELECT created_at, platform_id, user_id, sender_id, content
+                    FROM platform_message_history
+                    WHERE {" AND ".join(clauses)}
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                    params,
+                ).fetchall()
+        except sqlite3.Error:
+            rows = []
+        for row in rows:
+            content = _json_loads(row["content"])
+            role = str(content.get("type") or "").strip()
+            sender_id = str(row["sender_id"] or "").strip().lower()
+            if role != "bot" and sender_id != "bot":
+                continue
+            created_at = _normalize_time_string(str(row["created_at"] or ""))
+            keys = {
+                str(row["user_id"] or "").strip(),
+                f"{row['platform_id']}:{row['user_id']}",
+            }
+            for key in keys:
+                if key:
+                    replies.setdefault(key, []).append(created_at)
+
+    egress_path = egress_path or chat_path
+    if not egress_path.exists():
+        return replies
     try:
-        with _connect(chat_path) as conn:
-            clauses, params = _time_clauses(window)
+        with _connect(egress_path) as conn:
+            if not _table_exists(conn, "feishu_egress_audit"):
+                return replies
+            clauses, params = _time_clauses(
+                window,
+                column="sent_at",
+                converter=_iso_time,
+            )
             rows = conn.execute(
                 f"""
-                SELECT created_at, platform_id, user_id, sender_id, content
-                FROM platform_message_history
-                WHERE {" AND ".join(clauses)}
-                ORDER BY created_at ASC, id ASC
+                SELECT sent_at, reply_message_id, receive_id
+                FROM feishu_egress_audit
+                WHERE {" AND ".join(clauses)} AND success = 1
+                ORDER BY sent_at ASC, audit_id ASC
                 """,
                 params,
             ).fetchall()
     except sqlite3.Error:
-        return {}
-
-    replies: dict[str, list[str]] = {}
+        return replies
     for row in rows:
-        content = _json_loads(row["content"])
-        role = str(content.get("type") or "").strip()
-        sender_id = str(row["sender_id"] or "").strip().lower()
-        if role != "bot" and sender_id != "bot":
-            continue
-        created_at = _normalize_time_string(str(row["created_at"] or ""))
-        keys = {
-            str(row["user_id"] or "").strip(),
-            f"{row['platform_id']}:{row['user_id']}",
-        }
-        for key in keys:
+        sent_at = _normalize_time_string(str(row["sent_at"] or ""))
+        for key in {
+            str(row["reply_message_id"] or "").strip(),
+            str(row["receive_id"] or "").strip(),
+        }:
             if key:
-                replies.setdefault(key, []).append(created_at)
+                replies.setdefault(key, []).append(sent_at)
     return replies
 
 
@@ -529,9 +569,7 @@ def _is_problem_message(
     if status.startswith("blocked:"):
         return True
     if status == "received":
-        # Ingress audit allowed the message but no downstream inbox item exists.
-        # That is exactly the "not formally handled / no visible reply" bucket.
-        return not item.get("inbox_item_id")
+        return not _has_assistant_reply(item, reply_evidence)
     if status in {"waiting_materials", "in_progress"}:
         return True
     if status == "new":
@@ -557,6 +595,7 @@ def _has_assistant_reply(
         return False
     created_at = _normalize_time_string(str(item.get("created_at") or ""))
     keys = {
+        str(item.get("message_id") or "").strip(),
         str(item.get("conversation_id") or "").strip(),
         str(item.get("session_id") or "").strip(),
         str(item.get("sender_id") or "").strip(),

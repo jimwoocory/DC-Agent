@@ -39,6 +39,11 @@ SUPPORTED_SUFFIXES = {
 }
 DEFAULT_MAX_FILE_MB = 80
 DEFAULT_CONTEXT_CHARS = 12000
+_KB_IMPORT_INTENT_RE = re.compile(
+    r"((入库|归档|保存|存入|同步|导入).{0,10}(知识库|资料库|素材库))|"
+    r"((知识库|资料库|素材库).{0,10}(入库|归档|保存|存入|同步|导入))",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,11 @@ def _replace_event_text(event: AstrMessageEvent, text: str) -> None:
         event.message_obj.message_str = text
     except Exception:  # noqa: BLE001
         pass
+
+
+def _requests_kb_import(text: str) -> bool:
+    """Return whether the user explicitly asks to persist files to a KB."""
+    return bool(_KB_IMPORT_INTENT_RE.search(text or ""))
 
 
 def _safe_file_name(file_name: str) -> str:
@@ -431,7 +441,10 @@ class DocumentIntakePlugin(Star):
             for component in files
         ]
         ready_results = [result for result in results if result.status != "unsupported"]
-        if ready_results and self.auto_import:
+        should_auto_import = self.auto_import and _requests_kb_import(
+            event.message_str or ""
+        )
+        if ready_results and should_auto_import:
             try:
                 asyncio.create_task(
                     self._upload_results_to_kb_and_finalize_card(
@@ -447,7 +460,7 @@ class DocumentIntakePlugin(Star):
                     results=results,
                     kb_summary={"error": str(exc)},
                     inbox_path=self.inbox_dir,
-                    auto_import=self.auto_import,
+                    auto_import=should_auto_import,
                 )
         else:
             await _finalize_document_intake_card(

@@ -770,6 +770,7 @@ class TestQueueRecoveryFiltering:
             },
         )
         gate = MagicMock()
+        gate.reap_expired_running_jobs = AsyncMock(return_value=[])
         gate.list_pending_jobs = AsyncMock(return_value=[pending])
         gate.cancel_pending_job = AsyncMock(return_value=True)
         gate.start_pending_job = AsyncMock(return_value=None)
@@ -798,6 +799,7 @@ class TestQueueRecoveryFiltering:
             },
         )
         gate = MagicMock()
+        gate.reap_expired_running_jobs = AsyncMock(return_value=[])
         gate.list_pending_jobs = AsyncMock(return_value=[pending])
         gate.cancel_pending_job = AsyncMock(return_value=True)
         gate.start_pending_job = AsyncMock(return_value=None)
@@ -830,6 +832,7 @@ class TestQueueRecoveryFiltering:
             },
         )
         gate = MagicMock()
+        gate.reap_expired_running_jobs = AsyncMock(return_value=[])
         gate.list_pending_jobs = AsyncMock(return_value=[pending])
         gate.cancel_pending_job = AsyncMock(return_value=True)
         gate.start_pending_job = AsyncMock(return_value=None)
@@ -859,6 +862,7 @@ class TestQueueRecoveryFiltering:
         )
         started = types.SimpleNamespace(job_id="job_fresh")
         gate = MagicMock()
+        gate.reap_expired_running_jobs = AsyncMock(return_value=[])
         gate.list_pending_jobs = AsyncMock(return_value=[pending])
         gate.cancel_pending_job = AsyncMock(return_value=True)
         gate.start_pending_job = AsyncMock(return_value=started)
@@ -869,3 +873,17 @@ class TestQueueRecoveryFiltering:
         assert resumed == 1
         gate.cancel_pending_job.assert_not_awaited()
         gate.start_pending_job.assert_awaited_once_with("job_fresh")
+
+    @pytest.mark.asyncio
+    async def test_recovery_reclaims_expired_running_before_pending_scan(
+        self, cli_handlers
+    ) -> None:
+        gate = MagicMock()
+        gate.reap_expired_running_jobs = AsyncMock(return_value=["expired-job"])
+        gate.list_pending_jobs = AsyncMock(return_value=[])
+
+        resumed = await cli_handlers._resume_pending_cli_jobs(MagicMock(), gate)
+
+        assert resumed == 0
+        gate.reap_expired_running_jobs.assert_awaited_once_with(limit=20)
+        gate.list_pending_jobs.assert_awaited_once_with(limit=20)

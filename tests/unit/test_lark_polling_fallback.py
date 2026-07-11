@@ -89,6 +89,32 @@ def test_lark_image_only_message_waits_for_adjacent_fragments() -> None:
     asyncio.run(run())
 
 
+def test_lark_plain_text_and_commands_are_queued_immediately() -> None:
+    async def run() -> None:
+        adapter = _make_adapter_for_buffering()
+        plain = _make_abm(
+            message_id="om_plain",
+            message=[Comp.Plain("帮我搭建一个活动方案框架")],
+            message_str="帮我搭建一个活动方案框架",
+        )
+        command = _make_abm(
+            message_id="om_stop",
+            message=[Comp.Plain("/stop")],
+            message_str="/stop",
+        )
+
+        await adapter.handle_msg(plain)
+        await adapter.handle_msg(command)
+
+        first = adapter._event_queue.get_nowait()
+        second = adapter._event_queue.get_nowait()
+        assert first.message_obj.message_id == "om_plain"
+        assert second.message_obj.message_id == "om_stop"
+        assert adapter._pending_multimodal_messages == {}
+
+    asyncio.run(run())
+
+
 def test_lark_merges_image_then_follow_up_text() -> None:
     async def run() -> None:
         adapter = _make_adapter_for_buffering()
@@ -106,8 +132,6 @@ def test_lark_merges_image_then_follow_up_text() -> None:
         await adapter.handle_msg(image_msg)
         await adapter.handle_msg(text_msg)
 
-        assert adapter._event_queue.empty()
-        await asyncio.sleep(0.03)
         event = adapter._event_queue.get_nowait()
         assert event.message_obj.message_id == "om_text"
         assert event.message_str == "[image] 这张图片的人物帮我抠出来"
@@ -137,8 +161,6 @@ def test_lark_merges_text_then_follow_up_image() -> None:
         await adapter.handle_msg(text_msg)
         await adapter.handle_msg(image_msg)
 
-        assert adapter._event_queue.empty()
-        await asyncio.sleep(0.03)
         event = adapter._event_queue.get_nowait()
         assert event.message_obj.message_id == "om_image"
         assert event.message_str == "这张图片的人物帮我抠出来 [image]"
@@ -168,8 +190,6 @@ def test_lark_merges_file_then_follow_up_text() -> None:
         await adapter.handle_msg(file_msg)
         await adapter.handle_msg(text_msg)
 
-        assert adapter._event_queue.empty()
-        await asyncio.sleep(0.03)
         event = adapter._event_queue.get_nowait()
         assert event.message_obj.message_id == "om_text"
         assert event.message_str == "方案.pdf 帮我总结这份方案"
@@ -199,8 +219,6 @@ def test_lark_merges_text_then_follow_up_file() -> None:
         await adapter.handle_msg(text_msg)
         await adapter.handle_msg(file_msg)
 
-        assert adapter._event_queue.empty()
-        await asyncio.sleep(0.03)
         event = adapter._event_queue.get_nowait()
         assert event.message_obj.message_id == "om_file"
         assert event.message_str == "帮我总结这份方案 方案.pdf"
@@ -236,8 +254,6 @@ def test_lark_merges_batch_files_and_follow_up_text() -> None:
         await adapter.handle_msg(second_file)
         await adapter.handle_msg(text_msg)
 
-        assert adapter._event_queue.empty()
-        await asyncio.sleep(0.03)
         event = adapter._event_queue.get_nowait()
         assert event.message_obj.message_id == "om_text"
         assert event.message_str == "方案A.pdf 方案B.pdf 这两份都帮我提炼重点"
@@ -478,3 +494,21 @@ def test_lark_initial_polling_uses_backfill_with_persisted_seen_cache() -> None:
     after = int(time.time()) - 600
 
     assert before <= start_time <= after
+
+
+def test_lark_terminate_cancels_sdk_cache_cron() -> None:
+    async def run() -> None:
+        adapter = LarkPlatformAdapter.__new__(LarkPlatformAdapter)
+        adapter._polling_fallback_task = None
+        adapter.connection_mode = "webhook"
+        cache_cron = asyncio.create_task(asyncio.sleep(3600))
+        adapter.client = SimpleNamespace(
+            _cache=SimpleNamespace(_cron=cache_cron),
+        )
+
+        await adapter.terminate()
+
+        assert cache_cron.done()
+        assert cache_cron.cancelled()
+
+    asyncio.run(run())

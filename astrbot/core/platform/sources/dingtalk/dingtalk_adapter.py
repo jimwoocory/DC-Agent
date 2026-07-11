@@ -6,9 +6,11 @@ import uuid
 from concurrent.futures import CancelledError as FutureCancelledError
 from pathlib import Path
 from typing import Literal, NoReturn, cast
+from urllib.parse import quote_plus
 
 import aiohttp
 import dingtalk_stream
+import websockets
 from dingtalk_stream import AckMessage
 
 from astrbot import logger
@@ -61,6 +63,52 @@ class MyEventHandler(dingtalk_stream.EventHandler):
         return AckMessage.STATUS_OK, "OK"
 
 
+class ManagedDingTalkStreamClient(dingtalk_stream.DingTalkStreamClient):
+    """Run one cancellable DingTalk stream connection attempt.
+
+    The upstream SDK catches ``CancelledError`` inside an infinite reconnect loop,
+    which prevents AstrBot from shutting down. Reconnect policy belongs to the
+    adapter, so this client owns only one connection and always releases its
+    child tasks before returning.
+    """
+
+    async def start(self) -> None:
+        """Open and serve one stream connection until it closes or is cancelled.
+
+        Raises:
+            ConnectionError: The gateway cannot be opened or the stream closes.
+        """
+        self.pre_start()
+        connection = await asyncio.to_thread(self.open_connection)
+        if not connection:
+            raise ConnectionError("DingTalk gateway connection could not be opened")
+
+        self.logger.info("endpoint is %s", connection)
+        uri = f"{connection['endpoint']}?ticket={quote_plus(connection['ticket'])}"
+        keepalive_task: asyncio.Task | None = None
+        background_tasks: set[asyncio.Task] = set()
+        try:
+            async with websockets.connect(uri) as websocket:
+                self.websocket = websocket
+                keepalive_task = asyncio.create_task(self.keepalive(websocket))
+                async for raw_message in websocket:
+                    task = asyncio.create_task(
+                        self.background_task(json.loads(raw_message))
+                    )
+                    background_tasks.add(task)
+                    task.add_done_callback(background_tasks.discard)
+            raise ConnectionError("DingTalk stream connection closed")
+        finally:
+            tasks = list(background_tasks)
+            if keepalive_task is not None:
+                tasks.append(keepalive_task)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self.websocket = None
+
+
 @register_platform_adapter(
     "dingtalk", "钉钉机器人官方 API 适配器", support_streaming_message=True
 )
@@ -90,12 +138,35 @@ class DingtalkPlatformAdapter(Platform):
         self.client = AstrCallbackClient()
 
         credential = dingtalk_stream.Credential(self.client_id, self.client_secret)
-        client = dingtalk_stream.DingTalkStreamClient(credential, logger=logger)
+        client = ManagedDingTalkStreamClient(credential, logger=logger)
         client.register_all_event_handler(MyEventHandler())
         client.register_callback_handler(
             dingtalk_stream.ChatbotMessage.TOPIC,
             self.client,
         )
+        self._sdk_keepalive_tasks: set[asyncio.Task] = set()
+        original_keepalive = client.keepalive
+
+        async def tracked_keepalive(*args, **kwargs):
+            """Track the SDK-owned keepalive task for deterministic shutdown.
+
+            Args:
+                *args: Positional arguments forwarded to the DingTalk SDK.
+                **kwargs: Keyword arguments forwarded to the DingTalk SDK.
+
+            Returns:
+                The SDK keepalive coroutine result.
+            """
+            task = asyncio.current_task()
+            if task is not None:
+                self._sdk_keepalive_tasks.add(task)
+            try:
+                return await original_keepalive(*args, **kwargs)
+            finally:
+                if task is not None:
+                    self._sdk_keepalive_tasks.discard(task)
+
+        client.keepalive = tracked_keepalive
         self.client_ = client  # 用于 websockets 的 client
         self._shutdown_event = threading.Event()
         self._terminated_event = threading.Event()
@@ -811,6 +882,7 @@ class DingtalkPlatformAdapter(Platform):
                         self._shutdown_event.set()
                     self._shutdown_event.wait()
                     if self._terminated_event.is_set():
+                        should_cancel_task = True
                         return
                     if task.done():
                         try:
@@ -854,6 +926,12 @@ class DingtalkPlatformAdapter(Platform):
 
         self._terminated_event.set()
         self._shutdown_event.set()
+        keepalive_tasks = list(getattr(self, "_sdk_keepalive_tasks", set()))
+        for task in keepalive_tasks:
+            task.cancel()
+        if keepalive_tasks:
+            await asyncio.gather(*keepalive_tasks, return_exceptions=True)
+        getattr(self, "_sdk_keepalive_tasks", set()).clear()
         if self.client_.websocket is not None:
             self.client_.open_connection = monkey_patch_close
             await self.client_.websocket.close(code=1000, reason="Graceful shutdown")

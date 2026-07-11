@@ -405,11 +405,21 @@ _DEFAULT_RECOVERY_INTERVAL = 60
 
 
 async def _resume_pending_cli_jobs(_context: Any, gate: Any, *, limit: int = 20) -> int:
-    """Re-admit pending QuotaGate CLI jobs when resources free.
+    """Reclaim expired running jobs and re-admit pending CLI jobs.
 
     Returns the number of jobs that were successfully restarted.
     """
     resumed = 0
+    try:
+        reclaimed = await gate.reap_expired_running_jobs(limit=limit)
+        if reclaimed:
+            logger.warning(
+                "[cli_handlers] reclaimed %s expired running queue job(s): %s",
+                len(reclaimed),
+                ",".join(job_id[:8] for job_id in reclaimed),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[cli_handlers] 回收 expired running jobs 失败: %s", exc)
     try:
         pending_jobs = await gate.list_pending_jobs(limit=limit)
     except Exception as exc:  # noqa: BLE001
@@ -521,12 +531,18 @@ def start_queue_recovery(
     )
 
 
-def stop_queue_recovery() -> None:
-    """Stop the background pending queue scanner."""
+def stop_queue_recovery() -> asyncio.Task | None:
+    """Stop the background pending queue scanner.
+
+    Returns:
+        The cancelled scanner task, or ``None`` when no scanner was active.
+    """
     global _QUEUE_RECOVERY_TASK
+    task = _QUEUE_RECOVERY_TASK
     if _QUEUE_RECOVERY_TASK is not None and not _QUEUE_RECOVERY_TASK.done():
         _QUEUE_RECOVERY_TASK.cancel()
     _QUEUE_RECOVERY_TASK = None
+    return task
 
 
 __all__ = [

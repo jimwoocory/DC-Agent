@@ -1,10 +1,68 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from astrbot.builtin_stars.builtin_commands.commands import (
     conversation as conversation_module,
 )
+
+
+@pytest.mark.asyncio
+async def test_cancel_persisted_session_work_cancels_harness_and_router() -> None:
+    harness_engine = SimpleNamespace(
+        cancel_session_tasks=AsyncMock(return_value=["task-1", "task-2"])
+    )
+    router_cancel = AsyncMock(return_value=3)
+    context = SimpleNamespace(
+        harness_engine=harness_engine,
+        dc_cancel_session_work=router_cancel,
+    )
+
+    cancelled = await conversation_module._cancel_persisted_session_work(
+        context,
+        "lark:user-1",
+        reason="user requested stop",
+    )
+
+    assert cancelled == 5
+    harness_engine.cancel_session_tasks.assert_awaited_once_with(
+        "lark:user-1",
+        reason="user requested stop",
+    )
+    router_cancel.assert_awaited_once_with(
+        "lark:user-1",
+        reason="user requested stop",
+    )
+
+
+@pytest.mark.asyncio
+async def test_stop_reports_persisted_tasks_even_without_active_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = SimpleNamespace(
+        get_config=lambda **_kwargs: {
+            "provider_settings": {"agent_runner_type": "local"}
+        },
+    )
+    commands = conversation_module.ConversationCommands(context)
+    message = MagicMock(unified_msg_origin="lark:user-1")
+    monkeypatch.setattr(
+        conversation_module.active_event_registry,
+        "request_agent_stop_all",
+        lambda *_args, **_kwargs: 0,
+    )
+    monkeypatch.setattr(
+        conversation_module,
+        "_cancel_persisted_session_work",
+        AsyncMock(return_value=2),
+    )
+
+    await commands.stop(message)
+
+    result = message.set_result.call_args.args[0]
+    assert "2" in result.chain[0].text
+    assert "持续任务" in result.chain[0].text
 
 
 @pytest.mark.asyncio

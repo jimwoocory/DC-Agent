@@ -192,6 +192,40 @@ class HarnessEngine:
             event_payload={"reason": reason},
         )
 
+    async def cancel_session_tasks(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+    ) -> list[str]:
+        """Cancel every non-terminal task owned by a session.
+
+        Args:
+            session_id: Unified message origin used as the Harness session ID.
+            reason: User-visible cancellation reason stored in task events.
+
+        Returns:
+            Task identifiers successfully moved to ``cancelled``.
+        """
+        tasks = await self.store.list_tasks_for_session(
+            session_id,
+            limit=1000,
+            statuses=("pending", "in_progress", "blocked", "review_required"),
+        )
+        cancelled: list[str] = []
+        for task in tasks:
+            try:
+                await self._transition_task_status(
+                    task.task_id,
+                    "cancelled",
+                    event_payload={"reason": reason, "source": "session_command"},
+                )
+                cancelled.append(task.task_id)
+            except RuntimeError:
+                # Another worker may have terminalized the task after the list query.
+                continue
+        return cancelled
+
     async def append_trace(
         self,
         task_id: str,

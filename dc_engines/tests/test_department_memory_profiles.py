@@ -9,6 +9,55 @@ from dc_engines.department_workflows.memory_profiles import (
 )
 
 
+def test_system_tester_flag_does_not_change_department_memory_semantics(
+    monkeypatch,
+) -> None:
+    from data.plugins.dc_router.preprocessing import department_memory
+
+    event = type(
+        "Event",
+        (),
+        {
+            "unified_msg_origin": "lark:user-1",
+            "get_sender_id": lambda self: "ou_user",
+            "get_platform_id": lambda self: "巅池-Agent小助手",
+        },
+    )()
+    profiles = matching_department_memory_profiles("中台策划帮我搭建活动方案框架")
+    monkeypatch.setattr(
+        "dc_engines.department_workflows.memory_profiles.matching_department_memory_profiles",
+        lambda *_args, **_kwargs: profiles,
+    )
+    monkeypatch.setattr(
+        department_memory,
+        "_has_approved_department_memory",
+        lambda *_args, **_kwargs: True,
+    )
+    department_memory._PENDING.clear()
+    monkeypatch.setattr(
+        department_memory, "_is_system_tester_event", lambda _event: True
+    )
+    tester = department_memory.try_handle_department_memory(
+        event,
+        raw_text="中台策划帮我搭建活动方案框架",
+        query_text="中台策划帮我搭建活动方案框架",
+        send_prompt_response=False,
+    )
+    department_memory._PENDING.clear()
+    monkeypatch.setattr(
+        department_memory, "_is_system_tester_event", lambda _event: False
+    )
+    employee = department_memory.try_handle_department_memory(
+        event,
+        raw_text="中台策划帮我搭建活动方案框架",
+        query_text="中台策划帮我搭建活动方案框架",
+        send_prompt_response=False,
+    )
+
+    assert tester.stop == employee.stop
+    assert tester.inject_memory == employee.inject_memory
+
+
 def test_default_profiles_cover_content_planning_and_client() -> None:
     profiles = load_department_memory_profiles()
 

@@ -72,6 +72,23 @@ def test_sensor_runtime_classification_stays_reusable_outside_plugin() -> None:
     )
 
 
+def test_sensor_classifies_media_ack_as_acknowledged() -> None:
+    assert (
+        classify_response_quality(
+            None,
+            "已进入生图任务：GPT Image 2 主用，Dreamina 即梦自动兜底。",
+        )
+        == "acknowledged"
+    )
+    assert (
+        classify_response_quality(
+            None,
+            "已进入生图任务，等待卡会持续计时，完成后会自动更新。",
+        )
+        == "acknowledged"
+    )
+
+
 async def test_sensor_runtime_does_not_fallback_without_event_task_id() -> None:
     runtime = HarnessSensorRuntime(SimpleNamespace())
     store = SimpleNamespace(get_task=lambda _task_id: None)

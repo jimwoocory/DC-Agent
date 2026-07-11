@@ -66,6 +66,11 @@ class FeishuChannelControlPlugin(Star):
     async def initialize(self) -> None:
         self.context.feishu_channel_control = self
         self._ensure_ingress_audit_schema()
+        from astrbot.core.platform.sources.lark.lark_event import (
+            set_lark_egress_auditor,
+        )
+
+        set_lark_egress_auditor(self._record_egress_audit)
         synced = self._sync_employee_directory_approvals()
         logger.info(
             "[feishu_channel_control] enabled=%s dm=%s group=%s state=%s employee_synced=%s",
@@ -75,6 +80,15 @@ class FeishuChannelControlPlugin(Star):
             self.state_path,
             synced,
         )
+
+    async def terminate(self) -> None:
+        from astrbot.core.platform.sources.lark.lark_event import (
+            set_lark_egress_auditor,
+        )
+
+        set_lark_egress_auditor(None)
+        if getattr(self.context, "feishu_channel_control", None) is self:
+            self.context.feishu_channel_control = None
 
     @filter.command(
         "feishu-control",
@@ -287,9 +301,64 @@ class FeishuChannelControlPlugin(Star):
                     ON feishu_ingress_audit(sender_id, received_at DESC)
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS feishu_egress_audit (
+                        audit_id TEXT PRIMARY KEY,
+                        sent_at TEXT NOT NULL,
+                        reply_message_id TEXT NOT NULL,
+                        receive_id TEXT NOT NULL,
+                        receive_id_type TEXT NOT NULL,
+                        msg_type TEXT NOT NULL,
+                        success INTEGER NOT NULL,
+                        response_code TEXT NOT NULL,
+                        response_message_id TEXT NOT NULL,
+                        content_chars INTEGER NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_feishu_egress_reply
+                    ON feishu_egress_audit(reply_message_id, sent_at DESC)
+                    """
+                )
                 conn.commit()
         except Exception as exc:  # noqa: BLE001
             logger.warning("[feishu_channel_control] 初始化入口审计表失败：%s", exc)
+
+    def _record_egress_audit(self, payload: dict[str, Any]) -> None:
+        """Persist one privacy-light Feishu delivery result.
+
+        Args:
+            payload: Delivery metadata emitted by the Lark transport.
+        """
+        try:
+            with sqlite3.connect(self._audit_db_path()) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO feishu_egress_audit (
+                        audit_id, sent_at, reply_message_id, receive_id,
+                        receive_id_type, msg_type, success, response_code,
+                        response_message_id, content_chars
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        datetime.now(timezone.utc).isoformat(),
+                        str(payload.get("reply_message_id") or ""),
+                        str(payload.get("receive_id") or ""),
+                        str(payload.get("receive_id_type") or ""),
+                        str(payload.get("msg_type") or ""),
+                        1 if payload.get("success") else 0,
+                        str(payload.get("response_code") or ""),
+                        str(payload.get("response_message_id") or ""),
+                        int(payload.get("content_chars") or 0),
+                    ),
+                )
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[feishu_channel_control] 写入出口审计失败：%s", exc)
 
     def _sync_employee_directory_approvals(self) -> int:
         if not self.config.auto_approve_employee_directory:

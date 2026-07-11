@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from astrbot.api import logger
 from astrbot.api.star import Context, Star
 
@@ -20,6 +22,38 @@ from .health import health_snapshot
 __all__ = ["DCRouterPlugin", "health_snapshot", "dispatch", "DispatchResult"]
 
 
+async def cancel_router_session_work(context, umo: str, *, reason: str) -> int:
+    """Cancel router-owned media and quota jobs for one session.
+
+    Args:
+        context: Shared AstrBot runtime context.
+        umo: Unified message origin identifying the session.
+        reason: Cancellation reason forwarded to persistent workers.
+
+    Returns:
+        Total number of router-owned jobs cancelled.
+    """
+    cancelled = 0
+    try:
+        from .dc_quota_runtime import get_quota_gate
+
+        gate = await get_quota_gate()
+        cancelled += len(await gate.cancel_session_jobs(umo, reason=reason))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[dc_router] 取消 session quota jobs 失败: %s", exc)
+    try:
+        from .preprocessing.media_route import cancel_session_media_tasks
+
+        cancelled += await cancel_session_media_tasks(
+            context,
+            umo,
+            reason=reason,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[dc_router] 取消 session media jobs 失败: %s", exc)
+    return cancelled
+
+
 class DCRouterPlugin(Star):
     """Slim Star plugin — 全部业务逻辑收敛到 ``dispatch.dispatch()``。"""
 
@@ -27,6 +61,7 @@ class DCRouterPlugin(Star):
         super().__init__(context)
         self._dc_queue_recovery_running = False
         self._dc_media_recovery_running = False
+        self._dc_cancel_session_callback = None
 
     def _start_dc_queue_recovery(self) -> None:
         try:
@@ -42,7 +77,7 @@ class DCRouterPlugin(Star):
         except Exception as exc:  # noqa: BLE001
             logger.warning("[dc_router] queue_recovery 启动异常: %s", exc)
 
-    def _stop_dc_queue_recovery(self) -> None:
+    async def _stop_dc_queue_recovery(self) -> None:
         if not self._dc_queue_recovery_running:
             return
         try:
@@ -51,7 +86,9 @@ class DCRouterPlugin(Star):
             self._dc_queue_recovery_running = False
             return
         try:
-            stop_queue_recovery()
+            task = stop_queue_recovery()
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[dc_router] queue_recovery 停止忽略异常: %s", exc)
         finally:
@@ -69,7 +106,7 @@ class DCRouterPlugin(Star):
         except Exception as exc:  # noqa: BLE001
             logger.warning("[dc_router] media_task_recovery 启动异常: %s", exc)
 
-    def _stop_dc_media_recovery(self) -> None:
+    async def _stop_dc_media_recovery(self) -> None:
         if not self._dc_media_recovery_running:
             return
         try:
@@ -78,7 +115,9 @@ class DCRouterPlugin(Star):
             self._dc_media_recovery_running = False
             return
         try:
-            stop_media_task_recovery()
+            task = stop_media_task_recovery()
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[dc_router] media_task_recovery 停止忽略异常: %s", exc)
         finally:
@@ -90,6 +129,16 @@ class DCRouterPlugin(Star):
         if cfg.is_active and not cfg.is_dry_run:
             self._start_dc_queue_recovery()
             self._start_dc_media_recovery()
+
+            async def _cancel_session(umo: str, *, reason: str) -> int:
+                return await cancel_router_session_work(
+                    self.context,
+                    umo,
+                    reason=reason,
+                )
+
+            self._dc_cancel_session_callback = _cancel_session
+            self.context.dc_cancel_session_work = _cancel_session
         logger.info(
             "[dc_router] initialize · enabled=%s dry_run=%s",
             cfg.enabled,
@@ -97,5 +146,11 @@ class DCRouterPlugin(Star):
         )
 
     async def terminate(self) -> None:
-        self._stop_dc_queue_recovery()
-        self._stop_dc_media_recovery()
+        if (
+            getattr(self.context, "dc_cancel_session_work", None)
+            is self._dc_cancel_session_callback
+        ):
+            self.context.dc_cancel_session_work = None
+        self._dc_cancel_session_callback = None
+        await self._stop_dc_queue_recovery()
+        await self._stop_dc_media_recovery()

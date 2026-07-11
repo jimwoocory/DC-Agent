@@ -46,6 +46,11 @@
       "id": "media-generation-sop-009",
       "description": "GPT Image, Dreamina, and router media-generation success paths finalize media_generation cards through the runtime gateway and schedule retractable task cards after the generated media is sent separately.",
       "verification": "uv run pytest tests/test_media_generation_runtime_paths.py::test_media_generation_runtime_paths_retract_success_task_cards -q"
+    },
+    {
+      "id": "media-generation-sop-010",
+      "description": "Session cancellation stops active media workers, removes persisted recovery records, and finalizes waiting cards as cancelled.",
+      "verification": "uv run pytest tests/dc_router/test_media_route_policy.py::test_cancel_session_media_tasks_stops_worker_and_clears_record -q"
     }
   ],
   "verification": {

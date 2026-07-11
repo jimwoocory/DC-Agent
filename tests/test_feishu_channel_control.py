@@ -280,6 +280,35 @@ def test_plugin_recognizes_branded_feishu_platform_id(tmp_path: Path) -> None:
     )
 
 
+def test_plugin_records_feishu_egress_delivery(tmp_path: Path) -> None:
+    plugin = FeishuChannelControlPlugin.__new__(FeishuChannelControlPlugin)
+    plugin.project_root = tmp_path
+    plugin._ensure_ingress_audit_schema()
+
+    plugin._record_egress_audit(
+        {
+            "reply_message_id": "om_ingress",
+            "receive_id": "",
+            "receive_id_type": "",
+            "msg_type": "post",
+            "success": True,
+            "response_code": "0",
+            "response_message_id": "om_reply",
+            "content_chars": 128,
+        }
+    )
+
+    with sqlite3.connect(tmp_path / "data" / "ai_inbox.db") as conn:
+        row = conn.execute(
+            """
+            SELECT reply_message_id, msg_type, success,
+                   response_message_id, content_chars
+            FROM feishu_egress_audit
+            """
+        ).fetchone()
+    assert row == ("om_ingress", "post", 1, "om_reply", 128)
+
+
 def test_group_requires_allowlist_and_mention(tmp_path: Path) -> None:
     state = FeishuChannelState(tmp_path / "state.json")
     config = FeishuChannelConfig.from_dict(

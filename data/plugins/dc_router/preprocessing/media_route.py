@@ -36,6 +36,8 @@ GPT_IMAGE_MODULE_PATH: Final[Path] = data_path("plugins", "gpt_image_plugin", "m
 HERMES_CACHE_DIR: Final[Path] = project_root() / "hermes-config" / "cache" / "images"
 _MEDIA_TASKS_PATH: Final[Path] = data_path("runtime", "media_route_pending.json")
 _MEDIA_RECOVERY_TASK: asyncio.Task | None = None
+_ACTIVE_MEDIA_TASKS: dict[str, Any] = {}
+_ACTIVE_MEDIA_CONTEXT: dict[str, tuple[str, MediaRoute, Any]] = {}
 
 MediaRouteKind = Literal["image", "text2video", "image2video"]
 ImageProviderStrategy = Literal["gpt_first", "dreamina_first"]
@@ -911,6 +913,7 @@ async def _finalize_waiting_card(
     detail: str,
     output_url: str = "",
     output_path: str = "",
+    cancelled: bool = False,
 ) -> bool:
     if card is None:
         return False
@@ -934,7 +937,7 @@ async def _finalize_waiting_card(
         media_kind=media_kind,
         prompt=route.prompt,
         engine=engine,
-        status="succeeded" if success else "failed",
+        status="cancelled" if cancelled else ("succeeded" if success else "failed"),
         aspect_ratio=route.aspect_ratio,
         output_url=output_url,
         output_path=output_path,
@@ -943,7 +946,7 @@ async def _finalize_waiting_card(
     final_card = build_media_generation_card(
         task_title=_media_task_title(route),
         media_type=media_kind,
-        status="已完成" if success else "失败",
+        status="已取消" if cancelled else ("已完成" if success else "失败"),
         prompt=record.to_card_detail(),
         engine=engine,
         task_id=record.record_id,
@@ -1314,7 +1317,67 @@ async def _background_job_with_record(
     try:
         await _background_job(context, umo, route, card)
     finally:
+        _ACTIVE_MEDIA_TASKS.pop(task_id, None)
+        _ACTIVE_MEDIA_CONTEXT.pop(task_id, None)
         _remove_pending_media_task(task_id)
+
+
+async def cancel_session_media_tasks(
+    context: Any,
+    umo: str,
+    *,
+    reason: str,
+) -> int:
+    """Cancel active and persisted media jobs for a session.
+
+    Args:
+        context: Shared runtime context used to finalize waiting cards.
+        umo: Unified message origin identifying the session.
+        reason: Cancellation reason shown on the final card.
+
+    Returns:
+        Number of media jobs removed from active or recovery state.
+    """
+    records = {
+        str(item.get("task_id") or ""): item
+        for item in _load_pending_media_tasks()
+        if str(item.get("umo") or "") == umo and item.get("task_id")
+    }
+    task_ids = set(records)
+    task_ids.update(
+        task_id
+        for task_id, (session_id, _route, _card) in _ACTIVE_MEDIA_CONTEXT.items()
+        if session_id == umo
+    )
+    for task_id in task_ids:
+        worker = _ACTIVE_MEDIA_TASKS.pop(task_id, None)
+        active_context = _ACTIVE_MEDIA_CONTEXT.pop(task_id, None)
+        if worker is not None:
+            try:
+                worker.cancel()
+            except Exception:  # noqa: BLE001
+                pass
+
+        if active_context is not None:
+            _session_id, route, card = active_context
+        else:
+            record = records.get(task_id) or {}
+            route_data = record.get("route")
+            route = (
+                _route_from_dict(route_data) if isinstance(route_data, dict) else None
+            )
+            card = _restore_waiting_card(context, record, route) if route else None
+        if route is not None and card is not None:
+            await _finalize_waiting_card(
+                context,
+                card,
+                route=route,
+                success=False,
+                detail=reason or "任务已取消",
+                cancelled=True,
+            )
+        _remove_pending_media_task(task_id)
+    return len(task_ids)
 
 
 async def _resume_pending_media_tasks(context: Any) -> int:
@@ -1333,9 +1396,11 @@ async def _resume_pending_media_tasks(context: Any) -> int:
             _remove_pending_media_task(task_id)
             continue
         card = _restore_waiting_card(context, record, route)
-        asyncio.create_task(
+        worker = asyncio.create_task(
             _background_job_with_record(context, umo, route, card, task_id)
         )
+        _ACTIVE_MEDIA_TASKS[task_id] = worker
+        _ACTIVE_MEDIA_CONTEXT[task_id] = (umo, route, card)
         resumed += 1
         logger.info(
             "[dc_router] restored media route task=%s kind=%s session=%s",
@@ -1366,11 +1431,18 @@ def start_media_task_recovery(context: Any) -> None:
     logger.info("[dc_router] media_task_recovery 启动")
 
 
-def stop_media_task_recovery() -> None:
+def stop_media_task_recovery() -> asyncio.Task | None:
+    """Cancel the media recovery task and return it for awaited shutdown.
+
+    Returns:
+        The cancelled recovery task, or ``None`` when no task was active.
+    """
     global _MEDIA_RECOVERY_TASK
+    task = _MEDIA_RECOVERY_TASK
     if _MEDIA_RECOVERY_TASK is not None and not _MEDIA_RECOVERY_TASK.done():
         _MEDIA_RECOVERY_TASK.cancel()
     _MEDIA_RECOVERY_TASK = None
+    return task
 
 
 async def try_handle_media_route(context: Any, event: Any, text: str) -> bool:
@@ -1408,7 +1480,7 @@ async def try_handle_media_route(context: Any, event: Any, text: str) -> bool:
         event.set_result(result)
     except Exception:  # noqa: BLE001
         return False
-    asyncio.create_task(
+    worker = asyncio.create_task(
         _background_job_with_record(
             context,
             event.unified_msg_origin,
@@ -1416,6 +1488,12 @@ async def try_handle_media_route(context: Any, event: Any, text: str) -> bool:
             card,
             task_id,
         )
+    )
+    _ACTIVE_MEDIA_TASKS[task_id] = worker
+    _ACTIVE_MEDIA_CONTEXT[task_id] = (
+        event.unified_msg_origin,
+        route,
+        card,
     )
     logger.info(
         "[dc_router] media route kind=%s prompt=%r session=%s",
@@ -1428,6 +1506,7 @@ async def try_handle_media_route(context: Any, event: Any, text: str) -> bool:
 
 __all__ = [
     "MediaRoute",
+    "cancel_session_media_tasks",
     "is_source_image_edit_request",
     "start_media_task_recovery",
     "stop_media_task_recovery",

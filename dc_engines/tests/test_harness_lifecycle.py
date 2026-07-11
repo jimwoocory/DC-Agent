@@ -69,6 +69,31 @@ async def test_mark_in_progress(harness_engine: HarnessEngine) -> None:
     assert updated.status == "in_progress"
 
 
+async def test_cancel_session_tasks_terminalizes_all_active_work(
+    harness_engine: HarnessEngine,
+) -> None:
+    first = await harness_engine.create_task(_make_request(title="任务一"))
+    second = await harness_engine.create_task(_make_request(title="任务二"))
+    await harness_engine.mark_in_progress(second.task_id)
+    completed = await harness_engine.create_task(_make_request(title="已完成"))
+    await harness_engine.complete_task(
+        completed.task_id,
+        result={"summary": "done", "output_url": "/tmp/done.txt"},
+    )
+
+    cancelled = await harness_engine.cancel_session_tasks(
+        "lark:user_1",
+        reason="user requested stop",
+    )
+
+    assert set(cancelled) == {first.task_id, second.task_id}
+    assert (await harness_engine.store.get_task(first.task_id)).status == "cancelled"
+    assert (await harness_engine.store.get_task(second.task_id)).status == "cancelled"
+    assert (
+        await harness_engine.store.get_task(completed.task_id)
+    ).status == "completed"
+
+
 async def test_complete_task(harness_engine: HarnessEngine) -> None:
     task = await harness_engine.create_task(_make_request())
     await harness_engine.mark_in_progress(task.task_id)

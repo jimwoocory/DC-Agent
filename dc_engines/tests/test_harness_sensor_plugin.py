@@ -193,6 +193,28 @@ async def test_sensor_settle_skips_review_required_success_response() -> None:
     assert engine.status_changes == []
 
 
+async def test_sensor_does_not_complete_acknowledged_response() -> None:
+    module = _load_harness_sensor_module()
+    task = SimpleNamespace(
+        task_id="media_task",
+        status="in_progress",
+        payload={"auto_complete_on_response": True},
+    )
+    engine = _FakeEngine({"media_task": task})
+    plugin = module.HarnessSensorPlugin(_FakeContextWithEngine(engine))
+
+    await plugin._settle_active_tasks(
+        _FakeEvent({"workflow_intent_task_id": "media_task"}),
+        text="已进入生图任务，等待卡会持续计时，完成后会自动更新。",
+        quality="acknowledged",
+        source="harness_sensor_plugin:decorating_result",
+        role=None,
+    )
+
+    assert engine.completed == []
+    assert engine.status_changes == []
+
+
 async def test_sensor_excludes_review_required_by_default_auto_complete() -> None:
     module = _load_harness_sensor_module()
     plugin = module.HarnessSensorPlugin(_FakeContext())

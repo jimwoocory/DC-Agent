@@ -393,19 +393,7 @@ def try_handle_department_memory(
                 suggestion_id=pending.suggestion_id,
             )
 
-    # 2) 系统测试者 — 不弹部门记忆建议卡片，直接注入可用记忆并继续。
-    if _is_system_tester_event(event):
-        logger.info(
-            "[dc_router] dept memory prompt skipped for system tester platform=%s",
-            _safe_platform(event),
-        )
-        return DepartmentMemoryDecision(
-            inject_memory=True,
-            effective_text=text,
-            memory_query_text=query_text,
-        )
-
-    # 3) 显式记忆查询 — 直接 inject
+    # 2) 显式记忆查询 — 直接 inject。系统测试身份不能改变业务语义。
     if _EXPLICIT_MEMORY_LOOKUP_RE.search(text):
         return DepartmentMemoryDecision(
             inject_memory=True,

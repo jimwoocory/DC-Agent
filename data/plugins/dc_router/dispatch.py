@@ -498,7 +498,7 @@ async def dispatch(
         if await try_handle_source_image_edit(context, event, text):
             return DispatchResult(handled=True, source="source_image_edit")
 
-    # ── 7-12) context alignment / truth intake / SOP / dept memory / memory / tone ─────
+    # ── 7-12) context alignment / media / truth intake / SOP / memory / tone ─────
     memory_query_text = text
     if is_dc_router_managed_platform(platform_id):
         context_alignment = try_handle_context_alignment(event, raw_text=text)
@@ -508,6 +508,11 @@ async def dispatch(
                 source="context_alignment",
                 decision_intent=context_alignment.reason,
             )
+        # Explicit media creation is an execution request, not a factual claim.
+        # Route it before truth intake so brand/product words do not force a
+        # material-collection loop for an ordinary creative draft.
+        if await try_handle_media_route(context, event, text):
+            return DispatchResult(handled=True, source="media_route")
         if await _maybe_truth_intake(context, event, cfg):
             return DispatchResult(handled=True, source="truth_intake")
         sop_signal = try_capture_sop_signal(event, text=text)
@@ -567,11 +572,6 @@ async def dispatch(
                 "[dc_router] assistant tone context injected platform=%s",
                 platform_id,
             )
-
-    # ── 10) media route (后台任务，不阻塞 dispatch 后续) ──────────────
-    if is_dc_router_managed_platform(platform_id):
-        if await try_handle_media_route(context, event, text):
-            return DispatchResult(handled=True, source="media_route")
 
     # ── 11) dc_router (主路径) ───────────────────────────────────────
     if cfg.is_active or cfg.is_dry_run:

@@ -864,6 +864,7 @@ class TestStage6TruthIntake:
 
         assert result.handled is True
         assert result.source == "truth_intake"
+        patched_dispatch["media"].assert_awaited()
         # Once truth_intake stops, nothing else should run.
         patched_dispatch["sop"].assert_not_called()
         patched_dispatch["memory"].assert_not_awaited()
@@ -1343,6 +1344,26 @@ class TestStage10MediaRoute:
         assert result.source == "media_route"
         patched_dispatch["dc"].assert_not_awaited()
         patched_dispatch["v1"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_explicit_brand_poster_routes_before_truth_intake(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(
+            text="帮我生成一张五菱缤果夏至海报，包含西瓜、冰块和品牌Logo",
+            platform_id="巅池-Agent小助手",
+        )
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["media"].return_value = True
+        patched_dispatch["truth"].return_value = True
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.handled is True
+        assert result.source == "media_route"
+        patched_dispatch["media"].assert_awaited_once()
+        patched_dispatch["truth"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_media_route_skipped_on_unmanaged_platform(

@@ -47,8 +47,6 @@ class AIInboxEngine:
             return "other"
         if _ESCALATION_RE.search(normalized):
             return "escalation"
-        if _MATERIAL_RE.search(normalized):
-            return "material"
         if _TASK_RE.search(normalized):
             return "task"
         if _FEEDBACK_RE.search(normalized):
@@ -57,6 +55,8 @@ class AIInboxEngine:
             return "request"
         if _QUESTION_RE.search(normalized):
             return "question"
+        if _MATERIAL_RE.search(normalized):
+            return "material"
         return "other"
 
     def is_actionable(self, category: InboxItemCategory) -> bool:

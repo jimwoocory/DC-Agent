@@ -103,6 +103,40 @@ async def _clear_third_party_agent_runner_state(
     )
 
 
+async def _cancel_persisted_session_work(
+    context: star.Context,
+    umo: str,
+    *,
+    reason: str,
+) -> int:
+    """Cancel Harness and plugin-owned persistent work for one session.
+
+    Args:
+        context: Shared AstrBot runtime context.
+        umo: Unified message origin identifying the conversation session.
+        reason: Cancellation reason forwarded to every subsystem.
+
+    Returns:
+        Number of persistent tasks cancelled across registered subsystems.
+    """
+    cancelled = 0
+    harness_engine = getattr(context, "harness_engine", None)
+    cancel_harness = getattr(harness_engine, "cancel_session_tasks", None)
+    if callable(cancel_harness):
+        try:
+            cancelled += len(await cancel_harness(umo, reason=reason))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to cancel Harness work for session %s: %s", umo, exc)
+
+    cancel_plugin_work = getattr(context, "dc_cancel_session_work", None)
+    if callable(cancel_plugin_work):
+        try:
+            cancelled += int(await cancel_plugin_work(umo, reason=reason) or 0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to cancel plugin work for session %s: %s", umo, exc)
+    return cancelled
+
+
 class ConversationCommands:
     def __init__(self, context: star.Context) -> None:
         self.context = context
@@ -207,10 +241,17 @@ class ConversationCommands:
                 exclude=message,
             )
 
-        if stopped_count > 0:
+        persisted_count = await _cancel_persisted_session_work(
+            self.context,
+            umo,
+            reason="user requested stop",
+        )
+
+        if stopped_count > 0 or persisted_count > 0:
             message.set_result(
                 MessageEventResult().message(
-                    f"✅ Requested to stop {stopped_count} running tasks."
+                    "✅ 已请求停止当前会话任务："
+                    f"{stopped_count} 个实时任务，{persisted_count} 个持续任务。"
                 )
             )
             return
@@ -223,6 +264,11 @@ class ConversationCommands:
         """创建新对话"""
         cfg = self.context.get_config(umo=message.unified_msg_origin)
         agent_runner_type = cfg["provider_settings"]["agent_runner_type"]
+        await _cancel_persisted_session_work(
+            self.context,
+            message.unified_msg_origin,
+            reason="new conversation requested",
+        )
         if agent_runner_type in THIRD_PARTY_AGENT_RUNNER_KEY:
             active_event_registry.stop_all(message.unified_msg_origin, exclude=message)
             await _clear_third_party_agent_runner_state(

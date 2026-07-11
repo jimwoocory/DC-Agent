@@ -33,6 +33,7 @@ class QueueJob:
     priority: int = 0
     enqueue_at: float = 0
     eta_at: float | None = None
+    lease_until: float | None = None
     started_at: float | None = None
     completed_at: float | None = None
     error: str | None = None

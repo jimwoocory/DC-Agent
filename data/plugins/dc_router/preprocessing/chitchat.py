@@ -31,6 +31,17 @@ _CHITCHAT_PUNCT_RE: Final[re.Pattern] = re.compile(
     r"[\s，。！？、~～?!\.,;；:：\"'“”‘’（）()【】\[\]{}<>《》]+"
 )
 _CHITCHAT_AT_RE: Final[re.Pattern] = re.compile(r"^\s*(?:\[At:[^\]]+\]|@[^\s]+\s*)+")
+_ASSISTANT_ALIAS_PATTERN: Final[str] = (
+    r"(?:巅池-?agent(?:小助手)?|dc-?agent(?:小助手)?|小助手|助手|机器人)"
+)
+_CHITCHAT_ALIAS_PREFIX_RE: Final[re.Pattern] = re.compile(
+    rf"^{_ASSISTANT_ALIAS_PATTERN}",
+    re.IGNORECASE,
+)
+_CHITCHAT_ALIAS_SUFFIX_RE: Final[re.Pattern] = re.compile(
+    rf"{_ASSISTANT_ALIAS_PATTERN}$",
+    re.IGNORECASE,
+)
 _CHITCHAT_NEGATIVE_RE: Final[re.Pattern] = re.compile(
     r"(查|调|写|改|跑|算|搜|找|做|生成|优化|报错|错误|bug|任务|待办|提醒|方案|项目|资料|文件|链接|推文|群)"
 )
@@ -45,10 +56,18 @@ _CHITCHAT_RESPONSES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
             "hi",
             "hey",
             "你好呀",
+            "早上好",
+            "下午好",
+            "晚上好",
+            "哈喽",
+            "哈啰",
             "在吗",
             "在不",
             "在",
             "在？",
+            "你在吗",
+            "你在不在",
+            "准备好了吗",
             "喂",
         ),
         "responses": (
@@ -60,7 +79,11 @@ _CHITCHAT_RESPONSES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
     "thanks": {
         "keywords": (
             "谢谢",
+            "谢谢你",
+            "谢谢您",
             "感谢",
+            "感谢你",
+            "感谢您",
             "谢了",
             "太感谢了",
             "辛苦了",
@@ -75,7 +98,7 @@ _CHITCHAT_RESPONSES: Final[dict[str, dict[str, tuple[str, ...]]]] = {
         ),
     },
     "farewell": {
-        "keywords": ("再见", "拜拜", "bye", "goodbye"),
+        "keywords": ("再见", "拜拜", "晚安", "bye", "goodbye"),
         "responses": (
             "好的，后续有需要您随时找我。",
             "再见，祝您工作顺利。",
@@ -102,7 +125,9 @@ class ChitchatResult:
 
 def _normalize(text: str) -> str:
     cleaned = _CHITCHAT_AT_RE.sub("", text or "")
-    return _CHITCHAT_PUNCT_RE.sub("", cleaned.strip().lower())
+    normalized = _CHITCHAT_PUNCT_RE.sub("", cleaned.strip().lower())
+    normalized = _CHITCHAT_ALIAS_PREFIX_RE.sub("", normalized)
+    return _CHITCHAT_ALIAS_SUFFIX_RE.sub("", normalized)
 
 
 def _chitchat_response_for(text: str) -> tuple[str, str] | None:

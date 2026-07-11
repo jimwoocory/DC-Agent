@@ -558,6 +558,68 @@ class TestStage3Chitchat:
         result = await _dispatch.dispatch(ctx, event, cfg)
         assert "chitchat" not in result.source
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "text",
+        (
+            "你好呀,小助手",
+            "你好呀，小助手",
+            "小助手你好",
+            "早上好，小助手",
+            "小助手，在吗",
+            "谢谢你，小助手",
+        ),
+    )
+    async def test_real_chitchat_guard_handles_assistant_alias_without_llm(
+        self,
+        patched_dispatch: dict,
+        text: str,
+    ) -> None:
+        event = _make_event(text=text)
+        event.get_group_id = MagicMock(return_value="")
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["chitchat"].side_effect = (
+            _dc_router_preprocessing.try_handle_chitchat
+        )
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.handled is True
+        assert result.source.startswith("chitchat:")
+        event.should_call_llm.assert_called_once_with(False)
+        event.set_result.assert_called_once()
+        patched_dispatch["dc"].assert_not_awaited()
+        patched_dispatch["v1"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "text",
+        (
+            "你好，小助手，帮我写一份方案",
+            "小助手在吗？帮我查一下项目进度",
+            "谢谢你，再帮我调整一下标题",
+        ),
+    )
+    async def test_real_chitchat_guard_does_not_swallow_work_request(
+        self,
+        patched_dispatch: dict,
+        text: str,
+    ) -> None:
+        event = _make_event(text=text)
+        event.get_group_id = MagicMock(return_value="")
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["chitchat"].side_effect = (
+            _dc_router_preprocessing.try_handle_chitchat
+        )
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert not result.source.startswith("chitchat:")
+        event.should_call_llm.assert_not_called()
+        patched_dispatch["dc"].assert_awaited_once()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # 4. Stage 4 — reasoning prefix

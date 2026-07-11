@@ -295,6 +295,38 @@ class InboxStore:
             row = await cursor.fetchone()
         return self._item_from_row(row) if row else None
 
+    async def find_by_source_message_id(
+        self,
+        platform_id: str,
+        message_id: str,
+    ) -> InboxItem | None:
+        """Find an inbox item created from a provider message.
+
+        Args:
+            platform_id: Platform instance identifier.
+            message_id: Provider message identifier.
+
+        Returns:
+            The matching inbox item, or None when it has not been recorded.
+        """
+        await self.initialize()
+        if not message_id:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT * FROM inbox_items
+                WHERE platform_id = ?
+                  AND json_extract(payload_json, '$.message_id') = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (platform_id, message_id),
+            )
+            row = await cursor.fetchone()
+        return self._item_from_row(row) if row else None
+
     async def list_events(self, item_id: str) -> list[InboxEvent]:
         await self.initialize()
         async with aiosqlite.connect(self.db_path) as db:

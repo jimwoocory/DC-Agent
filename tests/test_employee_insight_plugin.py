@@ -18,6 +18,7 @@ from dc_engines.employee_insight_loop import (  # noqa: E402
     EmployeeInsightSessionStatus,
     EmployeeInsightStore,
     PilotStatus,
+    TaskStatus,
 )
 
 
@@ -125,6 +126,9 @@ class _FakeEvent:
     def set_extra(self, key, value):
         self.extras[key] = value
 
+    def get_extra(self, key):
+        return self.extras.get(key)
+
     def set_result(self, result):
         self.result = result
 
@@ -160,6 +164,130 @@ async def test_employee_insight_plugin_records_private_message_session(tmp_path:
     ]
     profile = await store.get_profile("ou_user")
     assert profile.unanswered_outreach_count == 0
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_ignores_non_task_private_messages(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+
+    await plugin.on_private_message(_FakeEvent("你好，小助手"))
+    await plugin.on_private_message(_FakeEvent("/new session"))
+    await plugin.on_private_message(_FakeEvent('__card_action__:{"value":{}}'))
+
+    assert await store.list_sessions() == []
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_attaches_negative_feedback_to_active_task(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    first_event = _FakeEvent("帮我写一个培训通知")
+    await plugin.on_private_message(first_event)
+    original_session_id = first_event.extras["employee_insight_session_id"]
+
+    feedback_event = _FakeEvent("这个结果不行，太慢了，也没解决我的问题")
+    await plugin.on_private_message(feedback_event)
+
+    sessions = await store.list_sessions()
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert feedback_event.extras["employee_insight_session_id"] == original_session_id
+    assert session.status == EmployeeInsightSessionStatus.BLOCKED
+    assert session.task_status == TaskStatus.BLOCKED
+    assert session.satisfaction == "negative"
+    assert session.friction_points == ["这个结果不行，太慢了，也没解决我的问题"]
+    events = await store.list_events(original_session_id)
+    assert events[-1].event_type == "friction_reported"
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_links_harness_task_to_session(tmp_path: Path):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    event = _FakeEvent("帮我整理项目计划")
+    await plugin.on_private_message(event)
+
+    await plugin.link_task_lifecycle(event, "task_123", source="test")
+
+    session = await store.get_session(event.extras["employee_insight_session_id"])
+    assert session is not None
+    assert session.task_status == TaskStatus.RUNNING
+    assert session.metadata["harness_task_id"] == "task_123"
+    events = await store.list_events(session.session_id)
+    assert events[-1].event_type == "task_linked"
+
+
+@pytest.mark.asyncio
+async def test_employee_insight_plugin_closes_session_from_harness_lifecycle(
+    tmp_path: Path,
+):
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    event = _FakeEvent("帮我整理项目计划")
+    await plugin.on_private_message(event)
+    await plugin.link_task_lifecycle(event, "task_123", source="test")
+
+    await plugin.update_task_lifecycle(
+        "task_123",
+        status="delivered",
+        source="harness_sensor",
+    )
+    await plugin.update_task_lifecycle(
+        "task_123",
+        status="closed",
+        source="task_cli",
+    )
+
+    session = await store.get_session(event.extras["employee_insight_session_id"])
+    assert session is not None
+    assert session.status == EmployeeInsightSessionStatus.COMPLETED
+    assert session.task_status == TaskStatus.COMPLETED
+    events = await store.list_events(session.session_id)
+    assert [item.event_type for item in events[-2:]] == [
+        "task_result_delivered",
+        "task_completed",
+    ]
 
 
 @pytest.mark.asyncio

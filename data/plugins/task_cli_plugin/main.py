@@ -357,6 +357,20 @@ class TaskCliPlugin(Star):
                     )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[task_cli] inbox close skipped: %s", exc)
+        update_insight_task = getattr(
+            self.context,
+            "employee_insight_update_task",
+            None,
+        )
+        if callable(update_insight_task):
+            try:
+                await update_insight_task(
+                    task.task_id,
+                    status="closed",
+                    source="task_cli_plugin/done",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[task_cli] insight close skipped: %s", exc)
         self._reply(
             event,
             f"任务已完成：{updated.task_id[:8]} | {updated.status} | {updated.title}",

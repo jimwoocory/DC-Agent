@@ -8,7 +8,10 @@ session/event 写入 employee insight 引擎。主动触达调度与真实发送
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,7 @@ from dc_engines.employee_insight_loop import (
     EmployeeInsightStore,
     InsightEvent,
     PilotStatus,
+    TaskStatus,
 )
 
 from astrbot.api import logger
@@ -40,6 +44,15 @@ _DEFAULT_LARK_PLATFORM_MARKERS = (
     "飞书",
     "巅池-agent小助手",
     "agent小助手",
+)
+_NON_TASK_COMMAND_PREFIXES = ("/new", "/stop", "/reset", "/help")
+_GREETING_RE = re.compile(
+    r"^(?:你好|您好|嗨|hi|hello|在吗)(?:[，, ]*(?:小助手|助手))?[呀啊哦!！。,. ]*$",
+    re.IGNORECASE,
+)
+_NEGATIVE_FEEDBACK_RE = re.compile(
+    r"(?:不行|不对|不好用|没解决|没有解决|太慢|卡住|失败|报错|答非所问|还是不行)",
+    re.IGNORECASE,
 )
 
 
@@ -72,6 +85,8 @@ class EmployeeInsightPlugin(Star):
         self.store = EmployeeInsightStore(data_dir / "employee_insight.db")
         await self.store.initialize()
         self.context.employee_insight_store = self.store
+        self.context.employee_insight_link_task = self.link_task_lifecycle
+        self.context.employee_insight_update_task = self.update_task_lifecycle
         logger.info(
             "[employee_insight] store 启动：%s", data_dir / "employee_insight.db"
         )
@@ -127,6 +142,9 @@ class EmployeeInsightPlugin(Star):
             )
             return
 
+        if self._is_non_task_text(text):
+            return
+
         if not await self._message_tracking_allowed(event):
             return
 
@@ -152,6 +170,35 @@ class EmployeeInsightPlugin(Star):
             event.set_extra("employee_insight_session_id", session.session_id)
             self._reply(event, "收到，我先暂停主动找你。你之后随时可以私聊我继续使用。")
             return
+
+        if _NEGATIVE_FEEDBACK_RE.search(text):
+            active = await self.store.find_latest_active_session(
+                str(event.get_sender_id() or "")
+            )
+            if active is not None:
+                friction = text[:300]
+                friction_points = list(active.friction_points)
+                if friction not in friction_points:
+                    friction_points.append(friction)
+                updated = replace(
+                    active,
+                    status=EmployeeInsightSessionStatus.BLOCKED,
+                    task_status=TaskStatus.BLOCKED,
+                    satisfaction="negative",
+                    friction_points=friction_points[-5:],
+                )
+                await self.store.upsert_session(updated)
+                await self.store.append_event(
+                    InsightEvent(
+                        event_id=uuid.uuid4().hex,
+                        session_id=updated.session_id,
+                        event_type="friction_reported",
+                        actor="employee",
+                        payload={"text": friction},
+                    )
+                )
+                event.set_extra("employee_insight_session_id", updated.session_id)
+                return
 
         scenario_id = self._infer_scenario(text)
         await self.store.mark_profile_engaged(str(event.get_sender_id() or ""))
@@ -182,6 +229,126 @@ class EmployeeInsightPlugin(Star):
                     "scenario_id": scenario_id,
                     "coaching_mode": "lark_dm",
                 },
+            )
+        )
+
+    async def link_task_lifecycle(
+        self,
+        event: AstrMessageEvent,
+        task_id: str,
+        *,
+        source: str = "",
+    ) -> None:
+        """Link a Harness task to the employee insight session.
+
+        Args:
+            event: Original employee message event.
+            task_id: Harness task identifier.
+            source: Component that created or linked the task.
+        """
+        if self.store is None or not task_id:
+            return
+        session_id = str(event.get_extra("employee_insight_session_id") or "")
+        if not session_id:
+            return
+        session = await self.store.get_session(session_id)
+        if session is None:
+            return
+        updated = replace(
+            session,
+            task_status=TaskStatus.RUNNING,
+            metadata={
+                **session.metadata,
+                "harness_task_id": task_id,
+                "task_link_source": source,
+            },
+        )
+        await self.store.upsert_session(updated)
+        await self.store.append_event(
+            InsightEvent(
+                event_id=uuid.uuid4().hex,
+                session_id=session_id,
+                event_type="task_linked",
+                actor="system",
+                payload={"task_id": task_id, "source": source},
+            )
+        )
+
+    async def update_task_lifecycle(
+        self,
+        task_id: str,
+        *,
+        status: str,
+        source: str = "",
+    ) -> None:
+        """Mirror an authoritative Harness state into employee insight.
+
+        Args:
+            task_id: Harness task identifier.
+            status: Inbox/Harness lifecycle status.
+            source: Component that emitted the lifecycle update.
+        """
+        if self.store is None or not task_id:
+            return
+        session = await self.store.find_session_by_task_id(task_id)
+        if session is None:
+            return
+        mapping = {
+            "in_progress": (
+                TaskStatus.RUNNING,
+                EmployeeInsightSessionStatus.ENGAGED,
+                "task_running",
+            ),
+            "delivered": (
+                TaskStatus.RESULT_DELIVERED,
+                EmployeeInsightSessionStatus.ENGAGED,
+                "task_result_delivered",
+            ),
+            "closed": (
+                TaskStatus.COMPLETED,
+                EmployeeInsightSessionStatus.COMPLETED,
+                "task_completed",
+            ),
+            "confirmed": (
+                TaskStatus.COMPLETED,
+                EmployeeInsightSessionStatus.COMPLETED,
+                "task_completed",
+            ),
+            "blocked": (
+                TaskStatus.BLOCKED,
+                EmployeeInsightSessionStatus.BLOCKED,
+                "task_blocked",
+            ),
+            "ignored": (
+                TaskStatus.ABANDONED,
+                EmployeeInsightSessionStatus.SKIPPED,
+                "task_abandoned",
+            ),
+        }
+        target = mapping.get(status)
+        if target is None:
+            return
+        task_status, session_status, event_type = target
+        now = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        updated = replace(
+            session,
+            status=session_status,
+            task_status=task_status,
+            updated_at=now,
+        )
+        await self.store.upsert_session(updated)
+        await self.store.append_event(
+            InsightEvent(
+                event_id=uuid.uuid4().hex,
+                session_id=session.session_id,
+                event_type=event_type,
+                actor="system",
+                payload={
+                    "task_id": task_id,
+                    "status": status,
+                    "source": source,
+                },
+                created_at=now,
             )
         )
 
@@ -322,6 +489,14 @@ class EmployeeInsightPlugin(Star):
     def _is_pause_text(self, text: str) -> bool:
         compact = "".join(text.lower().split())
         return compact in _PAUSE_WORDS
+
+    def _is_non_task_text(self, text: str) -> bool:
+        normalized = text.strip()
+        return (
+            normalized.startswith("__card_action__:")
+            or normalized.startswith(_NON_TASK_COMMAND_PREFIXES)
+            or _GREETING_RE.fullmatch(normalized) is not None
+        )
 
     def _is_verification_join_text(self, text: str) -> bool:
         compact = "".join(text.lower().split())

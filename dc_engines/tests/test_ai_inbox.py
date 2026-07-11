@@ -304,6 +304,41 @@ def test_plugin_group_event_without_is_group_requires_at_command() -> None:
     assert plugin._should_track(event, "普通群聊消息") is False
 
 
+def test_plugin_does_not_track_greetings_commands_or_card_callbacks() -> None:
+    module = _load_ai_inbox_plugin_module()
+    plugin = module.AIInboxPlugin(_FakeContext())
+    event = _FakeLarkEventWithoutIsGroup()
+
+    assert plugin._should_track(event, "你好，小助手") is False
+    assert plugin._should_track(event, "/new session") is False
+    assert plugin._should_track(event, '__card_action__:{"value":{}}') is False
+
+
+async def test_inbox_finds_existing_item_by_source_message_id(tmp_path: Path) -> None:
+    store = InboxStore(tmp_path / "ai_inbox.db")
+    await store.initialize()
+    created = await store.create_item(
+        InboxItemCreateRequest(
+            session_id="s1",
+            conversation_id="c1",
+            platform_id="巅池-Agent小助手",
+            sender_id="ou_user",
+            sender_name="测试员工",
+            text="帮我整理项目计划",
+            category="request",
+            payload={"message_id": "om_source_1"},
+        )
+    )
+
+    found = await store.find_by_source_message_id(
+        "巅池-Agent小助手",
+        "om_source_1",
+    )
+
+    assert found is not None
+    assert found.item_id == created.item_id
+
+
 async def test_plugin_records_obsidian_review_reply(
     tmp_path: Path,
     monkeypatch,

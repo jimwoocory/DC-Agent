@@ -1077,6 +1077,23 @@ class HermesBridgePlugin(Star):
                         "[HermesBridge] 更新 AI Inbox 交付状态失败：%s",
                         inbox_exc,
                     )
+            update_insight_task = getattr(
+                self.context,
+                "employee_insight_update_task",
+                None,
+            )
+            if callable(update_insight_task):
+                try:
+                    await update_insight_task(
+                        task_id,
+                        status="delivered",
+                        source="hermes_bridge",
+                    )
+                except Exception as insight_exc:  # noqa: BLE001
+                    logger.debug(
+                        "[HermesBridge] 更新员工体验任务状态失败：%s",
+                        insight_exc,
+                    )
             return True
         except Exception as exc:
             logger.warning("[HermesBridge] 完成 Harness 任务 %s 失败：%s", task_id, exc)

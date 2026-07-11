@@ -8,6 +8,7 @@ a session-level Case automatically so later tasks have somewhere to attach.
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,10 @@ _TRACKED_PLATFORM_IDS = {
 }
 
 _COMMANDS_TO_IGNORE = (
+    "/new",
+    "/stop",
+    "/reset",
+    "/help",
     "/employees",
     "employees ",
     "/case list",
@@ -52,6 +57,11 @@ _COMMANDS_TO_IGNORE = (
     "/task reject",
     "/tasks",
     "tasks",
+)
+
+_GREETING_RE = re.compile(
+    r"^(?:你好|您好|嗨|hi|hello|在吗)(?:[，, ]*(?:小助手|助手))?[呀啊哦!！。,. ]*$",
+    re.IGNORECASE,
 )
 
 
@@ -133,6 +143,17 @@ class AIInboxPlugin(Star):
     async def _record_message(self, event: AstrMessageEvent, text: str) -> None:
         if self.engine is None:
             return
+        message_id = self._source_message_id(event)
+        if message_id and self.store is not None:
+            existing = await self.store.find_by_source_message_id(
+                event.get_platform_id() or "",
+                message_id,
+            )
+            if existing is not None:
+                event.set_extra("ai_inbox_item_id", existing.item_id)
+                if existing.case_id:
+                    event.set_extra("ai_inbox_case_id", existing.case_id)
+                return
         category = self.engine.classify(text)
         conversation_id = await self._conversation_id(event)
         case_id = ""
@@ -156,7 +177,7 @@ class AIInboxPlugin(Star):
                 case_id=case_id,
                 payload={
                     "is_group": self._is_group_event(event),
-                    "message_id": str(getattr(event, "message_id", "") or ""),
+                    "message_id": message_id,
                     "is_at_or_wake_command": bool(
                         getattr(event, "is_at_or_wake_command", False)
                     ),
@@ -274,6 +295,13 @@ class AIInboxPlugin(Star):
                     event_type="task_linked",
                     event_payload={"source": source},
                 )
+            link_insight_task = getattr(
+                self.context,
+                "employee_insight_link_task",
+                None,
+            )
+            if callable(link_insight_task):
+                await link_insight_task(event, task_id, source=source)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[ai_inbox] link task 失败：%s", exc)
 
@@ -281,6 +309,10 @@ class AIInboxPlugin(Star):
         if not text.strip():
             return False
         normalized = text.strip()
+        if normalized.startswith("__card_action__:"):
+            return False
+        if _GREETING_RE.fullmatch(normalized):
+            return False
         if normalized.startswith(_COMMANDS_TO_IGNORE):
             return False
         try:
@@ -301,6 +333,13 @@ class AIInboxPlugin(Star):
         if self._is_group_event(event):
             return bool(getattr(event, "is_at_or_wake_command", False))
         return True
+
+    def _source_message_id(self, event: AstrMessageEvent) -> str:
+        direct = str(getattr(event, "message_id", "") or "").strip()
+        if direct:
+            return direct
+        message_obj = getattr(event, "message_obj", None)
+        return str(getattr(message_obj, "message_id", "") or "").strip()
 
     async def _maybe_record_obsidian_review(
         self,

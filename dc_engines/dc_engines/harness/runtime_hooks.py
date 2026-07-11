@@ -585,19 +585,28 @@ class HarnessSensorRuntime:
         source: str,
     ) -> None:
         inbox_store = getattr(self.context, "ai_inbox_store", None)
-        if inbox_store is None:
-            return
-        try:
-            item = await inbox_store.find_by_task_id(task_id)
-            if item is not None:
-                await inbox_store.update_item(
-                    item.item_id,
-                    status=status,
-                    event_type=event_type,
-                    event_payload={"source": source},
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[harness_sensor] inbox update skipped: %s", exc)
+        if inbox_store is not None:
+            try:
+                item = await inbox_store.find_by_task_id(task_id)
+                if item is not None:
+                    await inbox_store.update_item(
+                        item.item_id,
+                        status=status,
+                        event_type=event_type,
+                        event_payload={"source": source},
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[harness_sensor] inbox update skipped: %s", exc)
+        update_insight_task = getattr(
+            self.context,
+            "employee_insight_update_task",
+            None,
+        )
+        if callable(update_insight_task):
+            try:
+                await update_insight_task(task_id, status=status, source=source)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[harness_sensor] insight update skipped: %s", exc)
 
     async def _record_loop_response_observation(
         self,

@@ -595,6 +595,68 @@ class EmployeeInsightStore:
             ).fetchall()
         return [_session_from_row(row) for row in rows]
 
+    async def find_latest_active_session(
+        self,
+        employee_id: str,
+    ) -> EmployeeInsightSession | None:
+        """Find the latest employee session that can still receive feedback.
+
+        Args:
+            employee_id: Employee open identifier.
+
+        Returns:
+            The latest engaged or blocked session, or None when absent.
+        """
+        await self.initialize()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (
+                await db.execute(
+                    """
+                    SELECT * FROM employee_insight_sessions
+                    WHERE employee_id = ? AND status IN (?, ?)
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (
+                        employee_id,
+                        EmployeeInsightSessionStatus.ENGAGED.value,
+                        EmployeeInsightSessionStatus.BLOCKED.value,
+                    ),
+                )
+            ).fetchone()
+        return _session_from_row(row) if row else None
+
+    async def find_session_by_task_id(
+        self,
+        task_id: str,
+    ) -> EmployeeInsightSession | None:
+        """Find the employee session linked to a Harness task.
+
+        Args:
+            task_id: Harness task identifier.
+
+        Returns:
+            The linked employee insight session, or None when absent.
+        """
+        await self.initialize()
+        if not task_id:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            row = await (
+                await db.execute(
+                    """
+                    SELECT * FROM employee_insight_sessions
+                    WHERE json_extract(metadata_json, '$.harness_task_id') = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (task_id,),
+                )
+            ).fetchone()
+        return _session_from_row(row) if row else None
+
     async def append_event(self, event: InsightEvent) -> None:
         await self.initialize()
         async with aiosqlite.connect(self.db_path) as db:

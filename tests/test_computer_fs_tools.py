@@ -765,3 +765,23 @@ async def test_restricted_member_still_cannot_read_unrelated_data_path(
 
     assert "Read access is restricted" in result
     assert "active harness intake archives" in result
+
+
+@pytest.mark.asyncio
+async def test_file_read_tool_rejects_directory_with_clear_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    """FileReadTool should return a helpful message when given a directory path."""
+    workspace = _setup_local_fs_tools(monkeypatch, tmp_path)
+    subdir = workspace / "my-directory"
+    subdir.mkdir()
+
+    result = await fs_tools.FileReadTool().call(
+        _make_context(),
+        path="my-directory",
+    )
+
+    assert "is a directory, not a file" in result
+    assert "my-directory" in result
+    assert "'astrbot_execute_shell'" in result

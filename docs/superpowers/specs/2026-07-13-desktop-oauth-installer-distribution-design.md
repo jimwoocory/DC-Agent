@@ -33,6 +33,32 @@
 - 普通网页不能可靠枚举本机软件，必须通过自定义协议唤起和服务端心跳组合判断。
 - 当前员工数据库运行在 DC-Agent 本机，NAS 只挂载了知识库共享；不能把尚未存在于 NAS 的 SQLite 误称为 NAS 实时员工库。
 
+## 现有 Vercel 主页审查与增量改造边界
+
+2026 年 7 月 13 日核对线上 `https://dianchi2026.vercel.app` 后确认，现有产品方向与本设计一致，不需要重做官网：
+
+- 线上主页已经有“员工飞书登录”入口，`/api/auth/feishu/start` 能正确跳转飞书 OAuth。
+- 线上 `/api/me` 已能识别基础登录态，但仍是旧响应，只返回 `logged_in`、`user` 和 `activated`。
+- 线上尚未发布 `/desktop.html`、`/agent.html` 和 `/api/desktop/open`，这些路径当前返回 404。
+- 本地 `dianchi` 工作区已经把主页文案改为“飞书登录激活桌面端”，并已添加 `desktop.html`、员工身份分层和 `dianchi://` 唤起草案；这些现有改动应继续保留。
+- 本地草案仍使用 Vercel 无法访问的 SQLite，并通过 `dianchi://open?session=...` 传递完整会话；只替换这两处实现，不推翻已有页面和路由。
+
+因此实施采用局部修改，文件边界如下：
+
+| 现有区域 | 处理方式 |
+|---|---|
+| `index.html` | 保留全部官网布局、视频、品牌内容和视觉样式；只校正员工入口链接、登录后文案和目标页 |
+| `api/auth/feishu/start.py` | 保留现有 OAuth 发起、state 和安全 `next` 路径逻辑 |
+| `api/auth/feishu/callback.py` | 保留飞书换 token 和用户信息获取；只把 SQLite 身份解析替换为 Upstash 授权镜像，并为拒绝状态返回明确页面 |
+| `api/me.py` | 在现有接口上稳定补充 `allowed`、`auth_status`、`employee` 和 `identity`，不另建重复登录接口 |
+| `desktop.html` | 复用本地已有启动页，局部增加协议探测、未安装下载、失败重试和授权状态，不把安装逻辑塞回官网首页 |
+| `api/desktop/open.py` | 保留入口名称和鉴权顺序，把完整 session 深链替换成一次性授权码 |
+| `api/_kv.py` | 复用现有 Upstash REST 配置，增加授权快照和短时码所需的严格操作；生产授权路径禁止内存兜底 |
+| `/api/activate` 和钱包/宠物接口 | 保留现有幂等激活逻辑，只在员工授权通过后调用 |
+| `workspace.html`、官网业务展示和视频模块 | 不在本项目范围内修改 |
+
+实施时必须保护 `dianchi` 当前未提交的本地改动，先为相关文件建立基线并仅编辑上述授权与启动边界，不能用线上旧文件覆盖本地新版主页。
+
 ## 系统边界
 
 | 单元 | 责任 | 主要依赖 |
@@ -201,6 +227,7 @@ desktop/macos/arm64/0.2.0/DianchiDesktopAssistant.dmg
 
 ## 非目标
 
+- 不重做现有 Vercel 官网，不改变主页主体布局、视频、作品案例和对外品牌内容。
 - 不通过网页静默运行 EXE 或绕过操作系统安全确认。
 - 不复制、逆向或重新实现飞书 Messenger。
 - 不把 SQLite 直接放在 SMB 共享上供多个进程读写。

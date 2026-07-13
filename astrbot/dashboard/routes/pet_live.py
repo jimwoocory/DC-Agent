@@ -51,12 +51,29 @@ class PetLiveRoute(Route):
         if not session:
             return Response().error(f"{SESSION_COOKIE} cookie is required").__dict__
 
+        assertion_value = request.headers.get("X-Dianchi-Desktop-Assertion", "").strip()
+        assertion_identity = (
+            _verify_desktop_assertion(assertion_value) if assertion_value else None
+        )
+        if assertion_value and assertion_identity is None:
+            return Response().error("desktop binding assertion is invalid").__dict__
+        if (
+            assertion_identity is not None
+            and assertion_identity["desktop_session_id"] != session
+        ):
+            return (
+                Response().error("desktop binding assertion session mismatch").__dict__
+            )
+
         data = await request.get_json(silent=True) or {}
         authorized = self._binding_authorized()
         session_identity = _identity_from_signed_session(session)
         provided_feishu_open_id = str(data.get("feishu_open_id") or "").strip()
         provided_employee_id = str(data.get("employee_id") or "").strip()
-        if authorized:
+        if assertion_identity is not None:
+            feishu_open_id = assertion_identity["feishu_open_id"]
+            employee_id = assertion_identity["employee_id"]
+        elif authorized:
             feishu_open_id = provided_feishu_open_id
             employee_id = provided_employee_id
             if session_identity is not None:
@@ -439,8 +456,15 @@ def _identity_from_signed_session(value: str) -> dict[str, str] | None:
     if not isinstance(user, dict):
         return None
     feishu_open_id = str(user.get("open_id") or "").strip()
+    employee = payload.get("employee") if isinstance(payload, dict) else None
     employee_id = (
-        str(user.get("user_id") or "").strip()
+        str(user.get("employee_id") or "").strip()
+        or (
+            str(employee.get("employee_id") or "").strip()
+            if isinstance(employee, dict)
+            else ""
+        )
+        or str(user.get("user_id") or "").strip()
         or str(user.get("union_id") or "").strip()
         or str(user.get("email") or "").strip()
         or feishu_open_id
@@ -448,6 +472,52 @@ def _identity_from_signed_session(value: str) -> dict[str, str] | None:
     if not employee_id and not feishu_open_id:
         return None
     return {"employee_id": employee_id, "feishu_open_id": feishu_open_id}
+
+
+def _verify_desktop_assertion(value: str) -> dict[str, str] | None:
+    secret = os.environ.get("DESKTOP_BINDING_SECRET", "").strip()
+    if not secret:
+        return None
+    try:
+        body, signature = value.split(".", 1)
+        expected = hmac.new(
+            secret.encode("utf-8"),
+            body.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(_unb64(signature), expected):
+            return None
+        payload = json.loads(_unb64(body).decode("utf-8"))
+        issued_at = int(payload.get("iat") or 0)
+        expires_at = int(payload.get("exp") or 0)
+    except (
+        binascii.Error,
+        ValueError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        AttributeError,
+    ):
+        return None
+
+    now = int(time.time())
+    if (
+        issued_at <= 0
+        or expires_at <= now
+        or issued_at > now + 30
+        or now - issued_at > 120
+        or expires_at - issued_at > 90
+        or expires_at <= issued_at
+    ):
+        return None
+    identity = {
+        "employee_id": str(payload.get("employee_id") or "").strip(),
+        "feishu_open_id": str(payload.get("feishu_open_id") or "").strip(),
+        "desktop_session_id": str(payload.get("desktop_session_id") or "").strip(),
+        "nonce": str(payload.get("nonce") or "").strip(),
+    }
+    if not all(identity.values()):
+        return None
+    return identity
 
 
 def _event_window_from_request() -> dict[str, str]:

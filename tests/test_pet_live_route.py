@@ -15,18 +15,177 @@ from astrbot.dashboard.routes.pet_live import PetLiveRoute
 from astrbot.dashboard.routes.route import RouteContext
 
 
-def _signed_session(user: dict[str, str], *, secret: str, expires_in: int = 3600) -> str:
+def _signed_session(
+    user: dict[str, str], *, secret: str, expires_in: int = 3600
+) -> str:
     payload = {
         "user": user,
         "iat": int(time.time()),
         "exp": int(time.time()) + expires_in,
     }
-    body = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    ).rstrip(b"=").decode("ascii")
-    sig = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    body = (
+        base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        )
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    sig = hmac.new(
+        secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256
+    ).digest()
     encoded_sig = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
     return f"{body}.{encoded_sig}"
+
+
+def _desktop_assertion(
+    *,
+    secret: str,
+    employee_id: str = "emp_asserted",
+    feishu_open_id: str = "ou_asserted",
+    desktop_session_id: str = "desktop_asserted",
+    expires_in: int = 60,
+) -> str:
+    now = int(time.time())
+    payload = {
+        "employee_id": employee_id,
+        "feishu_open_id": feishu_open_id,
+        "desktop_session_id": desktop_session_id,
+        "nonce": "nonce_asserted",
+        "iat": now,
+        "exp": now + expires_in,
+    }
+    body = (
+        base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        )
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        body.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    encoded_signature = base64.urlsafe_b64encode(signature).rstrip(b"=").decode("ascii")
+    return f"{body}.{encoded_signature}"
+
+
+@pytest.mark.asyncio
+async def test_pet_live_bind_desktop_accepts_signed_desktop_assertion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DESKTOP_BINDING_SECRET", "desktop-secret")
+    monkeypatch.delenv("PET_LIVE_BINDING_TOKEN", raising=False)
+    assertion = _desktop_assertion(secret="desktop-secret")
+    app = Quart(__name__)
+    PetLiveRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        payload = await (
+            await client.post(
+                "/api/pet/bind-desktop",
+                headers={
+                    "Cookie": "dc_feishu_session=desktop_asserted",
+                    "X-Dianchi-Desktop-Assertion": assertion,
+                },
+                json={"employee_id": "emp_spoofed", "feishu_open_id": "ou_spoofed"},
+            )
+        ).get_json()
+
+    assert payload["status"] == "ok"
+    assert payload["data"]["identity"]["employee_id"] == "emp_asserted"
+    assert payload["data"]["identity"]["feishu_open_id"] == "ou_asserted"
+    assert payload["data"]["identity"]["desktop_session_id"] == "desktop_asserted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["expired", "tampered"])
+async def test_pet_live_bind_desktop_rejects_invalid_desktop_assertion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    monkeypatch.setenv("DESKTOP_BINDING_SECRET", "desktop-secret")
+    monkeypatch.delenv("PET_LIVE_BINDING_TOKEN", raising=False)
+    assertion = _desktop_assertion(
+        secret="desktop-secret",
+        expires_in=-1 if mode == "expired" else 60,
+    )
+    if mode == "tampered":
+        body, signature = assertion.split(".", 1)
+        decoded = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+        decoded["employee_id"] = "emp_tampered"
+        body = (
+            base64.urlsafe_b64encode(
+                json.dumps(decoded, separators=(",", ":"), sort_keys=True).encode(
+                    "utf-8"
+                )
+            )
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+        assertion = f"{body}.{signature}"
+    app = Quart(__name__)
+    PetLiveRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        payload = await (
+            await client.post(
+                "/api/pet/bind-desktop",
+                headers={
+                    "Cookie": "dc_feishu_session=desktop_asserted",
+                    "X-Dianchi-Desktop-Assertion": assertion,
+                },
+                json={},
+            )
+        ).get_json()
+
+    assert payload["status"] == "error"
+    assert "assertion" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_pet_live_assertion_cannot_rebind_desktop_session_to_another_employee(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DESKTOP_BINDING_SECRET", "desktop-secret")
+    monkeypatch.delenv("PET_LIVE_BINDING_TOKEN", raising=False)
+    first_assertion = _desktop_assertion(secret="desktop-secret")
+    second_assertion = _desktop_assertion(
+        secret="desktop-secret",
+        employee_id="emp_other",
+        feishu_open_id="ou_other",
+    )
+    app = Quart(__name__)
+    PetLiveRoute(RouteContext(config={}, app=app), dc_root=tmp_path)  # type: ignore[arg-type]
+
+    async with app.test_client() as client:
+        first = await (
+            await client.post(
+                "/api/pet/bind-desktop",
+                headers={
+                    "Cookie": "dc_feishu_session=desktop_asserted",
+                    "X-Dianchi-Desktop-Assertion": first_assertion,
+                },
+                json={},
+            )
+        ).get_json()
+        second = await (
+            await client.post(
+                "/api/pet/bind-desktop",
+                headers={
+                    "Cookie": "dc_feishu_session=desktop_asserted",
+                    "X-Dianchi-Desktop-Assertion": second_assertion,
+                },
+                json={},
+            )
+        ).get_json()
+
+    assert first["status"] == "ok"
+    assert second["status"] == "error"
+    assert "already bound" in second["message"]
 
 
 @pytest.mark.asyncio
@@ -283,7 +442,11 @@ async def test_pet_live_me_returns_recent_light_feedback_signal(
         source="assistant",
         event_type="work_habit_updated",
         source_ref={"employee_id": "emp_001"},
-        payload={"focus_level": 88, "work_rhythm": "deep_work", "summary": "quiet focus"},
+        payload={
+            "focus_level": 88,
+            "work_rhythm": "deep_work",
+            "summary": "quiet focus",
+        },
     )
 
     app = Quart(__name__)

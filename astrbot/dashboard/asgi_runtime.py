@@ -690,6 +690,14 @@ class FastAPIAppAdapter:
         methods: list[str] | None = None,
         endpoint: str | None = None,
     ) -> None:
+        """Register a legacy dashboard route before the static catch-all.
+
+        Args:
+            path: Legacy URL rule, including any path parameters.
+            view_func: Async or sync handler called for the route.
+            methods: Allowed HTTP methods. Defaults to GET.
+            endpoint: Optional route name.
+        """
         route_path = _convert_rule(path)
         methods = methods or ["GET"]
 
@@ -704,6 +712,20 @@ class FastAPIAppAdapter:
             name=endpoint,
             include_in_schema=False,
         )
+        # Custom routes are registered after the dashboard's static router.
+        # Insert the new route before its broad matcher so it cannot shadow
+        # later GET APIs. FastAPI may retain an included router as one wrapper.
+        registered_route = self._app.router.routes[-1]
+        for index, route in enumerate(self._app.router.routes[:-1]):
+            included_router = getattr(route, "original_router", None)
+            included_routes = getattr(included_router, "routes", ())
+            if getattr(route, "path", None) == "/{static_path:path}" or any(
+                getattr(item, "path", None) == "/{static_path:path}"
+                for item in included_routes
+            ):
+                self._app.router.routes.pop()
+                self._app.router.routes.insert(index, registered_route)
+                break
 
     def websocket(self, path: str):
         route_path = _convert_rule(path)

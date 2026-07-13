@@ -1,0 +1,53 @@
+{
+  "feature": "desktop_employee_onboarding",
+  "goal": "Allow an active company employee to authorize, install, and open Dianchi Desktop Assistant through Feishu OAuth while denying non-employees and preserving stable pet identity.",
+  "preserved_contracts": [
+    "organization_permission_model",
+    "feishu_desktop_messenger",
+    "pet_live_system"
+  ],
+  "target_architecture": {
+    "entrypoint": "existing Vercel company homepage",
+    "identity_gate": "Feishu OAuth identity resolved against a signed employee authorization snapshot",
+    "desktop_handoff": "60-second one-time code exchanged by the installed desktop app",
+    "installer_distribution": "immutable Windows and macOS artifacts on Vercel Blob",
+    "message_surface": "official Feishu Messenger web client",
+    "pet_identity": "stable employee_id bound by a short-lived signed desktop assertion"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "desktop-onboarding-001",
+      "description": "Only active employees from the company tenant pass the OAuth gate; unknown, pending, disabled, or external identities receive no desktop authorization.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p test_oauth_employee_gate.py -v"
+    },
+    {
+      "id": "desktop-onboarding-002",
+      "description": "The browser sends only a short-lived one-time code through the dianchi URL protocol, and replay or expired exchange attempts fail.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p test_desktop_auth.py -v"
+    },
+    {
+      "id": "desktop-onboarding-003",
+      "description": "The existing desktop is detected through an explicit protocol heartbeat; otherwise the employee receives the matching installer with a visible retry path.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p test_desktop_bootstrap.py -v"
+    },
+    {
+      "id": "desktop-onboarding-004",
+      "description": "Windows and macOS release artifacts use immutable version paths, declared size and SHA-256 integrity, and stable releases require signed artifacts.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -p test_packaging_contract.py -v"
+    },
+    {
+      "id": "desktop-onboarding-005",
+      "description": "Desktop authorization binds the existing pet system to the same stable employee_id without allowing unsigned identity fields or session takeover.",
+      "verification": "uv run pytest tests/test_pet_live_route.py tests/test_pet_live_identity_smoke_script.py -q"
+    },
+    {
+      "id": "desktop-onboarding-006",
+      "description": "The packaged desktop handles probe and authorization links on Windows x64 and macOS arm64 while preserving the official Feishu Messenger 25/75 message layout.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi-desktop/tests -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

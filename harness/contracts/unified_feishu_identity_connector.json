@@ -1,0 +1,64 @@
+{
+  "feature": "unified_feishu_identity_connector",
+  "goal": "Coordinate Feishu organization identity, company permission truth, purpose-bound OAuth, token lifecycle, and task return across web, Feishu H5, company homepage, and desktop entrypoints.",
+  "preserved_contracts": [
+    "organization_permission_model",
+    "desktop_employee_onboarding",
+    "feishu_assistant_workbench"
+  ],
+  "target_architecture": {
+    "identity_key": "tenant_key + union_id",
+    "organization_truth": "Feishu employee and department directory",
+    "authorization_truth": "DC-Agent permissions.db dc_permission_assignments",
+    "authorization_projection": "signed schema-v2 Upstash snapshot",
+    "sync_strategy": "database-change trigger plus daily full reconciliation",
+    "oauth_purposes": [
+      "employee_login",
+      "desktop_login",
+      "cloud_docs"
+    ],
+    "token_boundary": "employee cookie, desktop session, and cloud-document grant are isolated",
+    "task_return": "cloud-document reauthorization resumes the original draft"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "ufic-001",
+      "description": "The authorization snapshot projects stable Feishu identity mappings and subject-bound company permission assignments without deriving business permissions from departments or organization roles.",
+      "verification": "uv run pytest tests/scripts_tools/test_employee_auth_sync.py -q"
+    },
+    {
+      "id": "ufic-002",
+      "description": "Vercel distinguishes missing, invalid, stale, and unavailable snapshot states from employee identity denial and exposes a non-PII health result.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p 'test_employee_access.py' -v"
+    },
+    {
+      "id": "ufic-003",
+      "description": "Company administration authorization is finally decided by enabled dc_admin permission records with global scope and cannot be granted by department, relation_type, legacy role, or a hardcoded open ID.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p 'test_oauth_employee_gate.py' -v"
+    },
+    {
+      "id": "ufic-004",
+      "description": "OAuth transactions use signed short-lived state, a purpose, one-time nonce consumption, an allowlisted return target, and purpose-specific session or token output.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p 'test_oauth_connector.py' -v"
+    },
+    {
+      "id": "ufic-005",
+      "description": "Cloud-document authorization uses a one-time handoff and rotatable opaque grant, refreshes or reauthorizes after expiry, and returns to the original draft instead of entering employee desktop login.",
+      "verification": "uv run pytest tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "ufic-006",
+      "description": "Identity or permission database changes trigger synchronization while a daily reconciliation task repairs missed events, and the task is installable, observable, and removable.",
+      "verification": "uv run pytest tests/scripts_tools/test_employee_auth_sync.py tests/scripts_tools/test_employee_auth_sync_scheduler.py -q"
+    },
+    {
+      "id": "ufic-007",
+      "description": "Disabled or departed employees cannot obtain a new web session, desktop refresh, or cloud-document refresh even when an old permission assignment or token exists.",
+      "verification": "uv run python -m unittest discover -s /Users/dianchi/dianchi/tests -p 'test_*auth*.py' -v"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

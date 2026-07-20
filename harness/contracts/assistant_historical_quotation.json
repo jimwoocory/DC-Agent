@@ -1,0 +1,42 @@
+{
+  "feature": "assistant_historical_quotation",
+  "goal": "Let the business assistant recall indexed NAS supplier prices for both historical-price lookup and new project quotation drafts, while keeping calculations traceable and missing prices explicit.",
+  "acceptance_criteria": [
+    {
+      "id": "ahq-001",
+      "description": "A new project quotation request triggers NAS memory retrieval even when the user does not explicitly say history, while unrelated fresh creative work remains excluded.",
+      "verification": "uv run pytest tests/dc_router/test_memory_injection.py::test_new_quotation_work_triggers_historical_memory tests/dc_router/test_memory_injection.py::test_new_creative_work_does_not_trigger_historical_memory -q"
+    },
+    {
+      "id": "ahq-002",
+      "description": "Quotation context includes the matched document chunk, source path, and review status so the assistant can cite the exact historical price evidence.",
+      "verification": "uv run pytest tests/dc_router/test_memory_injection.py::test_quotation_context_includes_matched_price_evidence -q"
+    },
+    {
+      "id": "ahq-003",
+      "description": "New quotation output is constrained to a quotation draft with itemized calculations, separated tax and delivery costs, source citations, and explicit pending-inquiry labels for missing prices.",
+      "verification": "uv run pytest tests/dc_router/test_memory_injection.py::test_quotation_context_includes_matched_price_evidence -q"
+    },
+    {
+      "id": "ahq-004",
+      "description": "Quotation retrieval combines governed historical project memory with raw NAS supplier-price documents instead of allowing the governed-memory result to mask price evidence.",
+      "verification": "uv run pytest tests/dc_router/test_memory_injection.py::test_quotation_retrieval_combines_governed_and_nas_memory -q"
+    },
+    {
+      "id": "ahq-005",
+      "description": "Quotation searches rank budget documents and matched unit-price evidence ahead of general execution plans with similar project keywords.",
+      "verification": "uv run pytest tests/test_dc_memory_indexer_quote_ranking.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "data_source": "data/nas_memory.db",
+    "source_of_truth": "NAS originals and indexed curated supplier notes",
+    "output_status": "报价草案",
+    "missing_price_policy": "标记待询价，不编造单价",
+    "calculation_policy": "数量乘单价形成小计；税费、运输、安装、加急、损耗和利润单独列示",
+    "citation_policy": "使用历史价格时必须标明来源和资料状态"
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

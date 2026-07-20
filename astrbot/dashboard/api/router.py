@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from .api_keys import router as api_keys_router
+from .assistant_attachments import router as assistant_attachments_router
 from .auth import router as auth_router
 from .backups import router as backups_router
 from .bots import router as bots_router
@@ -16,6 +17,7 @@ from .files import router as files_router
 from .knowledge_bases import router as knowledge_bases_router
 from .live_chat import router as live_chat_router
 from .logs import router as logs_router
+from .media_auth import router as media_auth_router
 from .open_api import router as open_api_router
 from .personas import router as personas_router
 from .platform import router as platform_router
@@ -35,6 +37,7 @@ API_V1_PREFIX = "/api/v1"
 def build_api_router() -> APIRouter:
     router = APIRouter(prefix=API_V1_PREFIX)
     router.include_router(auth_router)
+    router.include_router(assistant_attachments_router)
     router.include_router(backups_router)
     router.include_router(config_profiles_router)
     router.include_router(api_keys_router)
@@ -52,6 +55,7 @@ def build_api_router() -> APIRouter:
     router.include_router(sessions_router)
     router.include_router(subagents_router)
     router.include_router(logs_router)
+    router.include_router(media_auth_router)
     router.include_router(stats_router)
     router.include_router(tools_router)
     router.include_router(platform_router)

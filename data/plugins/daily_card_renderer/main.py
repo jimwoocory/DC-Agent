@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import re
 
+from dc_engines.assistant_workbench_cards import (
+    build_assistant_workspace_app_link,
+)
 from dc_engines.card_runtime import (
     finalize_card_via_runtime,
     send_card_via_runtime,
@@ -381,6 +384,38 @@ class DailyCardRendererPlugin(Star):
 
         # Strip internal thinking before deciding which card to render.
         full_text = _strip_model_thinking(full_text)
+        material_completion_url = ""
+        if str(event.get_extra("assistant_workbench_task_type") or "") == "copy":
+            workspace_url = str(
+                event.get_extra("assistant_workbench_workspace_url") or ""
+            )
+            get_platform_inst = getattr(self.context, "get_platform_inst", None)
+            platform = None
+            if callable(get_platform_inst):
+                try:
+                    platform = get_platform_inst(platform_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "[daily_card_renderer] workbench platform lookup failed: %s",
+                        exc,
+                    )
+            config = getattr(platform, "config", None) or {}
+            app_id = str(config.get("app_id") or "") if isinstance(config, dict) else ""
+            material_completion_url = build_assistant_workspace_app_link(
+                app_id=app_id,
+                workspace_url=workspace_url,
+                mode="revise",
+                reload=True,
+            )
+        try:
+            from dc_engines.harness.runtime_hooks import classify_response_quality
+
+            event.set_extra(
+                "dc_result_response_quality",
+                classify_response_quality(None, full_text),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[daily_card_renderer] result quality audit skipped: %s", exc)
 
         # Prefer finalizing an existing waiting card.
         stream_id = event.get_extra(_STREAM_KEY)
@@ -410,6 +445,7 @@ class DailyCardRendererPlugin(Star):
                 content_md=full_text,
                 title=title,
                 header_color=header_color,
+                material_completion_url=material_completion_url,
             )
             ok = await finalize_card_via_runtime(
                 streamer,
@@ -426,6 +462,7 @@ class DailyCardRendererPlugin(Star):
                 oldest = next(iter(self._finalized_stream_ids))
                 self._finalized_stream_ids.pop(oldest, None)
             self._finalized_stream_ids[stream_id] = None
+            event.set_extra("dc_result_delivery_succeeded", True)
             _consume_rendered_result(result)
             logger.info(
                 "[daily_card_renderer] 占位卡 finalize message_id=%s len=%d",
@@ -445,6 +482,7 @@ class DailyCardRendererPlugin(Star):
             card = build_casual_response_card(
                 content_md=full_text,
                 user_msg=(event.message_str or "").strip(),
+                material_completion_url=material_completion_url,
             )
 
             stream = await send_card_via_runtime(
@@ -463,6 +501,7 @@ class DailyCardRendererPlugin(Star):
             if s:
                 s.finalized = True
 
+            event.set_extra("dc_result_delivery_succeeded", True)
             _consume_rendered_result(result)
             logger.info(
                 "[daily_card_renderer] 轻量回复转卡片 platform=%s chat=%s len=%d detail=%s",
@@ -503,6 +542,7 @@ class DailyCardRendererPlugin(Star):
             content_md=full_text,
             title=title,
             header_color=header_color,
+            material_completion_url=material_completion_url,
         )
 
         stream = await send_card_via_runtime(
@@ -521,6 +561,7 @@ class DailyCardRendererPlugin(Star):
         if s:
             s.finalized = True
 
+        event.set_extra("dc_result_delivery_succeeded", True)
         _consume_rendered_result(result)
         logger.info(
             "[daily_card_renderer] 长回复转卡片 platform=%s chat=%s len=%d title=%r",

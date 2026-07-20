@@ -187,7 +187,6 @@ STEP_CONFIG: dict[str, dict[str, Any]] = {
         "interval_sec": int(os.getenv("KNOWLEDGE_FEISHU_REPAIR_INTERVAL_SEC", "3600")),
         "timeout_sec": int(os.getenv("KNOWLEDGE_FEISHU_REPAIR_TIMEOUT_SEC", "1800")),
         "max_runtime_sec": 2400,
-        "stale_sec": int(os.getenv("KNOWLEDGE_FEISHU_STALE_SEC", "4000")),
         "enabled": os.getenv("KNOWLEDGE_ENABLE_LEGACY_FEISHU_REPAIR", "0") == "1",
     },
     "daily_full": {
@@ -409,30 +408,6 @@ def is_due(step: str) -> bool:
         entry = state.setdefault("steps", {}).setdefault(step, {})
         last_started = float(entry.get("last_started_ts") or 0)
     return time.time() - last_started >= interval
-
-
-def file_age_sec(path: Path) -> int | None:
-    try:
-        return int(time.time() - path.stat().st_mtime)
-    except OSError:
-        return None
-
-
-def feishu_needs_repair() -> bool:
-    log_age = file_age_sec(DC_ROOT / "nas_sync" / "feishu_sync.log")
-    stale_sec = int(STEP_CONFIG["feishu_repair"]["stale_sec"])
-    if log_age is None:
-        return True
-    if log_age > stale_sec:
-        return True
-    update_step(
-        "feishu_repair",
-        status="ok",
-        reason="external_launchd_fresh",
-        log_age_sec=log_age,
-        checked_at=now_iso(),
-    )
-    return False
 
 
 def feishu_cloud_workflow_running() -> bool:
@@ -749,7 +724,14 @@ def tick() -> int:
             update_step(step, status="disabled", checked_at=now_iso())
 
     if STEP_CONFIG["feishu_nas_workflow"]["enabled"]:
-        if is_due("feishu_nas_workflow") and start_step("feishu_nas_workflow"):
+        if feishu_cloud_workflow_paused():
+            update_step(
+                "feishu_nas_workflow",
+                status="paused",
+                reason="feishu_nas_workflow_paused",
+                checked_at=now_iso(),
+            )
+        elif is_due("feishu_nas_workflow") and start_step("feishu_nas_workflow"):
             scheduled.append("feishu_nas_workflow")
     else:
         update_step("feishu_nas_workflow", status="disabled", checked_at=now_iso())
@@ -772,20 +754,14 @@ def tick() -> int:
             checked_at=now_iso(),
         )
 
-    if (
-        STEP_CONFIG["feishu_repair"]["enabled"]
-        and is_due("feishu_repair")
-        and feishu_needs_repair()
-    ):
-        if start_step("feishu_repair"):
-            scheduled.append("feishu_repair")
-    elif not STEP_CONFIG["feishu_repair"]["enabled"]:
-        update_step(
-            "feishu_repair",
-            status="disabled",
-            reason="legacy_feishu_repair_disabled",
-            checked_at=now_iso(),
-        )
+    # Keep the shared sync Implementation manually callable, but remove the
+    # legacy repair Adapter from automatic scheduling.
+    update_step(
+        "feishu_repair",
+        status="retired",
+        reason="superseded_by_feishu_nas_workflow",
+        checked_at=now_iso(),
+    )
 
     if STEP_CONFIG["daily_full"]["enabled"] and is_due("daily_full"):
         if start_step("daily_full"):

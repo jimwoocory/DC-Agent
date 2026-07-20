@@ -36,6 +36,8 @@ send_alert(
     title="🚨 hermes_gateway 挂了",
     body="codex 诊断: ...",
     level="critical",  # info / warning / critical
+    action_url="http://127.0.0.1:6185/",  # 可选，仅允许 http/https
+    action_label="打开 Dashboard",
 )
 
 # 异步（plugin / FastAPI 里方便）

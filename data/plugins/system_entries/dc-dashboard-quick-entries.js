@@ -51,15 +51,6 @@
       priority: 70,
     },
     {
-      name: "OpenClaw",
-      url: "http://localhost:4312/",
-      hint: "OpenClaw 控制台",
-      alive: null,
-      on_demand_kick: "http://localhost:9120/kick",
-      category: "agent",
-      priority: 40,
-    },
-    {
       name: "记忆治理",
       url: "/#/memory-governance",
       hint: "NAS / Obsidian 记忆治理看板",
@@ -108,6 +99,12 @@
     PAUSED: "已暂停",
     missing: "文件缺失",
     unknown: "未知",
+    retired: "已退役",
+    migration_required: "待迁移",
+    review_required: "待人工介入",
+    pending: "待接单",
+    acknowledged: "处理中",
+    resolved: "已解决",
   };
   var TASK_LABELS = {
     "dianchi-tech-night": "技术日报夜间生成",
@@ -518,7 +515,7 @@
     if (CATEGORY_LABELS[category]) return category;
     var name = String((entry && entry.name) || "");
     if (/小助手|员工需求/.test(name)) return "assistant";
-    if (/Hermes|OpenClaw|Agent/i.test(name)) return "agent";
+    if (/Hermes|Agent/i.test(name)) return "agent";
     if (/记忆|SOP|内容|治理/.test(name)) return "governance";
     return "other";
   }
@@ -565,7 +562,7 @@
         return (
           entry &&
           entry.url &&
-          (entry.pinned === true || /Hermes.*WebUI|OpenClaw/i.test(entry.name || ""))
+          (entry.pinned === true || /Hermes.*WebUI/i.test(entry.name || ""))
         );
       })
     );
@@ -650,7 +647,7 @@
     return (values || []).map(groupText).join("、");
   }
 
-  function requestWatchdog(action, group, targetType, targetKey) {
+  function requestWatchdog(action, group, targetType, targetKey, planId, reviewAction) {
     var url =
       WATCHDOG_URL +
       "?action=" +
@@ -664,7 +661,14 @@
         "&target_key=" +
         encodeURIComponent(targetKey);
     }
+    if (planId) {
+      url += "&plan_id=" + encodeURIComponent(planId);
+    }
+    if (reviewAction) {
+      url += "&review_action=" + encodeURIComponent(reviewAction);
+    }
     return fetch(url, {
+      method: action === "pause" || action === "resume" || action === "review" ? "POST" : "GET",
       credentials: "include",
       cache: "no-store",
       headers: { Accept: "application/json" },
@@ -679,12 +683,12 @@
       .then(function (payload) {
         var data = payload && payload.data ? payload.data : payload;
         if (data && data.data) data = data.data;
-        if (!data || !data.state) {
+        if (!data || (!data.state && !data.plan)) {
           throw new Error((payload && payload.message) || "watchdog state missing");
         }
-        state.watchdog = data.state;
+        if (data.state) state.watchdog = data.state;
         state.watchdogError = "";
-        return data.state;
+        return data;
       });
   }
 
@@ -838,7 +842,7 @@
       btn.textContent = item[1];
       btn.disabled = !!state.watchdogBusy || !item[2];
       btn.addEventListener("click", function () {
-        loadWatchdog(item[0], type, row.key);
+        loadWatchdog(item[0], type, row.key, row);
       });
       wrap.appendChild(btn);
     });
@@ -850,6 +854,53 @@
     span.className = "dcqe-empty";
     span.textContent = text;
     return span;
+  }
+
+  function repairReviewAction(row) {
+    var operation = row.status === "pending" ? "acknowledge" : row.status === "acknowledged" ? "resolve" : "";
+    if (!operation) return readonlyAction(row.status === "resolved" ? "已解决" : "状态不可操作");
+    var button = document.createElement("button");
+    button.className = "dcqe-row-action";
+    button.type = "button";
+    button.textContent = operation === "acknowledge" ? "接单" : "确认解决";
+    button.disabled = !!state.watchdogBusy;
+    button.addEventListener("click", function () {
+      state.watchdogBusy = "正在生成审核 Control Plan";
+      state.watchdogError = "";
+      render();
+      requestWatchdog("plan-review", "watchdog", "repair_review", row.incident_id, "", operation)
+        .then(function (data) {
+          var plan = data && data.plan;
+          if (!plan || plan.incident_id !== row.incident_id || plan.operation !== operation) {
+            throw new Error("审核 Control Plan 缺失或不匹配");
+          }
+          var confirmed = window.confirm(
+            (operation === "acknowledge" ? "接单处理" : "确认已解决") +
+            " Incident " + row.incident_id + "？\n\n" +
+            (row.summary || row.reason || "需要人工复核") +
+            "\n\n此操作只更新审核状态，不执行修复命令。计划 120 秒内有效。"
+          );
+          if (!confirmed) return null;
+          state.watchdogBusy = "正在应用审核 Control Plan";
+          render();
+          return requestWatchdog(
+            "review",
+            "watchdog",
+            "repair_review",
+            row.incident_id,
+            plan.plan_id,
+            operation
+          );
+        })
+        .catch(function (error) {
+          state.watchdogError = error && error.message ? error.message : "审核 Control Plan 失败";
+        })
+        .then(function () {
+          state.watchdogBusy = "";
+          render();
+        });
+    });
+    return button;
   }
 
   function createEntryLink(entry) {
@@ -1104,6 +1155,64 @@
     panel.appendChild(msg);
 
     if (state.watchdog) {
+      var controlPlane = state.watchdog.control_plane;
+      if (controlPlane && Array.isArray(controlPlane.tasks)) {
+        renderSection(panel, "统一任务视图", controlPlane.tasks, [
+          { label: "任务", value: "name" },
+          { label: "状态", value: "status", pill: true },
+          { label: "来源", value: "source" },
+          { label: "执行角色", value: "executor_role" },
+          { label: "控制", value: "control_mode" },
+          { label: "权威", value: "authority_state" },
+          { label: "操作", node: function (row) { return readonlyAction(row.authority_state === "superseded" ? "已退役" : "统一只读视图"); } },
+        ]);
+      }
+      var repair = state.watchdog.repair;
+      if (repair && Array.isArray(repair.services)) {
+        var repairAnalytics = repair.analytics && repair.analytics.dashboard_summary;
+        if (repairAnalytics) {
+          renderSection(panel, "自愈可靠性指标", [repairAnalytics], [
+            { label: "状态", value: "status", pill: true },
+            { label: "24h 自动尝试", value: "auto_attempts_24h" },
+            { label: "24h 成功率", value: "success_rate_24h" },
+            { label: "24h 平均 MTTR(秒)", value: "mttr_mean_seconds_24h" },
+            { label: "当前熔断", value: "open_circuits" },
+            { label: "开放审核", value: "open_reviews" },
+            { label: "审核超 60m", value: "pending_over_60m" },
+            { label: "保留预览", value: "retention_candidates" },
+            { label: "Codex 深巡检建议", value: "codex_review_recommended", pill: true },
+            { label: "操作", node: function () { return readonlyAction("指标只读"); } },
+          ]);
+        }
+        renderSection(panel, "Watchdog 自愈策略", repair.services, [
+          { label: "服务", value: "service" },
+          { label: "状态", value: "state", pill: true },
+          { label: "剩余尝试", value: "attempts_remaining" },
+          { label: "连续失败", value: "consecutive_failures" },
+          { label: "熔断剩余秒数", value: "circuit_remaining_seconds" },
+          { label: "最近 Incident", value: "last_incident_id" },
+          { label: "操作", node: function () { return readonlyAction("策略只读"); } },
+        ]);
+        renderSection(panel, "人工介入队列", repair.reviews || [], [
+          { label: "Incident", value: "incident_id" },
+          { label: "服务", value: "service" },
+          { label: "状态", value: "status", pill: true },
+          { label: "风险", value: "risk" },
+          { label: "已通知", value: function (row) { return (row.notification_stages || []).join("、"); } },
+          { label: "摘要", value: "summary" },
+          { label: "原因", value: "reason" },
+          { label: "操作", node: repairReviewAction },
+        ]);
+        renderSection(panel, "最近自愈结果", repair.recent_results || [], [
+          { label: "Incident", value: "incident_id" },
+          { label: "服务", value: "service" },
+          { label: "动作", value: "action_id" },
+          { label: "状态", value: "status", pill: true },
+          { label: "原因", value: "reason" },
+          { label: "验证", value: "verification_detail" },
+          { label: "操作", node: function () { return readonlyAction("审计只读"); } },
+        ]);
+      }
       renderSection(panel, "系统定时任务", state.watchdog.launchd, [
         { label: "任务", value: function (row) { return taskText(row.key); } },
         { label: "启用", value: "enabled_state", pill: true },
@@ -1111,6 +1220,7 @@
         {
           label: "操作",
           node: function (row) {
+            if (row.controllable === false) return readonlyAction("只读登记");
             return rowActions("launchd", row, row.enabled_state === "enabled" || row.loaded_state === "loaded");
           },
         },
@@ -1122,18 +1232,37 @@
         {
           label: "操作",
           node: function (row) {
+            if (row.controllable === false) return readonlyAction("只读登记");
             return rowActions("cron", row, row.state === "installed");
           },
         },
       ]);
-      renderSection(panel, "Codex 自动化", state.watchdog.codex, [
+      renderSection(panel, "Codex 重要工具", state.watchdog.codex_tools || [], [
+        { label: "能力", value: "name" },
+        { label: "用途", value: "description" },
+        {
+          label: "授权",
+          value: function (row) {
+            return (row.authorized_by || []).join("、");
+          },
+        },
+        {
+          label: "入口",
+          value: function (row) {
+            return (row.entrypoints || []).join("；");
+          },
+        },
+        { label: "调度权", node: function () { return readonlyAction("不拥有"); } },
+      ]);
+      renderSection(panel, "旧 Codex 自动任务（已停用）", state.watchdog.codex, [
         { label: "任务", value: function (row) { return taskText(row.key); } },
         { label: "状态", value: "status", pill: true },
         { label: "说明", value: "description" },
         {
           label: "操作",
           node: function (row) {
-            return rowActions("codex", row, row.status === "ACTIVE");
+            if (row.status !== "ACTIVE") return readonlyAction("不可恢复");
+            return rowActions("codex", row, true);
           },
         },
       ]);
@@ -1160,7 +1289,7 @@
     kicker.textContent = "DC-Agent";
     var title = document.createElement("div");
     title.className = "dcqe-panel-title";
-    title.textContent = state.panelView === "watchdog" ? "Watch-Dog 控制台" : "系统入口中枢";
+    title.textContent = state.panelView === "watchdog" ? "任务控制面" : "系统入口中枢";
     var subtitle = document.createElement("div");
     subtitle.className = "dcqe-panel-subtitle";
     subtitle.textContent =
@@ -1317,7 +1446,7 @@
       });
   }
 
-  function loadWatchdog(action, targetType, targetKey) {
+  function loadWatchdog(action, targetType, targetKey, targetRow) {
     if (action === "status") {
       state.watchdogBusy = "刷新中";
     } else if (targetKey) {
@@ -1327,6 +1456,89 @@
     }
     state.watchdogError = "";
     render();
+    if (
+      action === "pause" &&
+      targetKey &&
+      targetRow &&
+      targetRow.impact_level === "critical"
+    ) {
+      state.watchdogBusy = "正在生成关键任务 Control Plan";
+      render();
+      requestWatchdog("plan-pause-one", state.watchdogGroup, targetType, targetKey)
+        .then(function (data) {
+          var plan = data && data.plan;
+          if (!plan || !Array.isArray(plan.actions) || plan.actions.length !== 1) {
+            throw new Error("关键任务 Control Plan 缺失");
+          }
+          var impact = targetRow.impact_summary || "该操作会影响系统保护能力";
+          var confirmed = window.confirm(
+            "关键操作：暂停 " + plan.actions[0].description + "\n\n" +
+            impact +
+            "\n\n计划 120 秒内有效。确认继续吗？"
+          );
+          if (!confirmed) return null;
+          state.watchdogBusy = "正在执行已确认的关键任务 Control Plan";
+          render();
+          return requestWatchdog(
+            action,
+            state.watchdogGroup,
+            targetType,
+            targetKey,
+            plan.plan_id
+          );
+        })
+        .catch(function (error) {
+          state.watchdogError = error && error.message ? error.message : "Control Plan 失败";
+        })
+        .then(function () {
+          state.watchdogBusy = "";
+          render();
+        });
+      return;
+    }
+    if ((action === "pause" || action === "resume") && !targetKey) {
+      var operationText = action === "pause" ? "暂停" : "启动";
+      var planAction = action === "pause" ? "plan-pause" : "plan-resume";
+      state.watchdogBusy = "正在生成 Control Plan";
+      render();
+      requestWatchdog(planAction, state.watchdogGroup)
+        .then(function (data) {
+          var plan = data && data.plan;
+          if (!plan || !Array.isArray(plan.actions)) {
+            throw new Error("Control Plan 缺失");
+          }
+          if (plan.actions.length === 0) {
+            state.watchdogError = "本组没有需要" + operationText + "的任务";
+            return null;
+          }
+          var lines = plan.actions.map(function (item) {
+            return "• " + item.description + "（" + item.schedule + "）";
+          });
+          var confirmed = window.confirm(
+            "将" + operationText + "以下 " + plan.actions.length + " 个任务：\n\n" +
+            lines.join("\n") +
+            "\n\n计划 120 秒内有效。确认继续吗？"
+          );
+          if (!confirmed) return null;
+          state.watchdogBusy = "正在执行已确认的 Control Plan";
+          render();
+          return requestWatchdog(
+            action,
+            state.watchdogGroup,
+            "",
+            "",
+            plan.plan_id
+          );
+        })
+        .catch(function (error) {
+          state.watchdogError = error && error.message ? error.message : "Control Plan 失败";
+        })
+        .then(function () {
+          state.watchdogBusy = "";
+          render();
+        });
+      return;
+    }
     requestWatchdog(action, state.watchdogGroup, targetType, targetKey)
       .catch(function (error) {
         state.watchdogError = error && error.message ? error.message : "看门狗控制失败";

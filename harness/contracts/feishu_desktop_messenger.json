@@ -1,0 +1,52 @@
+{
+  "contract_id": "feishu_desktop_messenger",
+  "goal": "Expose the official Feishu Messenger web client as the primary message surface in the company desktop app with a durable employee login and truthful fallback boundaries.",
+  "scope": {
+    "included": [
+      "official Feishu Messenger conversation list and chat surface embedded in the PySide6 desktop shell",
+      "Feishu global navigation and web-only notification banner removed from the focused message surface",
+      "a branded macOS application identity using the 巅池桌面助手 name and the existing company logo while retaining the legacy login data directory",
+      "persistent Feishu cookies, local storage, and web permissions",
+      "popup, download, media permission, and external-browser handling",
+      "a separately named company assistant message center backed by DC-Agent APIs",
+      "an explicit user-agent override for diagnostics"
+    ],
+    "excluded": [
+      "copying or reverse engineering Feishu native desktop code",
+      "claiming that bot-scoped Open Platform APIs expose an employee's complete personal inbox",
+      "silently granting camera or microphone access to non-Feishu origins"
+    ]
+  },
+  "acceptance_criteria": [
+    {
+      "id": "feishu-desktop-messenger-001",
+      "description": "The desktop navigation opens official Feishu Messenger from the primary 消息 item and labels the DC-Agent-backed conversation view as 小助手.",
+      "verification": "python3 -m unittest tests.test_feishu_messenger_integration -q"
+    },
+    {
+      "id": "feishu-desktop-messenger-002",
+      "description": "Feishu uses a dedicated persistent QWebEngine profile and a version-matched Chrome user agent derived from the embedded Chromium engine by default; a custom user agent is used only when explicitly configured.",
+      "verification": "python3 -m unittest tests.test_feishu_messenger_integration -q"
+    },
+    {
+      "id": "feishu-desktop-messenger-003",
+      "description": "Login popups no longer replace the Messenger page, downloads require an explicit destination, and camera or microphone requests are presented to the employee only for Feishu origins.",
+      "verification": "python3 -m unittest tests.test_feishu_messenger_integration -q"
+    },
+    {
+      "id": "feishu-desktop-messenger-004",
+      "description": "A no-GUI regression suite verifies desktop wiring without launching the desktop pet or mutating a real Feishu conversation.",
+      "verification": "python3 -m unittest discover -s tests -q"
+    },
+    {
+      "id": "feishu-desktop-messenger-005",
+      "description": "The embedded surface starts at the Messenger conversation list, preserves a polished 25/75 list-to-chat layout with neutral gray separators, and does not expose Feishu's global app navigation or notification banner.",
+      "verification": "python3 -m unittest tests.test_feishu_messenger_integration -q"
+    },
+    {
+      "id": "feishu-desktop-messenger-006",
+      "description": "The macOS Dock and application window identify the product as 巅池桌面助手 with the existing company logo, a company-owned bundle identifier and branded in-bundle executable rather than org.python.python, without changing the persistent Feishu storage directory.",
+      "verification": "python3 -m unittest tests.test_live_pet_activation_gate -q"
+    }
+  ]
+}

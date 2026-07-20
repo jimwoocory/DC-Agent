@@ -144,6 +144,54 @@ def test_promoter_dry_run_does_not_write_outputs(tmp_path: Path) -> None:
     assert store.list_audit("mem_approved") == []
 
 
+def test_promoter_noop_reconciliation_does_not_duplicate_audit(
+    tmp_path: Path,
+) -> None:
+    store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
+    store.initialize()
+    nas_db = tmp_path / "nas_memory.db"
+    overrides = tmp_path / "nas_memory_overrides.json"
+    create_nas_db(nas_db)
+    store.upsert_memory(memory("mem_approved"))
+
+    first = promote_governed_memories(
+        store=store,
+        nas_db_path=nas_db,
+        overrides_path=overrides,
+        now="2026-06-04T00:20:00Z",
+        actor="promoter-test",
+    )
+    second = promote_governed_memories(
+        store=store,
+        nas_db_path=nas_db,
+        overrides_path=overrides,
+        now="2026-06-04T01:20:00Z",
+        actor="promoter-test",
+    )
+
+    assert first.promoted_memory_ids == ["mem_approved"]
+    assert first.unchanged_memory_ids == []
+    assert second.promoted_memory_ids == []
+    assert second.unchanged_memory_ids == ["mem_approved"]
+    assert len(store.list_audit("mem_approved")) == 1
+
+    with sqlite3.connect(nas_db) as conn:
+        conn.execute(
+            "UPDATE documents SET review_status = 'need_review' WHERE doc_key = 'doc_1'"
+        )
+    repaired = promote_governed_memories(
+        store=store,
+        nas_db_path=nas_db,
+        overrides_path=overrides,
+        now="2026-06-04T02:20:00Z",
+        actor="promoter-test",
+    )
+
+    assert repaired.promoted_memory_ids == ["mem_approved"]
+    assert repaired.unchanged_memory_ids == []
+    assert len(store.list_audit("mem_approved")) == 2
+
+
 def test_recall_filters_to_approved_by_default(tmp_path: Path) -> None:
     store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
     store.initialize()

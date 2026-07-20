@@ -228,6 +228,37 @@ async def test_department_workflow_plugin_does_not_override_auto_complete_gate()
 
 
 @pytest.mark.asyncio
+async def test_department_workflow_task_contains_runtime_principal() -> None:
+    engine = _FakeCreateEngine()
+    plugin_cls = _load_plugin_class()
+    plugin = plugin_cls(
+        SimpleNamespace(
+            harness_engine=engine,
+            harness_store=_FakeStore(),
+            conversation_manager=_FakeConversationManager(),
+            employee_store=None,
+            dc_permission_store=None,
+            case_engine=None,
+        ),
+        {
+            "enabled": True,
+            "dry_run": False,
+            "notify_on_match": False,
+        },
+    )
+
+    await plugin.on_message(_DepartmentWorkflowEvent())
+
+    payload = engine.requests[0].payload
+    assert payload["requester_open_id"] == "ou_user"
+    assert payload["requester_identity_source"] == "event_sender"
+    assert payload["requester_principal_type"] == "user"
+    assert {item["permission"] for item in payload["requester_dc_permissions"]} == {
+        "employee_self_service"
+    }
+
+
+@pytest.mark.asyncio
 async def test_department_workflow_private_advisory_match_is_observe_only_by_default() -> (
     None
 ):

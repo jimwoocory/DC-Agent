@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import sys
+from pathlib import Path
 from typing import Any
 
 try:
@@ -16,6 +18,10 @@ except ImportError:  # pragma: no cover - direct file-load compatibility
 DC_ROOT = project_root()
 NAS_MEMORY_DB = data_path("nas_memory.db")
 GOVERNED_MEMORY_DB = data_path("governed_memory.db")
+OBSIDIAN_VAULT_ROOT = Path(
+    os.environ.get("DC_OBSIDIAN_VAULT_PATH") or DC_ROOT / "ObsidianVault"
+)
+COMPANY_ORG_CONFIG = DC_ROOT / "data" / "config" / "company_org_structure.json"
 BUSINESS_PLATFORM_ID = "巅池-Agent小助手"
 SUPPORTED_PLATFORM_IDS = {
     BUSINESS_PLATFORM_ID,
@@ -34,7 +40,16 @@ if str(DC_ENGINES_ROOT) not in sys.path:
 
 from dc_engines.memory_governance.recall import list_recall_memories  # noqa: E402
 from dc_engines.memory_governance.store import MemoryGovernanceStore  # noqa: E402
+from dc_engines.obsidian_vault import (  # noqa: E402
+    ObsidianVault,
+    VaultAccessError,
+    VaultSecurityPolicy,
+)
 
+from astrbot.core.runtime_context.models import (  # noqa: E402
+    RUNTIME_CONTEXT_SECTIONS_EXTRA_KEY,
+    RuntimeContextSection,
+)
 from nas_sync.dc_memory_indexer import (  # noqa: E402
     dedupe_query_rows,
     fetch_fts_rows,
@@ -43,7 +58,7 @@ from nas_sync.dc_memory_indexer import (  # noqa: E402
 )
 
 MEMORY_HINT_RE = re.compile(
-    r"(项目|方案|策划|执行|SOP|负责人|谁负责|发起人|部门|同事|员工|文案|脚本|"
+    r"(公司|项目|方案|策划|执行|SOP|负责人|谁负责|发起人|部门|同事|员工|文案|脚本|"
     r"预算|报价|排期|复盘|结算|舆情|KOW|KOS|五菱|菱听|鉴宝|归档|资料|文件|"
     r"飞书|链接|推文|素材|星光|缤果|宏光|宝骏|柳汽|东风|之光|之前|历史|记忆|"
     r"中台|提案|活动|传播|共创|反馈|邀约|触达|内容中心|用户运营|企微内容库|"
@@ -61,6 +76,14 @@ EXPLICIT_MEMORY_RE = re.compile(
     r"过往|复盘|记忆|知识库|资料库|已有资料|原有方案)",
     re.IGNORECASE,
 )
+QUOTATION_REQUEST_RE = re.compile(
+    r"历史.{0,8}(报价|预算|成本|费用)|"
+    r"(报价|询价|预算|成本|费用).{0,16}(方案|草案|清单|明细|测算|三档)|"
+    r"(做|出|生成|制作|整理|测算).{0,16}(报价|预算|成本|费用)|"
+    r"(基础|标准|升级|低配|中配|高配).{0,12}(报价|预算|方案)",
+    re.IGNORECASE,
+)
+PRICE_QUERY_RE = re.compile(r"报价|询价|预算|成本|费用", re.IGNORECASE)
 
 STOP_WORDS = {
     "帮我",
@@ -82,6 +105,7 @@ STOP_WORDS = {
 }
 
 MEMORY_TRIGGER_TERMS = (
+    "公司",
     "中台",
     "中台策划",
     "中台-策划",
@@ -165,6 +189,165 @@ def _candidate_terms(text: str) -> list[str]:
     return filtered[:8]
 
 
+def _bounded_bridge_excerpt(content: str, *, max_chars: int = 1_800) -> str:
+    """Build a compact, deduplicated excerpt from one generated bridge note.
+
+    Args:
+        content: Full Markdown content from the bridge note.
+        max_chars: Maximum excerpt size returned to the runtime prompt.
+
+    Returns:
+        A bounded Markdown excerpt without the verbose RawRef section.
+    """
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if line == "## 关联 RawRefs":
+            break
+        if not line or line.startswith("生成时间：") or line in seen:
+            continue
+        candidate = "\n".join([*lines, line])
+        if len(candidate) > max_chars:
+            break
+        seen.add(line)
+        lines.append(line)
+        if len(lines) >= 28:
+            break
+    return "\n".join(lines)
+
+
+def retrieve_obsidian_bridge_context(
+    text: str,
+    *,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Resolve company entities in a query to bounded Obsidian bridge notes.
+
+    Args:
+        text: Current memory retrieval query, including recent conversation context.
+        limit: Maximum number of matching entity, department, or person notes.
+
+    Returns:
+        Matching bridge summaries with stable Vault-relative source paths.
+    """
+
+    clean_text = _clean_text(text)
+    if not clean_text or not OBSIDIAN_VAULT_ROOT.is_dir() or not _should_retrieve(text):
+        return []
+
+    people: dict[str, dict[str, str]] = {}
+    try:
+        org_data = json.loads(COMPANY_ORG_CONFIG.read_text(encoding="utf-8"))
+        raw_people = org_data.get("people", {}) if isinstance(org_data, dict) else {}
+        if isinstance(raw_people, dict):
+            people = {
+                str(name): {
+                    str(key): str(value)
+                    for key, value in metadata.items()
+                    if key in {"department", "role", "office"} and value
+                }
+                for name, metadata in raw_people.items()
+                if isinstance(metadata, dict)
+            }
+    except (OSError, json.JSONDecodeError):
+        people = {}
+
+    resolved_people: set[str] = {name for name in people if name in clean_text}
+    for name, metadata in people.items():
+        role = metadata.get("role", "")
+        if name and "总" in role and f"{name[0]}总" in clean_text:
+            resolved_people.add(name)
+
+    terms = set(_candidate_terms(clean_text))
+    terms.update(resolved_people)
+    if not terms:
+        return []
+
+    try:
+        vault = ObsidianVault(
+            VaultSecurityPolicy(
+                vault_root=OBSIDIAN_VAULT_ROOT,
+                read_only=True,
+                actor="dc-memory-injection",
+            )
+        )
+        candidates: list[tuple[int, int, str, str, str]] = []
+        bridge_scopes = (
+            ("canonical", -1, "20_Bridges/Canonical"),
+            ("person", 0, "20_Bridges/People"),
+            ("department", 1, "20_Bridges/Departments"),
+            ("entity", 2, "20_Bridges/Entities"),
+        )
+        for kind, kind_priority, scope in bridge_scopes:
+            try:
+                entries = vault.list_directory(scope)
+            except VaultAccessError:
+                continue
+            for entry in entries:
+                if entry.kind != "file" or not entry.name.endswith(".md"):
+                    continue
+                label = Path(entry.name).stem
+                if kind == "entity":
+                    label = label.removeprefix("实体-")
+                elif kind == "canonical":
+                    if label == "公司-总览":
+                        label = "公司总览"
+                    else:
+                        label = re.sub(r"^(管理层|部门|客户)-", "", label)
+                score = 120 if kind == "person" and label in resolved_people else 0
+                if label in clean_text:
+                    score = max(score, 100)
+                for term in terms:
+                    if len(term) < 2:
+                        continue
+                    if term == label:
+                        score = max(score, 90)
+                    elif term in label or label in term:
+                        score = max(score, 50 + min(len(term), len(label)))
+                if score:
+                    if kind == "canonical":
+                        score += 40
+                    candidates.append((score, kind_priority, label, kind, entry.path))
+
+        results: list[dict[str, Any]] = []
+        bounded_limit = max(1, min(int(limit or 5), 8))
+        for _score, _priority, label, kind, path in sorted(
+            candidates,
+            key=lambda item: (-item[0], item[1], item[2]),
+        )[:bounded_limit]:
+            note = vault.read_note(path)
+            metadata = {}
+            if kind == "person":
+                metadata.update(people.get(label, {}))
+            if kind == "canonical":
+                metadata.update(
+                    {
+                        key: str(note.frontmatter.get(key) or "")
+                        for key in (
+                            "page_kind",
+                            "canonical_type",
+                            "review_status",
+                            "generated_at",
+                        )
+                        if note.frontmatter.get(key)
+                    }
+                )
+            results.append(
+                {
+                    "kind": kind,
+                    "name": label,
+                    "path": note.path,
+                    "metadata": metadata,
+                    "content": _bounded_bridge_excerpt(note.content),
+                }
+            )
+        return results
+    except (OSError, ValueError, VaultAccessError):
+        return []
+
+
 def _json_loads(value: str, fallback: Any) -> Any:
     try:
         return json.loads(value or "")
@@ -176,7 +359,11 @@ def _should_retrieve(text: str) -> bool:
     clean = _clean_text(text)
     if len(clean) < 2:
         return False
-    if FRESH_CREATIVE_RE.search(clean) and not EXPLICIT_MEMORY_RE.search(clean):
+    if (
+        FRESH_CREATIVE_RE.search(clean)
+        and not EXPLICIT_MEMORY_RE.search(clean)
+        and not QUOTATION_REQUEST_RE.search(clean)
+    ):
         return False
     return bool(MEMORY_HINT_RE.search(clean))
 
@@ -194,17 +381,22 @@ def _like_clause(columns: list[str], terms: list[str]) -> tuple[str, list[str]]:
 
 
 def retrieve_memory_context(text: str, *, limit: int = 5) -> dict[str, Any]:
+    quotation_mode = bool(PRICE_QUERY_RE.search(_clean_text(text)))
     governed_context = retrieve_governed_memory_context(text, limit=limit)
-    if governed_context.get("governed_memories"):
-        return governed_context
+    governed_context["obsidian_bridges"] = retrieve_obsidian_bridge_context(
+        text,
+        limit=limit,
+    )
 
     if not NAS_MEMORY_DB.exists() or not _should_retrieve(text):
-        return {"documents": [], "project_items": []}
+        governed_context["quotation_mode"] = quotation_mode
+        return governed_context
 
     terms = query_terms(_clean_text(text))
     project_terms = _candidate_terms(text)
     if not terms and not project_terms:
-        return {"documents": [], "project_items": []}
+        governed_context["quotation_mode"] = quotation_mode
+        return governed_context
 
     with sqlite3.connect(NAS_MEMORY_DB) as conn:
         conn.row_factory = sqlite3.Row
@@ -240,6 +432,9 @@ def retrieve_memory_context(text: str, *, limit: int = 5) -> dict[str, Any]:
 
     return {
         "terms": terms,
+        "quotation_mode": quotation_mode,
+        "governed_memories": governed_context.get("governed_memories") or [],
+        "obsidian_bridges": governed_context.get("obsidian_bridges") or [],
         "project_items": [dict(row) for row in project_items],
         "documents": documents,
     }
@@ -395,9 +590,11 @@ def retrieve_memory_context_legacy(text: str, *, limit: int = 5) -> dict[str, An
 
 def format_memory_context(context: dict[str, Any]) -> str:
     governed = context.get("governed_memories") or []
+    bridges = context.get("obsidian_bridges") or []
     docs = context.get("documents") or []
     items = context.get("project_items") or []
-    if not governed and not docs and not items:
+    quotation_mode = bool(context.get("quotation_mode"))
+    if not governed and not bridges and not docs and not items:
         return ""
 
     lines = [
@@ -405,8 +602,15 @@ def format_memory_context(context: dict[str, Any]) -> str:
     ]
     if governed:
         lines.append(
-            "以下是 DC-Agent 已通过 Obsidian 人工治理并批准的公司记忆。默认优先使用这些事实；回答中引用时要带来源。"
+            "以下是 DC-Agent 已通过 Obsidian 人工治理并批准的公司记忆。"
+            "仅在近期对话确定当前目标后作为事实参考；回答中引用时要带来源。"
         )
+        if docs or items:
+            lines.append(
+                "同时提供的项目明细和原始文档是补充、印证或冲突证据；"
+                "必须保留各自状态。review_status=need_review 的内容仍需人工确认，"
+                "不能因同时命中 approved 记忆而升级为已确认事实。"
+            )
         lines.append("已治理记忆：")
         for index, memory in enumerate(governed[:5], start=1):
             lines.append(
@@ -419,11 +623,53 @@ def format_memory_context(context: dict[str, Any]) -> str:
                 f"来源={memory.get('source_path') or memory.get('source_id') or ''}；"
                 f"内容={str(memory.get('canonical_text') or '')[:500]}"
             )
-    else:
+    elif docs or items:
         lines.extend(
             [
-                "以下是 DC-Agent 从公司 NAS 记忆库检索到的资料。优先使用这些事实；如果 review_status=need_review，要明确说明仍需人工确认，不要编造缺失的发起人/负责人。",
+                "以下是 DC-Agent 从公司 NAS 记忆库检索到的资料。"
+                "仅在近期对话确定当前目标后作为事实参考；"
+                "如果 review_status=need_review，要明确说明仍需人工确认，"
+                "不要编造缺失的发起人/负责人。",
                 "温和复核策略：只有当本轮回答确实引用了状态为 need_review 的资料，且用户正在聊对应项目/资料时，才可以在回答末尾顺手加一句确认请求。不要主动批量追问，不要打断主任务。确认请求示例：另外，这份资料的 Obsidian 图谱归属还待人工确认；如果方便，麻烦顺手确认它是否属于「项目名」，负责人是否为「负责人/未标注」。用户可回复“确认无误”或“需要调整：...”。",
+            ]
+        )
+    if bridges:
+        lines.append(
+            "以下是与当前问题匹配的 Obsidian 关系桥接页。"
+            "它们是关系索引，不等同于人工确认事实；"
+            "应结合 approved 记忆和原始资料判断。"
+        )
+        kind_labels = {
+            "canonical": "标准页",
+            "person": "人员",
+            "department": "部门",
+            "entity": "实体",
+        }
+        for index, bridge in enumerate(bridges[:5], start=1):
+            metadata = bridge.get("metadata") or {}
+            metadata_text = ""
+            if metadata.get("canonical_type"):
+                metadata_text += f"；标准类型={metadata['canonical_type']}"
+            if metadata.get("review_status"):
+                metadata_text += f"；状态={metadata['review_status']}"
+            if metadata.get("department"):
+                metadata_text += f"；部门={metadata['department']}"
+            if metadata.get("role"):
+                metadata_text += f"；角色={metadata['role']}"
+            if metadata.get("office"):
+                metadata_text += f"；办公归属={metadata['office']}"
+            excerpt = re.sub(r"\s+", " ", str(bridge.get("content") or ""))[:1200]
+            lines.append(
+                f"{index}. {kind_labels.get(bridge.get('kind'), '关系')}="
+                f"{bridge.get('name') or ''}{metadata_text}；"
+                f"来源=ObsidianVault/{bridge.get('path') or ''}；摘要={excerpt}"
+            )
+    if quotation_mode:
+        lines.extend(
+            [
+                "报价模式：把检索到的价格视为历史依据，不视为供应商当前承诺。",
+                "如用户要求新项目报价，输出必须标记为“报价草案”，并逐项列出项目、规格、数量、单位、历史单价、建议单价、小计和来源。数量×单价形成小计；税费、运输、安装、加急、损耗和利润必须单独列示，不得暗中并入。",
+                "没有历史价格的项目标记“待询价”，不得编造单价；使用历史价格时标明来源和资料状态，并提示正式采购前复核价格日期、含税口径、起订量与交付周期。",
             ]
         )
     if items:
@@ -452,8 +698,8 @@ def format_memory_context(context: dict[str, Any]) -> str:
                 if isinstance(item, dict)
             )
             excerpt = re.sub(
-                r"\s+", " ", str(doc.get("summary") or doc.get("text") or "")
-            )[:360]
+                r"\s+", " ", str(doc.get("text") or doc.get("summary") or "")
+            )[: 900 if quotation_mode else 360]
             lines.append(
                 f"{index}. doc_key={doc.get('doc_key') or ''}；"
                 f"{doc.get('title') or ''}；项目={doc.get('project_name') or ''}；"
@@ -487,14 +733,35 @@ def inject_memory_context_into_event(event, query_text: str | None = None) -> bo
     # The user's original short message remains clean.
     try:
         event.set_extra("dc_agent_memory_context", context)
-        event.set_extra(
-            "dc_agent_memory_hits",
-            {
-                "documents": len(context.get("documents") or []),
-                "governed_memories": len(context.get("governed_memories") or []),
-                "project_items": len(context.get("project_items") or []),
-            },
+        hits = {
+            "documents": len(context.get("documents") or []),
+            "governed_memories": len(context.get("governed_memories") or []),
+            "obsidian_bridges": len(context.get("obsidian_bridges") or []),
+            "project_items": len(context.get("project_items") or []),
+        }
+        event.set_extra("dc_agent_memory_hits", hits)
+        getter = getattr(event, "get_extra", None)
+        existing_sections = (
+            getter(RUNTIME_CONTEXT_SECTIONS_EXTRA_KEY) if callable(getter) else None
         )
+        sections = (
+            list(existing_sections)
+            if isinstance(existing_sections, (list, tuple))
+            else []
+        )
+        if not any(
+            isinstance(section, RuntimeContextSection)
+            and section.source_id == "dc_memory_context"
+            for section in sections
+        ):
+            sections.append(
+                RuntimeContextSection.memory_reference(
+                    text=block,
+                    source_id="dc_memory_context",
+                    metadata=hits,
+                )
+            )
+        event.set_extra(RUNTIME_CONTEXT_SECTIONS_EXTRA_KEY, sections)
     except Exception:  # noqa: BLE001
-        pass
+        return False
     return True

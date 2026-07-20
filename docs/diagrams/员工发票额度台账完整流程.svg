@@ -1,0 +1,575 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="4420" height="7046" viewBox="0 0 4420 7046">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#17324D" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  <rect width="100%" height="100%" fill="#FFFFFF"/>
+  <g font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif">
+    <rect x="1900" y="51" width="620" height="98" rx="34" fill="#1F4E78" filter="url(#shadow)"/>
+    <text x="2210" y="113" text-anchor="middle" font-size="40" font-weight="700" fill="#FFFFFF"><tspan x="2210" dy="0">员工发票额度台账全流程</tspan></text>
+    <path d="M 2210 149 L 2210 294" fill="none" stroke="#3370FF" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="294" width="460" height="70" rx="22" fill="rgb(226,235,255)" stroke="#3370FF" stroke-width="3"/>
+    <text x="2210" y="338.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">一、业务目标与基本口径</tspan></text>
+    <path d="M 2210 364 L 2210 430" fill="none" stroke="#3370FF" stroke-width="3.4"/>
+    <path d="M 710 430 L 3710 430" fill="none" stroke="#3370FF" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 710 430 L 710 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="505" y="494" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="710" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="710" dy="0">为每名员工建立独立的发票额度账户</tspan></text>
+    <path d="M 1210 430 L 1210 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="1005" y="494" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="1210" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1210" dy="0">无票报销时，按未覆盖金额扣减员工额度</tspan></text>
+    <path d="M 1710 430 L 1710 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="1505" y="494" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="1710" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1710" dy="0">发票金额大于报销金额时，富余部分形成</tspan><tspan x="1710" dy="29">待入额度</tspan></text>
+    <path d="M 2210 430 L 2210 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="2005" y="494" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="2210" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2210" dy="0">额度缺口 = max（报销金额 - 有效发</tspan><tspan x="2210" dy="29">票金额，0）</tspan></text>
+    <path d="M 2710 430 L 2710 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="2505" y="494" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="2710" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2710" dy="0">待入额度 = max（有效发票金额 - 报</tspan><tspan x="2710" dy="29">销金额，0）</tspan></text>
+    <path d="M 3210 430 L 3210 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="3005" y="494" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="3210" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3210" dy="0">OA 提交时先冻结，审批通过且付款完成</tspan><tspan x="3210" dy="29">后正式生效</tspan></text>
+    <path d="M 3710 430 L 3710 494" fill="none" stroke="#3370FF" stroke-width="3" opacity="0.75"/>
+    <rect x="3505" y="494" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#3370FF" stroke-width="2.4"/>
+    <text x="3710" y="529.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3710" dy="0">所有额度变化必须关联 OA 流水号并可</tspan><tspan x="3710" dy="29">追溯</tspan></text>
+    <path d="M 2210 718 L 2210 758" fill="none" stroke="#00A870" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="758" width="460" height="70" rx="22" fill="rgb(219,243,235)" stroke="#00A870" stroke-width="3"/>
+    <text x="2210" y="802.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">二、员工提交与 OA 建单</tspan></text>
+    <path d="M 2210 828 L 2210 894" fill="none" stroke="#00A870" stroke-width="3.4"/>
+    <path d="M 960 894 L 3460 894" fill="none" stroke="#00A870" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 960 894 L 960 958" fill="none" stroke="#00A870" stroke-width="3" opacity="0.75"/>
+    <rect x="755" y="958" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#00A870" stroke-width="2.4"/>
+    <text x="960" y="993.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="960" dy="0">员工选择部门、项目和费用科目</tspan></text>
+    <path d="M 1460 894 L 1460 958" fill="none" stroke="#00A870" stroke-width="3" opacity="0.75"/>
+    <rect x="1255" y="958" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#00A870" stroke-width="2.4"/>
+    <text x="1460" y="993.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1460" dy="0">填写报销金额、事由和收款信息</tspan></text>
+    <path d="M 1960 894 L 1960 958" fill="none" stroke="#00A870" stroke-width="3" opacity="0.75"/>
+    <rect x="1755" y="958" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#00A870" stroke-width="2.4"/>
+    <text x="1960" y="993.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1960" dy="0">上传发票附件</tspan></text>
+    <path d="M 1960 1013 C 1960 1047, 1773 1061, 1773 1089" fill="none" stroke="#00A870" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1773 1089 L 1773 1236" fill="none" stroke="#00A870" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1773 1112 L 1765 1112" fill="none" stroke="#00A870" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="1089" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="1132" x2="2147" y2="1132" stroke="#00A870" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="1118.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">允许不上传发票</tspan></text>
+    <path d="M 1773 1174 L 1765 1174" fill="none" stroke="#00A870" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="1151" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="1194" x2="2147" y2="1194" stroke="#00A870" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="1180.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">支持一张或多张发票</tspan></text>
+    <path d="M 1773 1236 L 1765 1236" fill="none" stroke="#00A870" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="1213" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="1256" x2="2147" y2="1256" stroke="#00A870" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="1242.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">保留原始文件和文件哈希</tspan></text>
+    <path d="M 2460 894 L 2460 958" fill="none" stroke="#00A870" stroke-width="3" opacity="0.75"/>
+    <rect x="2255" y="958" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#00A870" stroke-width="2.4"/>
+    <text x="2460" y="993.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2460" dy="0">员工提交 OA 报销审批</tspan></text>
+    <path d="M 2960 894 L 2960 958" fill="none" stroke="#00A870" stroke-width="3" opacity="0.75"/>
+    <rect x="2755" y="958" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#00A870" stroke-width="2.4"/>
+    <text x="2960" y="993.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2960" dy="0">OA 生成唯一流水号、审批实例和事件版</tspan><tspan x="2960" dy="29">本</tspan></text>
+    <path d="M 3460 894 L 3460 958" fill="none" stroke="#00A870" stroke-width="3" opacity="0.75"/>
+    <rect x="3255" y="958" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#00A870" stroke-width="2.4"/>
+    <text x="3460" y="993.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3460" dy="0">机器人实时接收 OA 提交事件</tspan></text>
+    <path d="M 2210 1399 L 2210 1439" fill="none" stroke="#F59E0B" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="1439" width="460" height="70" rx="22" fill="rgb(254,241,221)" stroke="#F59E0B" stroke-width="3"/>
+    <text x="2210" y="1483.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">三、机器人实时审核</tspan></text>
+    <path d="M 2210 1509 L 2210 1575" fill="none" stroke="#F59E0B" stroke-width="3.4"/>
+    <path d="M 960 1575 L 3460 1575" fill="none" stroke="#F59E0B" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 960 1575 L 960 1639" fill="none" stroke="#F59E0B" stroke-width="3" opacity="0.75"/>
+    <rect x="755" y="1639" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#F59E0B" stroke-width="2.4"/>
+    <text x="960" y="1674.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="960" dy="0">幂等检查</tspan></text>
+    <path d="M 960 1694 C 960 1728, 773 1742, 773 1770" fill="none" stroke="#F59E0B" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 773 1770 L 773 1855" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 773 1793 L 765 1793" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="765" y="1770" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="773" y1="1813" x2="1147" y2="1813" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="960" y="1799.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="960" dy="0">检查 OA 流水号和事件版本是否已处理</tspan></text>
+    <path d="M 773 1855 L 765 1855" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="765" y="1832" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="773" y1="1875" x2="1147" y2="1875" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="960" y="1861.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="960" dy="0">重复事件直接返回原处理结果</tspan></text>
+    <path d="M 1460 1575 L 1460 1639" fill="none" stroke="#F59E0B" stroke-width="3" opacity="0.75"/>
+    <rect x="1255" y="1639" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#F59E0B" stroke-width="2.4"/>
+    <text x="1460" y="1674.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1460" dy="0">读取 OA 数据</tspan></text>
+    <path d="M 1460 1694 C 1460 1728, 1273 1742, 1273 1770" fill="none" stroke="#F59E0B" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1273 1770 L 1273 1917" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1273 1793 L 1265 1793" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="1770" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="1813" x2="1647" y2="1813" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="1799.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">员工 ID、姓名和部门</tspan></text>
+    <path d="M 1273 1855 L 1265 1855" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="1832" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="1875" x2="1647" y2="1875" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="1861.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">项目、费用科目和报销金额</tspan></text>
+    <path d="M 1273 1917 L 1265 1917" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="1894" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="1937" x2="1647" y2="1937" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="1923.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">附件、审批状态和审批详情链接</tspan></text>
+    <path d="M 1960 1575 L 1960 1639" fill="none" stroke="#F59E0B" stroke-width="3" opacity="0.75"/>
+    <rect x="1755" y="1639" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#F59E0B" stroke-width="2.4"/>
+    <text x="1960" y="1674.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1960" dy="0">校验必填字段，缺失时登记异常并通知补</tspan><tspan x="1960" dy="29">充</tspan></text>
+    <path d="M 2460 1575 L 2460 1639" fill="none" stroke="#F59E0B" stroke-width="3" opacity="0.75"/>
+    <rect x="2255" y="1639" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#F59E0B" stroke-width="2.4"/>
+    <text x="2460" y="1674.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2460" dy="0">存在发票时执行 OCR</tspan></text>
+    <path d="M 2460 1694 C 2460 1728, 2273 1742, 2273 1770" fill="none" stroke="#F59E0B" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2273 1770 L 2273 1917" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2273 1793 L 2265 1793" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2265" y="1770" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2273" y1="1813" x2="2647" y2="1813" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2460" y="1799.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2460" dy="0">提取发票号码、金额和开票日期</tspan></text>
+    <path d="M 2273 1855 L 2265 1855" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2265" y="1832" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2273" y1="1875" x2="2647" y2="1875" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2460" y="1861.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2460" dy="0">提取购买方抬头、税号和销售方</tspan></text>
+    <path d="M 2273 1917 L 2265 1917" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2265" y="1894" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2273" y1="1937" x2="2647" y2="1937" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2460" y="1923.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2460" dy="0">识别发票类型和原始附件</tspan></text>
+    <path d="M 2960 1575 L 2960 1639" fill="none" stroke="#F59E0B" stroke-width="3" opacity="0.75"/>
+    <rect x="2755" y="1639" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#F59E0B" stroke-width="2.4"/>
+    <text x="2960" y="1674.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2960" dy="0">执行发票审核</tspan></text>
+    <path d="M 2960 1694 C 2960 1728, 2773 1742, 2773 1770" fill="none" stroke="#F59E0B" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2773 1770 L 2773 2041" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2773 1793 L 2765 1793" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="1770" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="1813" x2="3147" y2="1813" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="1799.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">发票验真</tspan></text>
+    <path d="M 2773 1855 L 2765 1855" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="1832" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="1875" x2="3147" y2="1875" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="1861.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">历史发票查重</tspan></text>
+    <path d="M 2773 1917 L 2765 1917" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="1894" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="1937" x2="3147" y2="1937" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="1923.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">红冲和作废状态检查</tspan></text>
+    <path d="M 2773 1979 L 2765 1979" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="1956" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="1999" x2="3147" y2="1999" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="1985.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">购买方抬头和税号检查</tspan></text>
+    <path d="M 2773 2041 L 2765 2041" fill="none" stroke="#F59E0B" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="2018" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="2061" x2="3147" y2="2061" stroke="#F59E0B" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="2047.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">员工归属和费用科目检查</tspan></text>
+    <path d="M 3460 1575 L 3460 1639" fill="none" stroke="#F59E0B" stroke-width="3" opacity="0.75"/>
+    <rect x="3255" y="1639" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#F59E0B" stroke-width="2.4"/>
+    <text x="3460" y="1674.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3460" dy="0">无法确认的发票转财务人工复核</tspan></text>
+    <path d="M 2210 2204 L 2210 2244" fill="none" stroke="#8B5CF6" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="2244" width="460" height="70" rx="22" fill="rgb(239,232,254)" stroke="#8B5CF6" stroke-width="3"/>
+    <text x="2210" y="2288.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">四、金额判定规则</tspan></text>
+    <path d="M 2210 2314 L 2210 2380" fill="none" stroke="#8B5CF6" stroke-width="3.4"/>
+    <path d="M 1460 2380 L 2960 2380" fill="none" stroke="#8B5CF6" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 1460 2380 L 1460 2444" fill="none" stroke="#8B5CF6" stroke-width="3" opacity="0.75"/>
+    <rect x="1255" y="2444" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="2.4"/>
+    <text x="1460" y="2479.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1460" dy="0">场景 A：没有发票</tspan></text>
+    <path d="M 1460 2499 C 1460 2533, 1273 2547, 1273 2575" fill="none" stroke="#8B5CF6" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1273 2575 L 1273 2722" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1273 2598 L 1265 2598" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="2575" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="2618" x2="1647" y2="2618" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="2604.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">有效发票金额 = 0</tspan></text>
+    <path d="M 1273 2660 L 1265 2660" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="2637" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="2680" x2="1647" y2="2680" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="2666.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">额度缺口 = 全部报销金额</tspan></text>
+    <path d="M 1273 2722 L 1265 2722" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="2699" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="2742" x2="1647" y2="2742" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="2728.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">进入员工额度冻结流程</tspan></text>
+    <path d="M 1960 2380 L 1960 2444" fill="none" stroke="#8B5CF6" stroke-width="3" opacity="0.75"/>
+    <rect x="1755" y="2444" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="2.4"/>
+    <text x="1960" y="2479.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1960" dy="0">场景 B：发票金额小于报销金额</tspan></text>
+    <path d="M 1960 2499 C 1960 2533, 1773 2547, 1773 2575" fill="none" stroke="#8B5CF6" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1773 2575 L 1773 2722" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1773 2598 L 1765 2598" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="2575" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="2618" x2="2147" y2="2618" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="2604.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">发票覆盖部分正常登记</tspan></text>
+    <path d="M 1773 2660 L 1765 2660" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="2637" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="2680" x2="2147" y2="2680" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="2666.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">差额作为额度缺口</tspan></text>
+    <path d="M 1773 2722 L 1765 2722" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="2699" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="2742" x2="2147" y2="2742" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="2728.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">进入员工额度冻结流程</tspan></text>
+    <path d="M 2460 2380 L 2460 2444" fill="none" stroke="#8B5CF6" stroke-width="3" opacity="0.75"/>
+    <rect x="2255" y="2444" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="2.4"/>
+    <text x="2460" y="2479.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2460" dy="0">场景 C：发票金额等于报销金额</tspan></text>
+    <path d="M 2460 2499 C 2460 2533, 2273 2547, 2273 2575" fill="none" stroke="#8B5CF6" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2273 2575 L 2273 2660" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2273 2598 L 2265 2598" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2265" y="2575" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2273" y1="2618" x2="2647" y2="2618" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="2460" y="2604.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2460" dy="0">员工额度不增加也不扣减</tspan></text>
+    <path d="M 2273 2660 L 2265 2660" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2265" y="2637" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2273" y1="2680" x2="2647" y2="2680" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="2460" y="2666.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2460" dy="0">仍生成零变动审计流水</tspan></text>
+    <path d="M 2960 2380 L 2960 2444" fill="none" stroke="#8B5CF6" stroke-width="3" opacity="0.75"/>
+    <rect x="2755" y="2444" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="2.4"/>
+    <text x="2960" y="2479.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2960" dy="0">场景 D：发票金额大于报销金额</tspan></text>
+    <path d="M 2960 2499 C 2960 2533, 2773 2547, 2773 2575" fill="none" stroke="#8B5CF6" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2773 2575 L 2773 2722" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2773 2598 L 2765 2598" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="2575" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="2618" x2="3147" y2="2618" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="2604.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">本次报销占用对应发票金额</tspan></text>
+    <path d="M 2773 2660 L 2765 2660" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="2637" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="2680" x2="3147" y2="2680" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="2666.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">富余金额登记为待入额度</tspan></text>
+    <path d="M 2773 2722 L 2765 2722" fill="none" stroke="#8B5CF6" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2765" y="2699" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2773" y1="2742" x2="3147" y2="2742" stroke="#8B5CF6" stroke-width="2" opacity="0.55"/>
+    <text x="2960" y="2728.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2960" dy="0">审批和付款完成后才转为可用额度</tspan></text>
+    <path d="M 2210 2885 L 2210 2925" fill="none" stroke="#08979C" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="2925" width="460" height="70" rx="22" fill="rgb(220,240,241)" stroke="#08979C" stroke-width="3"/>
+    <text x="2210" y="2969.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">五、额度账户与后台记账</tspan></text>
+    <path d="M 2210 2995 L 2210 3061" fill="none" stroke="#08979C" stroke-width="3.4"/>
+    <path d="M 960 3061 L 3460 3061" fill="none" stroke="#08979C" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 960 3061 L 960 3125" fill="none" stroke="#08979C" stroke-width="3" opacity="0.75"/>
+    <rect x="755" y="3125" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#08979C" stroke-width="2.4"/>
+    <text x="960" y="3160.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="960" dy="0">锁定员工额度账户</tspan></text>
+    <path d="M 960 3180 C 960 3214, 773 3228, 773 3256" fill="none" stroke="#08979C" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 773 3256 L 773 3403" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 773 3279 L 765 3279" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="765" y="3256" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="773" y1="3299" x2="1147" y2="3299" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="960" y="3285.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="960" dy="0">读取可用额度</tspan></text>
+    <path d="M 773 3341 L 765 3341" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="765" y="3318" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="773" y1="3361" x2="1147" y2="3361" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="960" y="3347.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="960" dy="0">读取冻结额度</tspan></text>
+    <path d="M 773 3403 L 765 3403" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="765" y="3380" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="773" y1="3423" x2="1147" y2="3423" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="960" y="3409.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="960" dy="0">读取待入额度和账户版本</tspan></text>
+    <path d="M 1460 3061 L 1460 3125" fill="none" stroke="#08979C" stroke-width="3" opacity="0.75"/>
+    <rect x="1255" y="3125" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#08979C" stroke-width="2.4"/>
+    <text x="1460" y="3160.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1460" dy="0">存在额度缺口</tspan></text>
+    <path d="M 1460 3180 C 1460 3214, 1273 3228, 1273 3256" fill="none" stroke="#08979C" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1273 3256 L 1273 3403" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1273 3279 L 1265 3279" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="3256" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="3299" x2="1647" y2="3299" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="3285.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">可用额度充足：冻结缺口金额</tspan></text>
+    <path d="M 1273 3341 L 1265 3341" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="3318" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="3361" x2="1647" y2="3361" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="3347.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">可用额度不足：不自动扣减，转财务处理</tspan></text>
+    <path d="M 1273 3403 L 1265 3403" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1265" y="3380" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1273" y1="3423" x2="1647" y2="3423" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="1460" y="3409.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1460" dy="0">生成待扣减流水</tspan></text>
+    <path d="M 1960 3061 L 1960 3125" fill="none" stroke="#08979C" stroke-width="3" opacity="0.75"/>
+    <rect x="1755" y="3125" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#08979C" stroke-width="2.4"/>
+    <text x="1960" y="3160.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1960" dy="0">存在富余票额</tspan></text>
+    <path d="M 1960 3180 C 1960 3214, 1773 3228, 1773 3256" fill="none" stroke="#08979C" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1773 3256 L 1773 3341" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1773 3279 L 1765 3279" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="3256" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="3299" x2="2147" y2="3299" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="3285.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">生成待入额流水</tspan></text>
+    <path d="M 1773 3341 L 1765 3341" fill="none" stroke="#08979C" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1765" y="3318" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1773" y1="3361" x2="2147" y2="3361" stroke="#08979C" stroke-width="2" opacity="0.55"/>
+    <text x="1960" y="3347.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1960" dy="0">审批中不增加员工可用额度</tspan></text>
+    <path d="M 2460 3061 L 2460 3125" fill="none" stroke="#08979C" stroke-width="3" opacity="0.75"/>
+    <rect x="2255" y="3125" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#08979C" stroke-width="2.4"/>
+    <text x="2460" y="3160.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2460" dy="0">登记发票与 OA 的分配关系</tspan></text>
+    <path d="M 2960 3061 L 2960 3125" fill="none" stroke="#08979C" stroke-width="3" opacity="0.75"/>
+    <rect x="2755" y="3125" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#08979C" stroke-width="2.4"/>
+    <text x="2960" y="3160.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2960" dy="0">记录变动前余额、预计余额和幂等键</tspan></text>
+    <path d="M 3460 3061 L 3460 3125" fill="none" stroke="#08979C" stroke-width="3" opacity="0.75"/>
+    <rect x="3255" y="3125" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#08979C" stroke-width="2.4"/>
+    <text x="3460" y="3160.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3460" dy="0">数据库事务提交后再同步多维表格</tspan></text>
+    <path d="M 2210 3566 L 2210 3606" fill="none" stroke="#D46B08" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="3606" width="460" height="70" rx="22" fill="rgb(249,234,220)" stroke="#D46B08" stroke-width="3"/>
+    <text x="2210" y="3650.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">六、飞书多维表格联动</tspan></text>
+    <path d="M 2210 3676 L 2210 3742" fill="none" stroke="#D46B08" stroke-width="3.4"/>
+    <path d="M 1210 3742 L 3210 3742" fill="none" stroke="#D46B08" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 1210 3742 L 1210 3806" fill="none" stroke="#D46B08" stroke-width="3" opacity="0.75"/>
+    <rect x="1005" y="3806" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#D46B08" stroke-width="2.4"/>
+    <text x="1210" y="3841.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1210" dy="0">员工额度账户表</tspan></text>
+    <path d="M 1210 3861 C 1210 3895, 1023 3909, 1023 3937" fill="none" stroke="#D46B08" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1023 3937 L 1023 4084" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1023 3960 L 1015 3960" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1015" y="3937" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1023" y1="3980" x2="1397" y2="3980" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1210" y="3966.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1210" dy="0">员工、部门和员工 ID</tspan></text>
+    <path d="M 1023 4022 L 1015 4022" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1015" y="3999" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1023" y1="4042" x2="1397" y2="4042" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1210" y="4028.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1210" dy="0">可用额度、冻结额度和待入额度</tspan></text>
+    <path d="M 1023 4084 L 1015 4084" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1015" y="4061" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1023" y1="4104" x2="1397" y2="4104" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1210" y="4090.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1210" dy="0">累计入额、累计使用和最后更新时间</tspan></text>
+    <path d="M 1710 3742 L 1710 3806" fill="none" stroke="#D46B08" stroke-width="3" opacity="0.75"/>
+    <rect x="1505" y="3806" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#D46B08" stroke-width="2.4"/>
+    <text x="1710" y="3841.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1710" dy="0">额度流水表</tspan></text>
+    <path d="M 1710 3861 C 1710 3895, 1523 3909, 1523 3937" fill="none" stroke="#D46B08" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1523 3937 L 1523 4146" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1523 3960 L 1515 3960" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="3937" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="3980" x2="1897" y2="3980" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="3966.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">OA 流水号和审批链接</tspan></text>
+    <path d="M 1523 4022 L 1515 4022" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="3999" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="4042" x2="1897" y2="4042" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="4028.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">入额、冻结、扣减、释放或冲正类型</tspan></text>
+    <path d="M 1523 4084 L 1515 4084" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="4061" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="4104" x2="1897" y2="4104" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="4090.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">变动金额、变动前后余额和处理状态</tspan></text>
+    <path d="M 1523 4146 L 1515 4146" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="4123" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="4166" x2="1897" y2="4166" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="4152.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">发生时间、处理人和台账记录链接</tspan></text>
+    <path d="M 2210 3742 L 2210 3806" fill="none" stroke="#D46B08" stroke-width="3" opacity="0.75"/>
+    <rect x="2005" y="3806" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#D46B08" stroke-width="2.4"/>
+    <text x="2210" y="3841.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2210" dy="0">发票明细表</tspan></text>
+    <path d="M 2210 3861 C 2210 3895, 2023 3909, 2023 3937" fill="none" stroke="#D46B08" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2023 3937 L 2023 4146" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2023 3960 L 2015 3960" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="3937" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="3980" x2="2397" y2="3980" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="3966.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">发票号码、金额、抬头和销售方</tspan></text>
+    <path d="M 2023 4022 L 2015 4022" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="3999" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="4042" x2="2397" y2="4042" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="4028.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">验真、查重、红冲和作废状态</tspan></text>
+    <path d="M 2023 4084 L 2015 4084" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="4061" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="4104" x2="2397" y2="4104" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="4090.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">归属员工、已占用金额和剩余金额</tspan></text>
+    <path d="M 2023 4146 L 2015 4146" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="4123" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="4166" x2="2397" y2="4166" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="4152.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">原始附件和关联 OA 流水</tspan></text>
+    <path d="M 2710 3742 L 2710 3806" fill="none" stroke="#D46B08" stroke-width="3" opacity="0.75"/>
+    <rect x="2505" y="3806" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#D46B08" stroke-width="2.4"/>
+    <text x="2710" y="3841.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2710" dy="0">异常处理表</tspan></text>
+    <path d="M 2710 3861 C 2710 3895, 2523 3909, 2523 3937" fill="none" stroke="#D46B08" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2523 3937 L 2523 4208" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2523 3960 L 2515 3960" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="3937" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="3980" x2="2897" y2="3980" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="3966.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">资料缺失</tspan></text>
+    <path d="M 2523 4022 L 2515 4022" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="3999" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="4042" x2="2897" y2="4042" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="4028.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">OCR 或验真失败</tspan></text>
+    <path d="M 2523 4084 L 2515 4084" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="4061" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="4104" x2="2897" y2="4104" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="4090.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">发票重复、红冲或抬头异常</tspan></text>
+    <path d="M 2523 4146 L 2515 4146" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="4123" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="4166" x2="2897" y2="4166" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="4152.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">员工额度不足</tspan></text>
+    <path d="M 2523 4208 L 2515 4208" fill="none" stroke="#D46B08" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="4185" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="4228" x2="2897" y2="4228" stroke="#D46B08" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="4214.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">人工结论、处理人和处理时间</tspan></text>
+    <path d="M 3210 3742 L 3210 3806" fill="none" stroke="#D46B08" stroke-width="3" opacity="0.75"/>
+    <rect x="3005" y="3806" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#D46B08" stroke-width="2.4"/>
+    <text x="3210" y="3841.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3210" dy="0">机器人返回本次多维表格记录链接</tspan></text>
+    <path d="M 2210 4371 L 2210 4411" fill="none" stroke="#5B8FF9" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="4411" width="460" height="70" rx="22" fill="rgb(232,239,254)" stroke="#5B8FF9" stroke-width="3"/>
+    <text x="2210" y="4455.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">七、财务与员工通知</tspan></text>
+    <path d="M 2210 4481 L 2210 4547" fill="none" stroke="#5B8FF9" stroke-width="3.4"/>
+    <path d="M 710 4547 L 3710 4547" fill="none" stroke="#5B8FF9" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 710 4547 L 710 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="505" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="710" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="710" dy="0">机器人发送飞书卡片给财务和申请员工</tspan></text>
+    <path d="M 1210 4547 L 1210 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="1005" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="1210" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1210" dy="0">展示员工、部门、项目和费用科目</tspan></text>
+    <path d="M 1710 4547 L 1710 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="1505" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="1710" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1710" dy="0">展示报销金额和有效发票金额</tspan></text>
+    <path d="M 2210 4547 L 2210 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="2005" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="2210" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2210" dy="0">展示本次冻结、待入或零变动金额</tspan></text>
+    <path d="M 2710 4547 L 2710 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="2505" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="2710" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2710" dy="0">展示变动前余额、冻结余额和预计余额</tspan></text>
+    <path d="M 3210 4547 L 3210 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="3005" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="3210" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3210" dy="0">明确展示 OA 流水号和审批链接</tspan></text>
+    <path d="M 3710 4547 L 3710 4611" fill="none" stroke="#5B8FF9" stroke-width="3" opacity="0.75"/>
+    <rect x="3505" y="4611" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#5B8FF9" stroke-width="2.4"/>
+    <text x="3710" y="4646.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3710" dy="0">附多维表格台账记录和异常处理入口</tspan></text>
+    <path d="M 2210 4806 L 2210 4846" fill="none" stroke="#36B37E" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="4846" width="460" height="70" rx="22" fill="rgb(227,244,237)" stroke="#36B37E" stroke-width="3"/>
+    <text x="2210" y="4890.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">八、OA 状态联动与正式结算</tspan></text>
+    <path d="M 2210 4916 L 2210 4982" fill="none" stroke="#36B37E" stroke-width="3.4"/>
+    <path d="M 1210 4982 L 3210 4982" fill="none" stroke="#36B37E" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 1210 4982 L 1210 5046" fill="none" stroke="#36B37E" stroke-width="3" opacity="0.75"/>
+    <rect x="1005" y="5046" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#36B37E" stroke-width="2.4"/>
+    <text x="1210" y="5081.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1210" dy="0">审批中</tspan></text>
+    <path d="M 1210 5101 C 1210 5135, 1023 5149, 1023 5177" fill="none" stroke="#36B37E" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1023 5177 L 1023 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1023 5200 L 1015 5200" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1015" y="5177" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1023" y1="5220" x2="1397" y2="5220" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="1210" y="5206.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1210" dy="0">缺口金额保持冻结</tspan></text>
+    <path d="M 1023 5262 L 1015 5262" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1015" y="5239" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1023" y1="5282" x2="1397" y2="5282" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="1210" y="5268.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1210" dy="0">富余金额保持待入</tspan></text>
+    <path d="M 1023 5324 L 1015 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1015" y="5301" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1023" y1="5344" x2="1397" y2="5344" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="1210" y="5330.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1210" dy="0">流水状态保持待处理</tspan></text>
+    <path d="M 1710 4982 L 1710 5046" fill="none" stroke="#36B37E" stroke-width="3" opacity="0.75"/>
+    <rect x="1505" y="5046" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#36B37E" stroke-width="2.4"/>
+    <text x="1710" y="5081.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1710" dy="0">退回修改</tspan></text>
+    <path d="M 1710 5101 C 1710 5135, 1523 5149, 1523 5177" fill="none" stroke="#36B37E" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 1523 5177 L 1523 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 1523 5200 L 1515 5200" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="5177" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="5220" x2="1897" y2="5220" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="5206.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">释放原冻结额度</tspan></text>
+    <path d="M 1523 5262 L 1515 5262" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="5239" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="5282" x2="1897" y2="5282" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="5268.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">取消原待入额度</tspan></text>
+    <path d="M 1523 5324 L 1515 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="1515" y="5301" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="1523" y1="5344" x2="1897" y2="5344" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="1710" y="5330.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="1710" dy="0">员工修改金额或附件后按新版本重新计算</tspan></text>
+    <path d="M 2210 4982 L 2210 5046" fill="none" stroke="#36B37E" stroke-width="3" opacity="0.75"/>
+    <rect x="2005" y="5046" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#36B37E" stroke-width="2.4"/>
+    <text x="2210" y="5081.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2210" dy="0">驳回或撤回</tspan></text>
+    <path d="M 2210 5101 C 2210 5135, 2023 5149, 2023 5177" fill="none" stroke="#36B37E" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2023 5177 L 2023 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2023 5200 L 2015 5200" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="5177" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="5220" x2="2397" y2="5220" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="5206.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">释放全部冻结额度</tspan></text>
+    <path d="M 2023 5262 L 2015 5262" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="5239" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="5282" x2="2397" y2="5282" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="5268.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">取消全部待入额度</tspan></text>
+    <path d="M 2023 5324 L 2015 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2015" y="5301" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2023" y1="5344" x2="2397" y2="5344" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="2210" y="5330.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2210" dy="0">追加释放流水并关闭流程</tspan></text>
+    <path d="M 2710 4982 L 2710 5046" fill="none" stroke="#36B37E" stroke-width="3" opacity="0.75"/>
+    <rect x="2505" y="5046" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#36B37E" stroke-width="2.4"/>
+    <text x="2710" y="5081.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2710" dy="0">审批通过但未付款</tspan></text>
+    <path d="M 2710 5101 C 2710 5135, 2523 5149, 2523 5177" fill="none" stroke="#36B37E" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 2523 5177 L 2523 5262" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 2523 5200 L 2515 5200" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="5177" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="5220" x2="2897" y2="5220" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="5206.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">保持待结算状态</tspan></text>
+    <path d="M 2523 5262 L 2515 5262" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="2515" y="5239" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="2523" y1="5282" x2="2897" y2="5282" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="2710" y="5268.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="2710" dy="0">等待付款完成或财务确认事件</tspan></text>
+    <path d="M 3210 4982 L 3210 5046" fill="none" stroke="#36B37E" stroke-width="3" opacity="0.75"/>
+    <rect x="3005" y="5046" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#36B37E" stroke-width="2.4"/>
+    <text x="3210" y="5081.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3210" dy="0">审批通过且付款完成</tspan></text>
+    <path d="M 3210 5101 C 3210 5135, 3023 5149, 3023 5177" fill="none" stroke="#36B37E" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 3023 5177 L 3023 5448" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 3023 5200 L 3015 5200" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3015" y="5177" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3023" y1="5220" x2="3397" y2="5220" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="3210" y="5206.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3210" dy="0">待扣减：冻结额度转为正式已使用额度</tspan></text>
+    <path d="M 3023 5262 L 3015 5262" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3015" y="5239" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3023" y1="5282" x2="3397" y2="5282" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="3210" y="5268.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3210" dy="0">待入额：转为员工可用额度</tspan></text>
+    <path d="M 3023 5324 L 3015 5324" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3015" y="5301" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3023" y1="5344" x2="3397" y2="5344" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="3210" y="5330.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3210" dy="0">零变动：关闭审计流水</tspan></text>
+    <path d="M 3023 5386 L 3015 5386" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3015" y="5363" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3023" y1="5406" x2="3397" y2="5406" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="3210" y="5392.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3210" dy="0">同步数据库和四张多维表格</tspan></text>
+    <path d="M 3023 5448 L 3015 5448" fill="none" stroke="#36B37E" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3015" y="5425" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3023" y1="5468" x2="3397" y2="5468" stroke="#36B37E" stroke-width="2" opacity="0.55"/>
+    <text x="3210" y="5454.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3210" dy="0">通知最终余额并完成归档</tspan></text>
+    <path d="M 2210 5611 L 2210 5651" fill="none" stroke="#E8684A" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="5651" width="460" height="70" rx="22" fill="rgb(252,234,230)" stroke="#E8684A" stroke-width="3"/>
+    <text x="2210" y="5695.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">九、异常处理与事后冲正</tspan></text>
+    <path d="M 2210 5721 L 2210 5787" fill="none" stroke="#E8684A" stroke-width="3.4"/>
+    <path d="M 960 5787 L 3460 5787" fill="none" stroke="#E8684A" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 960 5787 L 960 5851" fill="none" stroke="#E8684A" stroke-width="3" opacity="0.75"/>
+    <rect x="755" y="5851" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#E8684A" stroke-width="2.4"/>
+    <text x="960" y="5886.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="960" dy="0">资料缺失：通知员工补充后重新审核</tspan></text>
+    <path d="M 1460 5787 L 1460 5851" fill="none" stroke="#E8684A" stroke-width="3" opacity="0.75"/>
+    <rect x="1255" y="5851" width="410" height="84" rx="16" fill="#FFFFFF" stroke="#E8684A" stroke-width="2.4"/>
+    <text x="1460" y="5886.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1460" dy="0">发票异常：财务确认补票、按无票处理或</tspan><tspan x="1460" dy="29">拒绝</tspan></text>
+    <path d="M 1960 5787 L 1960 5851" fill="none" stroke="#E8684A" stroke-width="3" opacity="0.75"/>
+    <rect x="1755" y="5851" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#E8684A" stroke-width="2.4"/>
+    <text x="1960" y="5886.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1960" dy="0">额度不足：阻断、转人工或记录特批授权</tspan></text>
+    <path d="M 2460 5787 L 2460 5851" fill="none" stroke="#E8684A" stroke-width="3" opacity="0.75"/>
+    <rect x="2255" y="5851" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#E8684A" stroke-width="2.4"/>
+    <text x="2460" y="5886.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2460" dy="0">同时报销：账户加锁并校验账户版本</tspan></text>
+    <path d="M 2960 5787 L 2960 5851" fill="none" stroke="#E8684A" stroke-width="3" opacity="0.75"/>
+    <rect x="2755" y="5851" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#E8684A" stroke-width="2.4"/>
+    <text x="2960" y="5886.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2960" dy="0">重复回调：使用幂等键返回原处理结果</tspan></text>
+    <path d="M 3460 5787 L 3460 5851" fill="none" stroke="#E8684A" stroke-width="3" opacity="0.75"/>
+    <rect x="3255" y="5851" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#E8684A" stroke-width="2.4"/>
+    <text x="3460" y="5886.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3460" dy="0">结算后异常</tspan></text>
+    <path d="M 3460 5906 C 3460 5940, 3273 5954, 3273 5982" fill="none" stroke="#E8684A" stroke-width="2.5" opacity="0.65"/>
+    <path d="M 3273 5982 L 3273 6253" fill="none" stroke="#E8684A" stroke-width="2.2" opacity="0.48"/>
+    <path d="M 3273 6005 L 3265 6005" fill="none" stroke="#E8684A" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3265" y="5982" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3273" y1="6025" x2="3647" y2="6025" stroke="#E8684A" stroke-width="2" opacity="0.55"/>
+    <text x="3460" y="6011.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3460" dy="0">发票红冲或作废</tspan></text>
+    <path d="M 3273 6067 L 3265 6067" fill="none" stroke="#E8684A" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3265" y="6044" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3273" y1="6087" x2="3647" y2="6087" stroke="#E8684A" stroke-width="2" opacity="0.55"/>
+    <text x="3460" y="6073.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3460" dy="0">付款撤销或退款</tspan></text>
+    <path d="M 3273 6129 L 3265 6129" fill="none" stroke="#E8684A" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3265" y="6106" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3273" y1="6149" x2="3647" y2="6149" stroke="#E8684A" stroke-width="2" opacity="0.55"/>
+    <text x="3460" y="6135.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3460" dy="0">金额或归属记账错误</tspan></text>
+    <path d="M 3273 6191 L 3265 6191" fill="none" stroke="#E8684A" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3265" y="6168" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3273" y1="6211" x2="3647" y2="6211" stroke="#E8684A" stroke-width="2" opacity="0.55"/>
+    <text x="3460" y="6197.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3460" dy="0">创建冲正申请并经财务审批</tspan></text>
+    <path d="M 3273 6253 L 3265 6253" fill="none" stroke="#E8684A" stroke-width="2.2" opacity="0.55"/>
+    <rect x="3265" y="6230" width="390" height="46" rx="9" fill="#FFFFFF"/>
+    <line x1="3273" y1="6273" x2="3647" y2="6273" stroke="#E8684A" stroke-width="2" opacity="0.55"/>
+    <text x="3460" y="6259.76" text-anchor="middle" font-size="18" font-weight="420" fill="#37474F"><tspan x="3460" dy="0">追加反向流水，不删除历史记录</tspan></text>
+    <path d="M 2210 6416 L 2210 6456" fill="none" stroke="#6D5BD0" stroke-width="5" stroke-linecap="round" opacity="0.82"/>
+    <rect x="1980" y="6456" width="460" height="70" rx="22" fill="rgb(235,232,248)" stroke="#6D5BD0" stroke-width="3"/>
+    <text x="2210" y="6500.88" text-anchor="middle" font-size="28" font-weight="650" fill="#172B4D"><tspan x="2210" dy="0">十、财务需要确认的规则</tspan></text>
+    <path d="M 2210 6526 L 2210 6592" fill="none" stroke="#6D5BD0" stroke-width="3.4"/>
+    <path d="M 460 6592 L 3960 6592" fill="none" stroke="#6D5BD0" stroke-width="3.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M 460 6592 L 460 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="255" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="460" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="460" dy="0">正式生效节点：审批通过还是付款完成</tspan></text>
+    <path d="M 960 6592 L 960 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="755" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="960" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="960" dy="0">员工额度不足：阻断还是允许特批</tspan></text>
+    <path d="M 1460 6592 L 1460 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="1255" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="1460" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1460" dy="0">富余票额何时可以计入可用额度</tspan></text>
+    <path d="M 1960 6592 L 1960 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="1755" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="1960" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="1960" dy="0">哪些项目和费用科目允许使用内部票额</tspan></text>
+    <path d="M 2460 6592 L 2460 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="2255" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="2460" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2460" dy="0">发票余额是否允许跨项目、跨月份使用</tspan></text>
+    <path d="M 2960 6592 L 2960 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="2755" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="2960" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="2960" dy="0">员工离职、调岗时剩余额度如何处理</tspan></text>
+    <path d="M 3460 6592 L 3460 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="3255" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="3460" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3460" dy="0">财务人工调整需要哪些审批和授权</tspan></text>
+    <path d="M 3960 6592 L 3960 6656" fill="none" stroke="#6D5BD0" stroke-width="3" opacity="0.75"/>
+    <rect x="3755" y="6656" width="410" height="55" rx="16" fill="#FFFFFF" stroke="#6D5BD0" stroke-width="2.4"/>
+    <text x="3960" y="6691.04" text-anchor="middle" font-size="21" font-weight="560" fill="#263238"><tspan x="3960" dy="0">多维表格只读展示还是允许发起调整</tspan></text>
+  </g>
+</svg>

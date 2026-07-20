@@ -51,6 +51,16 @@
       "id": "card-system-010",
       "description": "The shared Feishu card runtime can schedule best-effort message deletion for retractable task cards after successful finalize without deleting final-answer cards by default.",
       "verification": "uv run pytest dc_engines/tests/test_card_dedup_2026_06_11.py::test_streamer_schedule_retract_deletes_message dc_engines/tests/test_card_system_dedup.py::test_runtime_finalize_can_schedule_retractable_task_card -q"
+    },
+    {
+      "id": "card-system-011",
+      "description": "All registered cards are normalized to Card JSON 2.0 at the runtime boundary with one typography scale, semantic header colors, readable spacing, and no unsupported font-family fields.",
+      "verification": "uv run pytest tests/test_feishu_card_style.py -q"
+    },
+    {
+      "id": "card-system-012",
+      "description": "Formal result cards retain a redacted final Card JSON with card and template versions, message and conversation identifiers, source/task provenance, delivery-file links, content-version lineage, retraction state, and minimal user regeneration actions; waiting and progress cards remain runtime-event-only.",
+      "verification": "uv run pytest dc_engines/tests/test_card_result_archive.py -q && scripts-tools/card-system-health.py --strict-gate"
     }
   ],
   "verification": {

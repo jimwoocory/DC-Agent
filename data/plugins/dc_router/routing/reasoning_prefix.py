@@ -13,6 +13,8 @@ from typing import Final
 
 from astrbot.api import logger
 
+CODEX_TOOL_PREFIX: Final[str] = "#codex工具"
+
 # Gemini via AIHubMix
 # 重要语义边界: ``#超深`` / ``#超高`` / ``#xhigh`` / ``#深度`` 一律走 Claude Opus 4-7
 # (员工日常「给我往深了想」的最高档)。**只有显式带 codex 头的** (例如 ``#codex超深``)
@@ -46,6 +48,22 @@ _PREFIX_KEYS_LOWER: Final[tuple[tuple[str, str], ...]] = tuple(
     (prefix.lower(), provider_id)
     for prefix, provider_id in _REASONING_PREFIX_PROVIDERS.items()
 )
+
+
+def extract_codex_tool_request(text: str) -> str | None:
+    """Extract an explicit Codex Advanced Executor request.
+
+    Args:
+        text: User or trusted card text entering the router.
+
+    Returns:
+        The request after ``#codex工具``. Returns an empty string when the
+        marker is present without a request, and ``None`` when it is absent.
+    """
+    stripped = str(text or "").lstrip()
+    if not stripped.lower().startswith(CODEX_TOOL_PREFIX.lower()):
+        return None
+    return stripped[len(CODEX_TOOL_PREFIX) :].strip()
 
 
 def match_reasoning_prefix(text: str) -> str | None:
@@ -150,7 +168,9 @@ REASONING_PREFIX_PROVIDERS = _REASONING_PREFIX_PROVIDERS
 
 
 __all__ = [
+    "CODEX_TOOL_PREFIX",
     "REASONING_PREFIX_PROVIDERS",
+    "extract_codex_tool_request",
     "match_reasoning_prefix",
     "strip_known_prefix",
 ]

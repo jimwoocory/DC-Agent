@@ -14,6 +14,18 @@ from data.plugins.document_intake_plugin.main import (
 )
 
 
+def test_nas_inbox_environment_overrides_desktop_config(monkeypatch, tmp_path):
+    nas_inbox = tmp_path / "nas-inbox"
+    monkeypatch.setenv("DC_NAS_INBOX_DIR", str(nas_inbox))
+
+    plugin = DocumentIntakePlugin(
+        type("Context", (), {})(),
+        {"inbox_dir": "/Users/dianchi/DC-Agent/nas/knowledge/inbox/download"},
+    )
+
+    assert plugin.inbox_dir == nas_inbox
+
+
 @pytest.mark.asyncio
 async def test_copy_component_to_inbox_parses_text_file(tmp_path):
     source = tmp_path / "source.txt"
@@ -98,7 +110,10 @@ def test_document_intake_requires_explicit_knowledge_base_intent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_finalize_document_intake_card_uses_runtime_card(tmp_path):
+async def test_finalize_document_intake_card_uses_runtime_card(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
     class Streamer:
         def __init__(self) -> None:
             self.finalized = []
@@ -108,6 +123,11 @@ async def test_finalize_document_intake_card_uses_runtime_card(tmp_path):
             return True
 
     streamer = Streamer()
+    archived = {}
+    monkeypatch.setattr(
+        "dc_engines.card_runtime.archive_card_result",
+        lambda **kwargs: archived.update(kwargs) or kwargs,
+    )
     handle = DocumentIntakeCardHandle(
         streamer=streamer,
         message_id="om_doc",
@@ -138,3 +158,13 @@ async def test_finalize_document_intake_card_uses_runtime_card(tmp_path):
     assert streamer.finalized[0][0] == "om_doc"
     card = streamer.finalized[0][1]
     assert card["header"]["title"]["content"] == "文档上传 · 已入库"
+    assert archived["source"] == "document_intake_plugin"
+    assert archived["task_id"] == "om_doc"
+    assert archived["delivery_files"] == [
+        {
+            "name": "training.txt",
+            "path": str(tmp_path / "training.txt"),
+            "sha256": "sha",
+            "size": 12,
+        }
+    ]

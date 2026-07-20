@@ -24,6 +24,15 @@ ROUTER_MEMORY_QUERY_REGRESSION = (
     "uv run pytest tests/unit/test_runtime_context_memory_query.py::"
     "test_build_memory_retrieval_query_combines_history_and_short_feedback -q"
 )
+STRUCTURED_EVENT_EXTRA_REGRESSION = (
+    "uv run pytest tests/unit/test_astr_main_agent.py::"
+    "TestBuildMainAgent::"
+    "test_build_main_agent_consumes_structured_memory_event_extra -q"
+)
+ASSEMBLER_ORDERING_REGRESSION = (
+    "uv run pytest tests/unit/test_runtime_context_assembler.py::"
+    "test_assembler_orders_deduplicates_and_bounds_event_sections -q"
+)
 
 
 def _contract() -> dict:
@@ -51,6 +60,8 @@ def test_short_term_context_priority_contract_points_to_required_verifiers() -> 
     assert HARNESS_REGRESSION in commands
     assert LARK_REGRESSION in commands
     assert ROUTER_MEMORY_QUERY_REGRESSION in commands
+    assert STRUCTURED_EVENT_EXTRA_REGRESSION in commands
+    assert ASSEMBLER_ORDERING_REGRESSION in commands
 
 
 def test_contract_records_memory_priority_boundaries() -> None:
@@ -62,7 +73,8 @@ def test_contract_records_memory_priority_boundaries() -> None:
         "current user prompt",
     ]
     assert boundaries["lower_priority_reference"] == [
-        "data/plugins/dc_router/memory_injection.py injected dc_agent_memory_context"
+        "data/plugins/dc_router/memory_injection.py injected dc_agent_memory_context",
+        "runtime_context_sections event extra",
     ]
     assert boundaries["retrieval_query_context"] == [
         "data/plugins/dc_router/dispatch.py recent conversation history",
@@ -99,6 +111,10 @@ def test_contract_requires_runtime_context_pipeline_files() -> None:
         "knowledge_base_reference": "no_save",
         "background_system_context": "no_save",
     }
+    assert pipeline["event_extra_interface"] == "runtime_context_sections"
+    assert pipeline["structured_section_owner"] == (
+        "astrbot.core.runtime_context.assembler.RuntimeContextAssembler"
+    )
 
 
 def test_contract_blocks_platform_only_or_query_only_fixes() -> None:
@@ -157,7 +173,7 @@ def test_runtime_context_pipeline_entry_points_exist() -> None:
 
     assert "class RuntimeContextAssembler" in assembler
     assert "def build_memory_retrieval_query" in memory_query
-    assert "RuntimeContextAssembler().normalize(req)" in main_agent
+    assert "RuntimeContextAssembler().normalize(req, event=event)" in main_agent
     assert "build_memory_retrieval_query(" in router
 
 
@@ -191,4 +207,4 @@ def test_core_implementation_demotes_memory_context() -> None:
     assert "TextPart(" in assembler_source
     assert ".mark_as_temp()" in assembler_source
     assert "DC_MEMORY_CONTEXT_OPEN_MARKER not in req.prompt" in assembler_source
-    assert "RuntimeContextAssembler().normalize(req)" in main_agent_source
+    assert "RuntimeContextAssembler().normalize(req, event=event)" in main_agent_source

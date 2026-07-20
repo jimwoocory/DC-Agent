@@ -171,6 +171,37 @@ async def test_streamer_finalize_first_call_still_returns_true_with_real_stream(
 
 
 @pytest.mark.asyncio
+async def test_streamer_patch_updates_untracked_card_after_restart() -> None:
+    """Navigation patches must not depend on process-local stream state."""
+    streamer_mod = _load_streamer_module()
+    patch_call_count = 0
+
+    class _FakeResponse:
+        def success(self) -> bool:
+            return True
+
+    class _FakeMessageApi:
+        async def apatch(self, req):
+            nonlocal patch_call_count
+            patch_call_count += 1
+            return _FakeResponse()
+
+    class _FakeClient:
+        class _V1:
+            message = _FakeMessageApi()
+
+        im = type("_Im", (), {"v1": _V1()})()
+
+    streamer = streamer_mod.FeishuCardStreamer(_FakeClient())  # type: ignore[arg-type]
+
+    ok = await streamer.patch("om_existing", {"elements": []})
+
+    assert ok is True
+    assert patch_call_count == 1
+    assert streamer.get_stream("om_existing") is None
+
+
+@pytest.mark.asyncio
 async def test_streamer_schedule_retract_deletes_message() -> None:
     """Retractable task cards should be deleted via Feishu message delete."""
     streamer_mod = _load_streamer_module()

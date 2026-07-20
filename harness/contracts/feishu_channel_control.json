@@ -1,6 +1,6 @@
 {
   "feature": "feishu_channel_control",
-  "goal": "Provide OpenClaw-style Feishu/Lark channel governance as a native DC-Agent AstrBot plugin that integrates with dc_hub, feishu_hub users, card callbacks, and downstream router metadata without replacing the Lark adapter.",
+  "goal": "Provide native DC-Agent Feishu/Lark channel governance that integrates with dc_hub, feishu_hub users, card callbacks, and downstream router metadata without replacing the Lark adapter.",
   "runtime_wiring": {
     "plugin_file": "data/plugins/feishu_channel_control/main.py",
     "engine_file": "dc_engines/dc_engines/feishu_channel_control.py",

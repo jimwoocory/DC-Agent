@@ -1,0 +1,26 @@
+{
+  "feature": "media_provider_login_manager",
+  "goal": "Keep Image2 and Dreamina authentication inside the NAS runtime, expose administrator-only device login controls, and make the selected image provider deterministic.",
+  "acceptance_criteria": [
+    {
+      "id": "media-provider-login-001",
+      "description": "The dashboard provider page exposes authenticated status, device login, login polling, connectivity checks, and logout for Codex OAuth (Image2) and Dreamina without returning access or refresh tokens.",
+      "verification": "uv run pytest tests/test_media_provider_login_manager.py -q"
+    },
+    {
+      "id": "media-provider-login-002",
+      "description": "All media login operations require the dashboard provider scope and inherit the NAS HTTP proxy environment.",
+      "verification": "uv run pytest tests/test_media_provider_login_manager.py tests/test_codex_oauth_luna.py -q"
+    },
+    {
+      "id": "media-provider-login-003",
+      "description": "The NAS image workspace exposes Auto, Image2, and Dreamina choices; explicit provider choices do not silently fall back to the other provider.",
+      "verification": "uv run pytest tests/test_assistant_attachment_upload.py tests/dc_router/test_assistant_workbench.py tests/dc_router/test_media_route_policy.py -q"
+    },
+    {
+      "id": "media-provider-login-004",
+      "description": "Codex OAuth, Dreamina CLI state, and the Linux Secret Service keyring are persisted by NAS volumes, while Codex and Dreamina subprocesses run through the AWS tunnel inherited by dc-agent.",
+      "verification": "uv run pytest tests/test_media_provider_login_manager.py tests/test_codex_oauth_luna.py -q"
+    }
+  ]
+}

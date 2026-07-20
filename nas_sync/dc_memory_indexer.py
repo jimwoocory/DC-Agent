@@ -28,8 +28,12 @@ from xml.etree import ElementTree as ET
 
 import yaml
 
-DC_ROOT = Path("/Users/dianchi/DC-Agent")
-CONFIG_PATH = DC_ROOT / "nas_sync" / "config.yaml"
+DC_ROOT = Path(
+    os.environ.get("ASTRBOT_ROOT", Path(__file__).resolve().parents[1]),
+).resolve()
+CONFIG_PATH = Path(
+    os.environ.get("DC_NAS_MEMORY_CONFIG", DC_ROOT / "nas_sync" / "config.yaml"),
+).resolve()
 NAS_MEMORY_DB = DC_ROOT / "data" / "nas_memory.db"
 HARNESS_MEMORY_DB = DC_ROOT / "data" / "harness_memory.db"
 EMPLOYEE_DB = DC_ROOT / "data" / "employees.db"
@@ -136,7 +140,10 @@ def process_lock():
 
 
 def load_config() -> dict:
-    return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    if mount_point := os.environ.get("DC_NAS_MOUNT_POINT"):
+        config.setdefault("nas", {})["mount_point"] = mount_point
+    return config
 
 
 def load_overrides() -> dict:
@@ -1598,6 +1605,14 @@ def query_row_score(row: dict, terms: list[str], original_query: str) -> float:
         if term_lower in searchable["text"]:
             score += 3
 
+    if re.search(r"报价|询价|预算|成本|费用", original_query):
+        if doc_type == "预算报价":
+            score += 24
+        if any(
+            marker in searchable["text"]
+            for marker in ("单价", "报价合计", "元/㎡", "元/份", "不含税总价")
+        ):
+            score += 18
     if doc_type in {"SOP", "执行方案"}:
         score += 10
     if parser in {"docx", "md"}:
@@ -1684,8 +1699,25 @@ def dedupe_query_rows(
         row["score"] = round(query_row_score(row, terms, query), 3)
         if row.get("match_source") == "fts":
             row["score"] += 4
+    quotation_query = bool(re.search(r"报价|询价|预算|成本|费用", query))
     rows.sort(
         key=lambda item: (
+            -int(
+                quotation_query
+                and (
+                    str(item.get("doc_type") or "") == "预算报价"
+                    or any(
+                        marker in str(item.get("text") or "")
+                        for marker in (
+                            "单价",
+                            "报价合计",
+                            "元/㎡",
+                            "元/份",
+                            "不含税总价",
+                        )
+                    )
+                )
+            ),
             -float(item.get("score") or 0),
             str(item.get("title") or ""),
             int(item.get("chunk_index") or 0),

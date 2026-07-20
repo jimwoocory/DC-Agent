@@ -8,7 +8,7 @@ LLM 工具:
   - quality: low (~15s) / medium (~40s · 默认) / high (~2min · 最强)
   - aspect_ratio: landscape / square / portrait
 
-输出: 图片保存到 ~/DC-Agent/hermes-config/cache/images/，AstrBot 发回飞书
+输出: 图片保存到 AstrBot 数据目录的 output/images/，AstrBot 发回飞书
 
 TODO: 5/25 后提取到 dc_engines/image_gen_engine/ 引擎，AstrBot + Hermes 共用
 """
@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,7 @@ import uuid
 from pathlib import Path
 
 from dc_engines.card_runtime import finalize_card_via_runtime
+from dc_engines.codex_capability import authorize_codex
 from dc_engines.dreamina_cli import (
     dreamina_command_not_found_message,
     resolve_dreamina_executable,
@@ -36,6 +38,11 @@ from dc_engines.feishu_card_streamer import (
     build_media_generation_card,
     start_waiting_card_for_event,
 )
+from dc_engines.harness import (
+    HarnessArtifactSpec,
+    HarnessDeliveryReceipt,
+    HarnessTaskCreateRequest,
+)
 from dc_engines.media_sop import (
     build_media_generation_record,
     build_structured_media_prompt,
@@ -44,6 +51,7 @@ from dc_engines.media_sop import (
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 # ─────────────────── 配置 ───────────────────
 
@@ -58,10 +66,15 @@ IMAGE_SIZES = {
     "portrait": "1024x1536",
 }
 
-IMAGE_CACHE_DIR = Path("/Users/dianchi/DC-Agent/hermes-config/cache/images")
+IMAGE_CACHE_DIR = Path(
+    os.environ.get(
+        "DC_IMAGE_CACHE_DIR",
+        Path(get_astrbot_data_path()) / "output" / "images",
+    )
+)
 IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 _HARNESS_TERMINAL_STATUSES = {"completed", "cancelled", "failed"}
-_IMAGE_TASK_DOMAINS = {"department_workflow:brand_publicity"}
+_IMAGE_TASK_DOMAINS = {"department_workflow:brand_publicity", "media"}
 
 INSTRUCTIONS = (
     "You are an assistant that must fulfill image generation requests by "
@@ -132,6 +145,14 @@ def _call_codex_image_gen(
     aspect_ratio: str,
 ) -> tuple[bool, str]:
     """同步调用 Codex Responses API 生图，返 (success, image_path_or_error)."""
+    authorization = authorize_codex(
+        "image_generation",
+        authorized_by="user",
+        owns_schedule=False,
+    )
+    if not authorization.allowed:
+        return False, f"Codex 生图未获授权: {authorization.reason}"
+
     token = _read_codex_access_token()
     if not token:
         return False, "未找到 Codex OAuth token (~/.codex/auth.json)"
@@ -310,15 +331,19 @@ class GPTImagePlugin(Star):
             return []
 
         task_ids: list[str] = []
-        raw_task_id = event.get_extra("department_workflow_task_id")
-        raw_task_ids = (
-            raw_task_id
-            if isinstance(raw_task_id, (list, tuple, set))
-            else [raw_task_id]
-        )
-        for value in raw_task_ids:
-            if isinstance(value, str) and value.strip():
-                task_ids.append(value.strip())
+        for extra_key in (
+            "department_workflow_task_id",
+            "gpt_image_harness_task_id",
+        ):
+            raw_task_id = event.get_extra(extra_key)
+            raw_task_ids = (
+                raw_task_id
+                if isinstance(raw_task_id, (list, tuple, set))
+                else [raw_task_id]
+            )
+            for value in raw_task_ids:
+                if isinstance(value, str) and value.strip():
+                    task_ids.append(value.strip())
 
         if task_ids:
             tasks = []
@@ -351,6 +376,133 @@ class GPTImagePlugin(Star):
             and task.domain in _IMAGE_TASK_DOMAINS
         ]
 
+    async def _begin_image_harness_attempt(
+        self,
+        event: AstrMessageEvent,
+        *,
+        prompt: str,
+        quality: str,
+        aspect_ratio: str,
+    ) -> bool:
+        """Create or resume the durable media execution before provider work.
+
+        Args:
+            event: Current AstrBot message event.
+            prompt: Structured image-generation prompt.
+            quality: Requested GPT Image quality tier.
+            aspect_ratio: Requested output aspect ratio.
+
+        Returns:
+            ``True`` when every selected task has a running media execution.
+        """
+        harness_engine = getattr(self.context, "harness_engine", None)
+        executor_settlement = getattr(self.context, "executor_settlement", None)
+        store = getattr(harness_engine, "store", None)
+        if harness_engine is None or executor_settlement is None or store is None:
+            logger.error("[gpt_image] Executor Settlement runtime unavailable")
+            return False
+
+        tasks = await self._load_image_harness_tasks(event)
+        created_task = None
+        try:
+            if not tasks:
+                session_id = str(getattr(event, "unified_msg_origin", "") or "")
+                platform_id = str(event.get_platform_id() or "")
+                conversation_id = ""
+                try:
+                    conversation_id = str(
+                        await self.context.conversation_manager.get_curr_conversation_id(
+                            session_id
+                        )
+                        or ""
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                conversation_id = conversation_id or session_id
+                subject_ref = str(event.get_sender_id() or "anonymous")
+                work_context = await store.get_or_create_work_context(
+                    scope_key=(f"media:{platform_id}:{conversation_id}:{subject_ref}"),
+                    platform_id=platform_id,
+                    conversation_id=conversation_id,
+                    subject_ref=subject_ref,
+                    session_id=session_id,
+                )
+                created_task = await harness_engine.create_task(
+                    HarnessTaskCreateRequest(
+                        title="GPT Image 图片生成",
+                        conversation_id=conversation_id,
+                        platform_id=platform_id,
+                        session_id=session_id,
+                        domain="media",
+                        payload={
+                            "source": "gpt_image_plugin",
+                            "media_kind": "image",
+                            "prompt_chars": len(prompt),
+                        },
+                    )
+                )
+                raw_message = getattr(
+                    getattr(event, "message_obj", None), "raw_message", None
+                )
+                message_ref = await store.record_message_reference(
+                    context_id=work_context.context_id,
+                    task_id=created_task.task_id,
+                    platform_message_id=str(
+                        getattr(raw_message, "message_id", "") or ""
+                    ),
+                    session_id=session_id,
+                    direction="inbound",
+                    content=str(getattr(event, "message_str", "") or prompt),
+                )
+                await store.link_task_to_context(
+                    task_id=created_task.task_id,
+                    context_id=work_context.context_id,
+                    relation_type="root",
+                    message_ref_id=message_ref.message_ref_id,
+                )
+                event.set_extra("gpt_image_harness_task_id", created_task.task_id)
+                tasks = [created_task]
+
+            for task in tasks:
+                execution = await store.get_latest_execution_for_task(task.task_id)
+                if (
+                    execution is None
+                    or execution.executor_kind != "media"
+                    or execution.status != "running"
+                ):
+                    execution = await executor_settlement.begin(
+                        task_id=task.task_id,
+                        executor_kind="media",
+                        capability="image_generation",
+                        idempotency_key=f"gpt-image:{task.task_id}:attempt:1",
+                        request_digest=hashlib.sha256(prompt.encode()).hexdigest(),
+                        metadata={
+                            "provider": "gpt-image-2",
+                            "quality": quality,
+                            "aspect_ratio": aspect_ratio,
+                        },
+                    )
+                await harness_engine.mark_in_progress(
+                    task.task_id,
+                    note="GPT Image execution started",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[gpt_image] Executor Settlement begin failed: %s",
+                exc,
+                exc_info=True,
+            )
+            if created_task is not None:
+                try:
+                    await harness_engine.fail_task(
+                        created_task.task_id,
+                        reason="GPT Image execution ledger start failed",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            return False
+        return True
+
     async def _settle_image_harness_tasks(
         self,
         event: AstrMessageEvent,
@@ -369,9 +521,10 @@ class GPTImagePlugin(Star):
         harness_engine = getattr(self.context, "harness_engine", None)
         if harness_engine is None:
             return
+        executor_settlement = getattr(self.context, "executor_settlement", None)
 
         result = {
-            "summary": "图片已生成并返回。"
+            "summary": "图片已生成，已交给 AstrBot 运行时返回。"
             if success
             else "图片生成失败，已记录失败原因。",
             "response_preview": detail[:500],
@@ -389,7 +542,72 @@ class GPTImagePlugin(Star):
 
         for task in tasks:
             try:
-                if success:
+                if executor_settlement is not None:
+                    store = harness_engine.store
+                    execution = await store.get_latest_execution_for_task(task.task_id)
+                    context_id = ""
+                    if success:
+                        link = await store.get_task_link(task.task_id)
+                        if link is None:
+                            work_context = await store.get_or_create_work_context(
+                                scope_key=f"media:{task.platform_id}:{task.conversation_id}:{task.task_id}",
+                                platform_id=task.platform_id,
+                                conversation_id=task.conversation_id,
+                                subject_ref=str(
+                                    task.payload.get("requester_subject_id")
+                                    or task.task_id
+                                ),
+                                session_id=task.session_id,
+                            )
+                            await store.link_task_to_context(
+                                task_id=task.task_id,
+                                context_id=work_context.context_id,
+                                relation_type="root",
+                            )
+                            context_id = work_context.context_id
+                        else:
+                            context_id = link.context_id
+                    if (
+                        execution is None
+                        or execution.executor_kind != "media"
+                        or execution.status != "running"
+                    ):
+                        execution = await executor_settlement.begin(
+                            task_id=task.task_id,
+                            executor_kind="media",
+                            capability="image_generation",
+                            idempotency_key=f"gpt-image:{task.task_id}:attempt:1",
+                            request_digest=hashlib.sha256(prompt.encode()).hexdigest(),
+                            metadata={"provider": provider, "quality": quality},
+                        )
+                    await executor_settlement.settle(
+                        execution_id=execution.execution_id,
+                        idempotency_key=f"settle:{execution.execution_id}:{'success' if success else 'failed'}",
+                        outcome="review_required" if success else "failed",
+                        result=result,
+                        delivery=HarnessDeliveryReceipt(
+                            mode="runtime_owned",
+                            reference_digest=hashlib.sha256(
+                                detail.encode("utf-8")
+                            ).hexdigest(),
+                        ),
+                        artifact=(
+                            HarnessArtifactSpec(
+                                context_id=context_id,
+                                artifact_kind="image",
+                                uri=detail,
+                                mime_type="image/png",
+                                metadata={
+                                    "provider": provider,
+                                    "quality": quality,
+                                    "aspect_ratio": aspect_ratio,
+                                },
+                            )
+                            if success
+                            else None
+                        ),
+                    )
+                elif success:
                     await harness_engine.complete_task(task.task_id, result=result)
                 else:
                     await harness_engine.set_status(
@@ -472,7 +690,7 @@ class GPTImagePlugin(Star):
             card=final_card,
             platform_id="",
             detail=f"gpt image generation finalized record={record.record_id}",
-            retract_after_sec=8.0 if success else None,
+            retract_after_sec=None,
         )
 
     @filter.llm_tool(name="generate_image")
@@ -502,6 +720,17 @@ class GPTImagePlugin(Star):
             aspect_ratio=aspect_ratio,
             target_engine="gpt-image-2",
         )
+
+        if not await self._begin_image_harness_attempt(
+            event,
+            prompt=prompt,
+            quality=quality,
+            aspect_ratio=aspect_ratio,
+        ):
+            yield event.plain_result(
+                "图片任务账本初始化失败，本次没有调用生图服务，请稍后重试。"
+            )
+            return
 
         waiting_card = await self._start_image_waiting_card(
             event,

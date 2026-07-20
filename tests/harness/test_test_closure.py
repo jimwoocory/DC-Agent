@@ -25,10 +25,6 @@ def test_dashboard_and_docs_tests_are_covered() -> None:
 
 
 def test_external_and_non_script_candidates_do_not_pass_as_main_closure() -> None:
-    assert (
-        status_for("openclaw-control-center/test/chat-api.test.ts")
-        == "referenced_external"
-    )
     assert status_for("data/skills/stock-analysis/test.py") == "external"
     assert status_for("data/attachments/openapi_test.txt") == "non_script"
 
@@ -38,6 +34,13 @@ def test_nested_virtualenv_tests_are_excluded() -> None:
         classify_path(
             "dc_engines/.venv/lib/python3.12/site-packages/annotated_types/test_cases.py"
         )
+        is None
+    )
+
+
+def test_linked_worktree_tests_are_excluded() -> None:
+    assert (
+        classify_path(".worktrees/feature-branch/tests/test_isolated_feature.py")
         is None
     )
 

@@ -93,7 +93,7 @@ fi
     lsof "$CFG" 2>/dev/null || echo "  (没有进程当前持有 handle，写入者已 close)"
     echo ""
     echo "--- 4. 最近 5 分钟修改的关键文件（可能跟凶手相关）---"
-    find /Users/dianchi/DC-Agent /Users/dianchi/Openclaw -type f -mmin -5 \
+    find /Users/dianchi/DC-Agent -type f -mmin -5 \
         ! -path '*/__pycache__/*' \
         ! -path '*/.venv/*' \
         ! -path '*/node_modules/*' \

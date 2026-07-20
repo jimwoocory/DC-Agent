@@ -40,6 +40,15 @@ Run the full check before PRs or cross-module changes:
 scripts/agent-check.sh --profile full
 ```
 
+For any Feishu H5 change, verify the complete deployed chain together:
+
+- Every published and legacy menu label routes to the intended task type.
+- Every Card JSON 2.0 entry opens the matching H5 route and retains its expired-link recovery callback.
+- Copy, image, video, research, file, quotation, AI-to-CDR, and Codex workspaces all pass their task-aware tests.
+- The NAS container serves the same shared origin used by the Feishu card, and the rebuilt image is checked through the live Feishu sidebar.
+
+Do not release an H5-only change while leaving menu aliases, card builders, callback routing, or the NAS deployment unverified.
+
 ## 5. Review Summary
 
 Final Codex responses must include:

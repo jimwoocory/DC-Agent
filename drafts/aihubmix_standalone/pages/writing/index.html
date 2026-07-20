@@ -1,0 +1,1357 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>文字写作 - 巅池 Agent 工具箱</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f3f1;
+      --panel: #ffffff;
+      --panel-soft: #f8f8f6;
+      --text: #171716;
+      --muted: #8a8a86;
+      --muted-strong: #5f5f5b;
+      --line: #e5e5e1;
+      --line-strong: #d2d2cd;
+      --button: #171716;
+      --button-text: #ffffff;
+      --success: #187552;
+      --paper: #fffefa;
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      --serif: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select,
+    textarea { font: inherit; letter-spacing: 0; }
+
+    button { color: inherit; cursor: pointer; }
+
+    .app-shell {
+      min-width: 1180px;
+      height: 100vh;
+      background: var(--bg);
+    }
+
+    .topbar {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 40;
+      display: grid;
+      grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+      align-items: center;
+      gap: 18px;
+      height: 57px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .84);
+      backdrop-filter: blur(16px);
+    }
+
+    .product-title {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+      justify-self: start;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .mode-nav,
+    .right-tabs,
+    .length-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f4f4f2;
+    }
+
+    .mode-nav {
+      width: 246px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      justify-self: center;
+    }
+
+    .mode-nav a,
+    .mode-nav button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 30px;
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      border-radius: 5px;
+      padding: 0 13px;
+      background: transparent;
+      color: var(--muted-strong);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .mode-nav .active {
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+    }
+
+    .top-actions { display: flex; align-items: center; justify-self: end; gap: 5px; }
+
+    .icon-button,
+    .format-button {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #454542;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon-button:hover,
+    .format-button:hover { background: #eaeae7; }
+    .icon-button svg,
+    .format-button svg { width: 18px; height: 18px; stroke-width: 1.9; }
+
+    .writing-layout {
+      position: fixed;
+      inset: 57px 0 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 210px minmax(600px, 1fr) 380px;
+      overflow: hidden;
+    }
+
+    .outline-panel,
+    .assistant-panel {
+      min-height: 0;
+      background: rgba(255, 255, 255, .72);
+      backdrop-filter: blur(14px);
+    }
+
+    .outline-panel {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      border-right: 1px solid var(--line);
+      padding: 22px 14px 14px;
+    }
+
+    .panel-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 32px;
+      padding: 0 7px;
+    }
+
+    .panel-heading h2,
+    .assistant-header h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .panel-heading span,
+    .assistant-header span { color: var(--muted); font-size: 11px; font-weight: 600; }
+
+    .outline-list {
+      min-height: 0;
+      overflow: auto;
+      margin-top: 14px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .outline-item {
+      position: relative;
+      width: 100%;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      padding: 8px 9px 8px 18px;
+      color: var(--muted-strong);
+      text-align: left;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .outline-item::before {
+      content: "";
+      position: absolute;
+      top: 14px;
+      left: 7px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: #bdbdb8;
+    }
+
+    .outline-item:hover,
+    .outline-item.active { background: #ecece8; color: var(--text); }
+    .outline-item.active::before { background: var(--text); }
+    .outline-item.level-3 { padding-left: 28px; color: var(--muted); }
+    .outline-item.level-3::before { left: 17px; }
+
+    .outline-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--line);
+      padding: 13px 7px 0;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .editor-workbench {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 54px 1fr 34px;
+      background: var(--bg);
+    }
+
+    .editor-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 0;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 247, 245, .88);
+      backdrop-filter: blur(10px);
+    }
+
+    .document-meta { min-width: 0; display: flex; align-items: center; gap: 10px; }
+
+    .document-name {
+      width: min(280px, 26vw);
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+    }
+
+    .save-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .save-state::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .format-tools { display: flex; align-items: center; gap: 2px; }
+    .toolbar-divider { width: 1px; height: 20px; margin: 0 5px; background: var(--line-strong); }
+
+    .format-button.text-icon { font-family: Georgia, serif; font-size: 15px; font-weight: 700; }
+    .format-button em { font-family: Georgia, serif; font-size: 16px; font-weight: 600; }
+    .format-button.heading-icon { width: 38px; font-family: var(--sans); font-size: 11px; font-weight: 800; }
+
+    .editor-stage {
+      min-height: 0;
+      overflow: auto;
+      padding: 34px clamp(24px, 5vw, 76px) 80px;
+      scroll-behavior: smooth;
+    }
+
+    .paper {
+      width: min(720px, 100%);
+      min-height: 900px;
+      margin: 0 auto;
+      border: 1px solid #e1e0da;
+      border-radius: 4px;
+      background: var(--paper);
+      box-shadow: 0 18px 52px rgba(32, 32, 28, .08), 0 2px 5px rgba(32, 32, 28, .04);
+      padding: 72px clamp(54px, 8vw, 90px) 100px;
+    }
+
+    .title-input {
+      width: 100%;
+      min-height: 44px;
+      border: 0;
+      outline: 0;
+      resize: none;
+      overflow: hidden;
+      background: transparent;
+      color: #161614;
+      font-family: var(--serif);
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .title-input::placeholder { color: #c3c1ba; }
+
+    .title-rule {
+      width: 34px;
+      height: 2px;
+      margin: 24px 0 34px;
+      background: #1e1e1b;
+    }
+
+    .document-editor {
+      min-height: 650px;
+      outline: 0;
+      color: #2a2926;
+      font-family: var(--serif);
+      font-size: 17px;
+      line-height: 2;
+      word-break: break-word;
+    }
+
+    .document-editor:empty::before {
+      content: attr(data-placeholder);
+      color: #bdbbb4;
+      pointer-events: none;
+    }
+
+    .document-editor p { margin: 0 0 1.25em; }
+    .document-editor h2 { margin: 2.2em 0 .8em; color: #171715; font-size: 23px; line-height: 1.5; }
+    .document-editor h3 { margin: 1.8em 0 .65em; color: #272622; font-size: 18px; line-height: 1.5; }
+    .document-editor blockquote { margin: 1.8em 0; border-left: 2px solid #252521; padding: 2px 0 2px 18px; color: #66645e; }
+    .document-editor ul,
+    .document-editor ol { padding-left: 1.5em; }
+
+    .editor-statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 18px;
+      border-top: 1px solid var(--line);
+      background: #f7f7f5;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .editor-statusbar strong { color: var(--muted-strong); font-family: var(--mono); font-weight: 600; }
+
+    .assistant-panel {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      border-left: 1px solid var(--line);
+    }
+
+    .assistant-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 21px 22px 14px;
+    }
+
+    .right-tabs { margin: 0 22px; }
+
+    .right-tabs button,
+    .length-switch button {
+      flex: 1;
+      height: 30px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted-strong);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .right-tabs button.active,
+    .length-switch button.active {
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 2px 7px rgba(0, 0, 0, .06);
+    }
+
+    .assistant-scroll { min-height: 0; overflow: auto; padding: 20px 22px 28px; }
+    .assistant-view { display: none; }
+    .assistant-view.active { display: block; animation: panelIn .18s ease-out; }
+
+    @keyframes panelIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .field-group { display: grid; gap: 9px; margin-bottom: 22px; }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #484844;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .field-label span { color: var(--muted); font-size: 10px; font-weight: 500; }
+
+    .brief-input,
+    .rewrite-input {
+      width: 100%;
+      resize: vertical;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      outline: 0;
+      background: rgba(255, 255, 255, .76);
+      color: var(--text);
+      padding: 12px 13px;
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .brief-input { min-height: 118px; }
+    .rewrite-input { min-height: 88px; }
+    .brief-input:focus,
+    .rewrite-input:focus,
+    .select-control:focus { border-color: #888883; box-shadow: 0 0 0 3px rgba(17, 17, 16, .06); }
+
+    .type-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px; }
+
+    .type-option,
+    .rewrite-action {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .72);
+      color: var(--muted-strong);
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 650;
+      text-align: left;
+    }
+
+    .type-option:hover,
+    .type-option.active,
+    .rewrite-action:hover { border-color: #acaca6; background: #ffffff; color: var(--text); }
+    .type-option.active { box-shadow: inset 3px 0 0 #1a1a18; }
+
+    .select-control {
+      width: 100%;
+      height: 40px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      outline: 0;
+      background: rgba(255, 255, 255, .76);
+      color: var(--text);
+      padding: 0 11px;
+      font-size: 12px;
+    }
+
+    .model-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .model-option {
+      min-width: 0;
+      min-height: 42px;
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .66);
+      padding: 7px 9px;
+      cursor: pointer;
+    }
+
+    .model-option:has(input:checked) {
+      border-color: #8f8f89;
+      background: #fff;
+      box-shadow: inset 3px 0 0 #1a1a18;
+    }
+
+    .model-option input {
+      width: 15px;
+      height: 15px;
+      margin: 0;
+      accent-color: #171716;
+    }
+
+    .model-copy {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    .model-copy strong {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-copy small {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .aihubmix-key-field {
+      display: grid;
+      gap: 6px;
+      margin-top: 3px;
+    }
+
+    .aihubmix-key-field label,
+    .aihubmix-key-field span {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .aihubmix-key-field input {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      outline: 0;
+      background: rgba(255, 255, 255, .76);
+      color: var(--text);
+      padding: 0 11px;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .aihubmix-key-field input:focus {
+      border-color: #888883;
+      box-shadow: 0 0 0 3px rgba(17, 17, 16, .06);
+    }
+
+    .length-switch { width: 100%; }
+
+    .generate-button,
+    .secondary-button {
+      width: 100%;
+      min-height: 43px;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .draft-actions {
+      display: grid;
+      grid-template-columns: minmax(104px, .8fr) minmax(0, 1.5fr);
+      gap: 8px;
+    }
+
+    .generate-button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid var(--button);
+      background: var(--button);
+      color: var(--button-text);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, .12);
+    }
+
+    .generate-button:hover { background: #30302d; }
+    .generate-button svg { width: 17px; height: 17px; }
+    .generate-button:disabled { cursor: wait; opacity: .62; }
+
+    .writing-results {
+      display: grid;
+      gap: 9px;
+      margin-top: 14px;
+    }
+
+    .writing-results:empty { display: none; }
+
+    .writing-result {
+      min-width: 0;
+      display: grid;
+      gap: 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .72);
+      padding: 11px;
+    }
+
+    .writing-result.selected {
+      border-color: #75756f;
+      box-shadow: inset 3px 0 0 #171716;
+    }
+
+    .writing-result.error { background: #fff9f7; }
+
+    .result-meta {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .result-meta strong {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 750;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .result-meta span {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 9px;
+    }
+
+    .result-title {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 750;
+      line-height: 1.45;
+    }
+
+    .result-preview,
+    .result-error {
+      margin: 0;
+      overflow: hidden;
+      color: var(--muted-strong);
+      font-size: 11px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    .result-preview {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 5;
+    }
+
+    .result-error { color: var(--danger); }
+
+    .use-result-button {
+      height: 34px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .use-result-button:hover { border-color: #8d8d87; }
+
+    .retry-result-button {
+      height: 34px;
+      border: 1px solid #d9b8ad;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--danger);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .retry-result-button:hover { border-color: #bc8574; }
+
+    .secondary-button {
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, .76);
+      color: var(--text);
+    }
+
+    .secondary-button:hover { background: #fff; border-color: #a9a9a4; }
+
+    .rewrite-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 18px; }
+    .rewrite-action { text-align: center; }
+
+    .check-result {
+      display: grid;
+      place-items: center;
+      min-height: 210px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 7px;
+      color: var(--muted);
+      text-align: center;
+      padding: 30px;
+    }
+
+    .check-result svg { width: 30px; height: 30px; margin-bottom: 10px; color: #aaa9a3; }
+    .check-result strong { display: block; color: var(--muted-strong); font-size: 13px; }
+    .check-result span { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; }
+
+    .assistant-footer {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      padding: 0 22px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .assistant-footer strong { color: var(--muted-strong); font-weight: 650; }
+
+    .toast {
+      position: fixed;
+      z-index: 80;
+      left: 50%;
+      bottom: 26px;
+      transform: translate(-50%, 12px);
+      min-width: 180px;
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 7px;
+      background: rgba(20, 20, 19, .92);
+      color: #fff;
+      padding: 10px 16px;
+      text-align: center;
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+      backdrop-filter: blur(12px);
+    }
+
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 1340px) {
+      .writing-layout { grid-template-columns: 184px minmax(560px, 1fr) 350px; }
+      .paper { padding-left: 58px; padding-right: 58px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="product-title" href="/" title="返回巅池 Agent 工具箱">巅池 Agent 工具箱</a>
+
+      <nav class="mode-nav" aria-label="工具模式">
+        <a href="/" title="打开图片生成工作台">生图</a>
+        <a href="/video/" title="打开视频生成工作台">生视频</a>
+        <button class="active" type="button">写作</button>
+      </nav>
+
+      <div class="top-actions">
+        <button class="icon-button" id="copyDocumentButton" type="button" title="复制全文" aria-label="复制全文">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+        <button class="icon-button" id="exportDocumentButton" type="button" title="导出文稿" aria-label="导出文稿">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
+        <button class="icon-button" type="button" title="设置" aria-label="设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21h-4v-.05A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3v-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06L7.06 4.2l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3h4v.05A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21v4h-.05A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="writing-layout">
+      <aside class="outline-panel" id="outlinePanel" aria-label="文章大纲">
+        <div class="panel-heading"><h2>文章大纲</h2><span id="outlineCount">1 节</span></div>
+        <ol class="outline-list" id="outlineList">
+          <li><button class="outline-item active" type="button" data-target="documentTitle">未命名文章</button></li>
+        </ol>
+        <div class="outline-footer"><span>结构</span><span id="sectionCount">0 个小节</span></div>
+      </aside>
+
+      <section class="editor-workbench" aria-label="文稿编辑器">
+        <div class="editor-toolbar">
+          <div class="document-meta">
+            <input class="document-name" id="documentName" value="未命名文稿" aria-label="文稿名称" />
+            <span class="save-state" id="saveState">当前会话</span>
+          </div>
+          <div class="format-tools" aria-label="文字格式">
+            <button class="format-button" type="button" data-command="undo" title="撤销" aria-label="撤销"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 7-5 5 5 5"/><path d="M4 12h9a7 7 0 0 1 7 7"/></svg></button>
+            <button class="format-button" type="button" data-command="redo" title="重做" aria-label="重做"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m15 7 5 5-5 5"/><path d="M20 12h-9a7 7 0 0 0-7 7"/></svg></button>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <button class="format-button heading-icon" type="button" data-block="h2" title="二级标题">H2</button>
+            <button class="format-button text-icon" type="button" data-command="bold" title="加粗" aria-label="加粗">B</button>
+            <button class="format-button text-icon" type="button" data-command="italic" title="斜体" aria-label="斜体"><em>I</em></button>
+            <button class="format-button" type="button" data-block="blockquote" title="引用" aria-label="引用"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M7 17h4V9H5v5h2v3Z"/><path d="M15 17h4V9h-6v5h2v3Z"/></svg></button>
+            <button class="format-button" type="button" data-command="insertUnorderedList" title="项目列表" aria-label="项目列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".7" fill="currentColor"/><circle cx="4" cy="12" r=".7" fill="currentColor"/><circle cx="4" cy="18" r=".7" fill="currentColor"/></svg></button>
+          </div>
+        </div>
+
+        <div class="editor-stage" id="editorStage">
+          <article class="paper">
+            <textarea class="title-input" id="documentTitle" rows="1" placeholder="输入文章标题" aria-label="文章标题"></textarea>
+            <div class="title-rule" aria-hidden="true"></div>
+            <div class="document-editor" id="documentEditor" contenteditable="true" data-placeholder="从这里开始写作……" spellcheck="true" aria-label="文章正文"></div>
+          </article>
+        </div>
+
+        <footer class="editor-statusbar">
+          <span><strong id="wordCount">0</strong> 字</span>
+          <span id="readingTime">阅读约 0 分钟</span>
+          <span id="documentMode">自由写作 · 专业清晰</span>
+        </footer>
+      </section>
+
+      <aside class="assistant-panel" aria-label="写作助手">
+        <div class="assistant-header"><h2>写作助手</h2><span id="writingProviderStatus">GPT-5.6 Sol</span></div>
+        <div class="right-tabs" role="tablist">
+          <button class="active" type="button" data-assistant-tab="draft">起草</button>
+          <button type="button" data-assistant-tab="rewrite">改写</button>
+          <button type="button" data-assistant-tab="proofread">校对</button>
+        </div>
+
+        <div class="assistant-scroll">
+          <form class="assistant-view active" data-assistant-view="draft" id="writingForm">
+            <div class="field-group">
+              <label class="field-label" for="writingBrief">写作主题 <span id="briefCount">0 / 500</span></label>
+              <textarea class="brief-input" id="writingBrief" maxlength="500" placeholder="例如：写一篇介绍团队新产品的公众号文章，重点突出使用场景和真实价值。"></textarea>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">写作模型 <span id="selectedModelCount">已选 1 个</span></div>
+              <div class="model-grid" id="writingModelGrid">
+                <label class="model-option">
+                  <input type="checkbox" name="writingModel" value="gpt-5.6-sol" data-provider="codex-oauth" checked />
+                  <span class="model-copy"><strong>GPT-5.6 Sol</strong><small>Codex OAuth</small></span>
+                </label>
+                <label class="model-option">
+                  <input type="checkbox" name="writingModel" value="qwen3.7-max" data-provider="aihubmix" />
+                  <span class="model-copy"><strong>Qwen 3.7 Max</strong><small>qwen3.7-max</small></span>
+                </label>
+                <label class="model-option">
+                  <input type="checkbox" name="writingModel" value="doubao-seed-2-1-pro" data-provider="aihubmix" />
+                  <span class="model-copy"><strong>豆包 Seed 2.1 Pro</strong><small>doubao-seed-2-1-pro</small></span>
+                </label>
+                <label class="model-option">
+                  <input type="checkbox" name="writingModel" value="claude-fable-5" data-provider="aihubmix" />
+                  <span class="model-copy"><strong>Claude Fable 5</strong><small>claude-fable-5</small></span>
+                </label>
+                <label class="model-option">
+                  <input type="checkbox" name="writingModel" value="gemini-3.5-flash" data-provider="aihubmix" />
+                  <span class="model-copy"><strong>Gemini 3.5 Flash</strong><small>gemini-3.5-flash</small></span>
+                </label>
+                <label class="model-option">
+                  <input type="checkbox" name="writingModel" value="grok-4.5" data-provider="aihubmix" />
+                  <span class="model-copy"><strong>Grok 4.5</strong><small>grok-4.5</small></span>
+                </label>
+              </div>
+              <div class="aihubmix-key-field" id="aihubmixKeyField">
+                <label for="writingApiKey">临时 AIHUBMIX Key</label>
+                <input id="writingApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅选择 AIHUBMIX 模型时需要" />
+                <span>只随本次请求发送，不保存到浏览器或设置文件。</span>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">文章类型</div>
+              <div class="type-grid" id="typeGrid">
+                <button class="type-option" type="button" data-type="公众号文章">公众号文章</button>
+                <button class="type-option" type="button" data-type="短视频脚本">短视频脚本</button>
+                <button class="type-option" type="button" data-type="工作方案">工作方案</button>
+                <button class="type-option" type="button" data-type="商务邮件">商务邮件</button>
+                <button class="type-option active" type="button" data-type="自由写作">自由写作</button>
+                <button class="type-option" type="button" data-type="产品文案">产品文案</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="toneSelect">表达语气</label>
+              <select class="select-control" id="toneSelect">
+                <option selected>专业清晰</option>
+                <option>自然亲切</option>
+                <option>简洁直接</option>
+                <option>理性克制</option>
+                <option>有感染力</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label">目标篇幅</div>
+              <div class="length-switch" id="lengthSwitch">
+                <button type="button" data-length="800">短篇</button>
+                <button class="active" type="button" data-length="1500">中篇</button>
+                <button type="button" data-length="3000">长篇</button>
+              </div>
+            </div>
+
+            <div class="draft-actions">
+              <button class="secondary-button" id="localTemplateButton" type="button">固定模板</button>
+              <button class="generate-button" id="generateDraftButton" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3Z"/><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z"/></svg>
+                <span id="generateDraftLabel">生成 1 份初稿</span>
+              </button>
+            </div>
+            <div class="writing-results" id="writingResults" aria-live="polite"></div>
+          </form>
+
+          <section class="assistant-view" data-assistant-view="rewrite">
+            <div class="field-group">
+              <div class="field-label">改写方式</div>
+              <div class="rewrite-grid">
+                <button class="rewrite-action" type="button" data-rewrite="更简洁">更简洁</button>
+                <button class="rewrite-action" type="button" data-rewrite="更生动">更生动</button>
+                <button class="rewrite-action" type="button" data-rewrite="更专业">更专业</button>
+                <button class="rewrite-action" type="button" data-rewrite="扩写内容">扩写内容</button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="rewriteInstruction">补充要求</label>
+              <textarea class="rewrite-input" id="rewriteInstruction" placeholder="输入希望保留的重点或调整方向"></textarea>
+            </div>
+            <button class="secondary-button" id="applyRewriteButton" type="button">应用到选中段落</button>
+          </section>
+
+          <section class="assistant-view" data-assistant-view="proofread">
+            <div class="check-result" id="checkResult">
+              <div>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M20 11.2V12a8 8 0 1 1-4.7-7.3"/><path d="m8.5 11.5 2.3 2.3L20 4.6"/></svg>
+                <strong>文稿尚未校对</strong>
+                <span>完成正文后运行一次检查</span>
+              </div>
+            </div>
+            <button class="secondary-button" id="proofreadButton" type="button" style="margin-top:14px">检查文稿</button>
+          </section>
+        </div>
+
+        <footer class="assistant-footer"><span id="assistantStatus">准备就绪</span><strong id="targetLength">目标 1500 字</strong></footer>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const documentTitle = document.getElementById('documentTitle');
+    const documentEditor = document.getElementById('documentEditor');
+    const documentName = document.getElementById('documentName');
+    const writingBrief = document.getElementById('writingBrief');
+    const toneSelect = document.getElementById('toneSelect');
+    const wordCount = document.getElementById('wordCount');
+    const readingTime = document.getElementById('readingTime');
+    const documentMode = document.getElementById('documentMode');
+    const outlineList = document.getElementById('outlineList');
+    const outlineCount = document.getElementById('outlineCount');
+    const sectionCount = document.getElementById('sectionCount');
+    const assistantStatus = document.getElementById('assistantStatus');
+    const targetLength = document.getElementById('targetLength');
+    const writingModelInputs = Array.from(document.querySelectorAll('input[name="writingModel"]'));
+    const writingApiKey = document.getElementById('writingApiKey');
+    const writingResults = document.getElementById('writingResults');
+    const generateDraftButton = document.getElementById('generateDraftButton');
+    const generateDraftLabel = document.getElementById('generateDraftLabel');
+    const localTemplateButton = document.getElementById('localTemplateButton');
+    const toast = document.getElementById('toast');
+    let selectedType = '自由写作';
+    let selectedLength = 1500;
+    let selectedRewrite = '';
+    const writingCandidates = new Map();
+    const writingResultState = new Map();
+    let toastTimer = 0;
+
+    function showToast(message) {
+      window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.add('visible');
+      toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200);
+    }
+
+    function getPlainText() {
+      return documentEditor.innerText.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    function updateDocumentStats() {
+      const text = getPlainText();
+      const count = text.replace(/\s/g, '').length;
+      wordCount.textContent = String(count);
+      readingTime.textContent = `阅读约 ${count ? Math.max(1, Math.ceil(count / 400)) : 0} 分钟`;
+      documentMode.textContent = `${selectedType} · ${toneSelect.value}`;
+      assistantStatus.textContent = count ? '文稿已更新' : '准备就绪';
+    }
+
+    function resizeTitle() {
+      documentTitle.style.height = 'auto';
+      documentTitle.style.height = `${documentTitle.scrollHeight}px`;
+    }
+
+    function updateOutline() {
+      const headings = Array.from(documentEditor.querySelectorAll('h2, h3'));
+      outlineList.innerHTML = '';
+
+      const titleItem = document.createElement('li');
+      const titleButton = document.createElement('button');
+      titleButton.type = 'button';
+      titleButton.className = 'outline-item active';
+      titleButton.textContent = documentTitle.value.trim() || '未命名文章';
+      titleButton.addEventListener('click', () => documentTitle.focus());
+      titleItem.appendChild(titleButton);
+      outlineList.appendChild(titleItem);
+
+      headings.forEach((heading, index) => {
+        if (!heading.id) heading.id = `section-${index + 1}`;
+        const item = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `outline-item level-${heading.tagName === 'H3' ? '3' : '2'}`;
+        button.textContent = heading.textContent.trim() || `小节 ${index + 1}`;
+        button.addEventListener('click', () => heading.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+        item.appendChild(button);
+        outlineList.appendChild(item);
+      });
+
+      outlineCount.textContent = `${headings.length + 1} 节`;
+      sectionCount.textContent = `${headings.length} 个小节`;
+    }
+
+    function setEditorDraft(title, content) {
+      documentTitle.value = title;
+      resizeTitle();
+      documentName.value = title;
+      documentEditor.innerHTML = '';
+      let paragraphLines = [];
+      const flushParagraph = () => {
+        const paragraphText = paragraphLines.join('\n').trim();
+        paragraphLines = [];
+        if (!paragraphText) return;
+        const paragraph = document.createElement('p');
+        paragraph.textContent = paragraphText;
+        documentEditor.appendChild(paragraph);
+      };
+      String(content || '').split(/\r?\n/).forEach((line) => {
+        const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
+        if (headingMatch) {
+          flushParagraph();
+          const heading = document.createElement(headingMatch[1].length >= 3 ? 'h3' : 'h2');
+          heading.textContent = headingMatch[2].trim();
+          if (heading.textContent !== title) documentEditor.appendChild(heading);
+          return;
+        }
+        if (!line.trim()) {
+          flushParagraph();
+          return;
+        }
+        paragraphLines.push(line);
+      });
+      flushParagraph();
+      updateDocumentStats();
+      updateOutline();
+      document.getElementById('editorStage').scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function selectedWritingModels() {
+      return writingModelInputs.filter((input) => input.checked).map((input) => input.value);
+    }
+
+    function updateWritingModelState() {
+      const selectedInputs = writingModelInputs.filter((input) => input.checked);
+      const count = selectedInputs.length;
+      const hasRemote = selectedInputs.some((input) => input.dataset.provider === 'aihubmix');
+      document.getElementById('selectedModelCount').textContent = `已选 ${count} 个`;
+      document.getElementById('writingProviderStatus').textContent = count > 1 ? `${count} 模型对比` : (selectedInputs[0]?.closest('.model-option').querySelector('strong').textContent || '选择模型');
+      document.getElementById('aihubmixKeyField').style.display = hasRemote ? 'grid' : 'none';
+      generateDraftLabel.textContent = count > 1 ? `并行生成 ${count} 份` : '生成 1 份初稿';
+      generateDraftButton.disabled = count === 0;
+    }
+
+    function applyWritingResult(modelId) {
+      const result = writingCandidates.get(modelId);
+      if (!result) return;
+      setEditorDraft(result.title, result.content);
+      document.querySelectorAll('.writing-result').forEach((card) => card.classList.toggle('selected', card.dataset.modelId === modelId));
+      assistantStatus.textContent = `已采用 ${result.label}`;
+      showToast(`已采用 ${result.label} 的初稿`);
+    }
+
+    function renderWritingResults(results, replace = true) {
+      if (replace) writingResultState.clear();
+      results.forEach((result) => writingResultState.set(result.model_id, result));
+      writingCandidates.clear();
+      writingResults.replaceChildren();
+      writingResultState.forEach((result) => {
+        const card = document.createElement('article');
+        card.className = `writing-result ${result.status === 'success' ? '' : 'error'}`.trim();
+        card.dataset.modelId = result.model_id;
+
+        const meta = document.createElement('div');
+        meta.className = 'result-meta';
+        const modelName = document.createElement('strong');
+        modelName.textContent = result.label;
+        const timing = document.createElement('span');
+        timing.textContent = result.status === 'success' ? `${(result.elapsed_ms / 1000).toFixed(1)}s` : '失败';
+        meta.append(modelName, timing);
+        card.appendChild(meta);
+
+        if (result.status === 'success') {
+          writingCandidates.set(result.model_id, result);
+          const title = document.createElement('h3');
+          title.className = 'result-title';
+          title.textContent = result.title;
+          const preview = document.createElement('p');
+          preview.className = 'result-preview';
+          preview.textContent = result.content.replace(/^#{1,3}\s+/gm, '');
+          const useButton = document.createElement('button');
+          useButton.className = 'use-result-button';
+          useButton.type = 'button';
+          useButton.textContent = '采用此稿';
+          useButton.addEventListener('click', () => applyWritingResult(result.model_id));
+          card.append(title, preview, useButton);
+        } else {
+          const error = document.createElement('p');
+          error.className = 'result-error';
+          error.textContent = result.error || '该模型本次生成失败';
+          const retryButton = document.createElement('button');
+          retryButton.className = 'retry-result-button';
+          retryButton.type = 'button';
+          retryButton.textContent = '刷新重试';
+          retryButton.addEventListener('click', () => generateWriting([result.model_id], false));
+          card.append(error, retryButton);
+        }
+        writingResults.appendChild(card);
+      });
+    }
+
+    document.querySelectorAll('[data-assistant-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-assistant-tab]').forEach((node) => node.classList.toggle('active', node === button));
+        document.querySelectorAll('[data-assistant-view]').forEach((view) => view.classList.toggle('active', view.dataset.assistantView === button.dataset.assistantTab));
+      });
+    });
+
+    document.querySelectorAll('[data-type]').forEach((button) => {
+      button.addEventListener('click', () => {
+        selectedType = button.dataset.type || '自由写作';
+        document.querySelectorAll('[data-type]').forEach((node) => node.classList.toggle('active', node === button));
+        updateDocumentStats();
+      });
+    });
+
+    document.querySelectorAll('[data-length]').forEach((button) => {
+      button.addEventListener('click', () => {
+        selectedLength = Number(button.dataset.length || 1500);
+        document.querySelectorAll('[data-length]').forEach((node) => node.classList.toggle('active', node === button));
+        targetLength.textContent = `目标 ${selectedLength} 字`;
+      });
+    });
+
+    document.querySelectorAll('[data-command]').forEach((button) => {
+      button.addEventListener('click', () => {
+        documentEditor.focus();
+        document.execCommand(button.dataset.command, false);
+        updateDocumentStats();
+      });
+    });
+
+    document.querySelectorAll('[data-block]').forEach((button) => {
+      button.addEventListener('click', () => {
+        documentEditor.focus();
+        document.execCommand('formatBlock', false, button.dataset.block);
+        updateDocumentStats();
+        updateOutline();
+      });
+    });
+
+    document.querySelectorAll('[data-rewrite]').forEach((button) => {
+      button.addEventListener('click', () => {
+        selectedRewrite = button.dataset.rewrite || '';
+        document.querySelectorAll('[data-rewrite]').forEach((node) => node.classList.toggle('active', node === button));
+      });
+    });
+
+    async function generateWriting(modelsOverride = null, replaceResults = true) {
+      const brief = writingBrief.value.trim();
+      if (!brief) {
+        writingBrief.focus();
+        showToast('请先输入写作主题');
+        return;
+      }
+      const models = modelsOverride || selectedWritingModels();
+      if (!models.length) {
+        showToast('请至少选择一个写作模型');
+        return;
+      }
+
+      generateDraftButton.disabled = true;
+      generateDraftLabel.textContent = `正在生成 ${models.length} 份`;
+      assistantStatus.textContent = models.length > 1 ? '多模型并行写作中' : '正在生成初稿';
+      if (replaceResults) {
+        writingResultState.clear();
+        writingCandidates.clear();
+        writingResults.replaceChildren();
+      }
+      try {
+        const response = await fetch('/api/writing-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brief,
+            article_type: selectedType,
+            tone: toneSelect.value,
+            target_length: selectedLength,
+            models,
+            api_key: writingApiKey.value.trim()
+          })
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status !== 'ok') throw new Error(payload.message || '写作请求失败');
+        const data = payload.data || {};
+        renderWritingResults(Array.isArray(data.results) ? data.results : [], replaceResults);
+        const currentResults = Array.from(writingResultState.values());
+        const successCount = currentResults.filter((result) => result.status === 'success').length;
+        const failureCount = currentResults.length - successCount;
+        assistantStatus.textContent = `${successCount} 份完成 · ${failureCount} 份失败`;
+        showToast(data.success_count ? '模型写作已完成，请选择采用' : '生成失败，可刷新重试');
+      } catch (error) {
+        assistantStatus.textContent = '写作生成失败';
+        showToast(error.message || '写作生成失败');
+      } finally {
+        updateWritingModelState();
+      }
+    }
+
+    generateDraftButton.addEventListener('click', () => generateWriting());
+
+    localTemplateButton.addEventListener('click', () => {
+      const brief = writingBrief.value.trim();
+      if (!brief) {
+        writingBrief.focus();
+        showToast('请先输入写作主题');
+        return;
+      }
+      const title = brief.replace(/[。！？].*$/s, '').slice(0, 28) || `${selectedType}初稿`;
+      const content = [
+        `## 开篇\n围绕“${brief}”，先从读者最关心的问题切入，用${toneSelect.value}的方式交代背景与写作目的。`,
+        `## 核心内容\n展开最重要的观点与事实，保持信息层级清楚，并结合具体场景说明这件事为什么值得关注。本文按${selectedType}的表达方式组织，目标篇幅约 ${selectedLength} 字。`,
+        '## 结语\n收束全文观点，给出清楚、自然的下一步行动，让文章在信息之外保留一个可记住的落点。'
+      ].join('\n\n');
+      setEditorDraft(title, content);
+      assistantStatus.textContent = '固定模板已生成';
+      showToast('固定模板已放入编辑器');
+    });
+
+    document.getElementById('applyRewriteButton').addEventListener('click', () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !documentEditor.contains(selection.anchorNode)) {
+        showToast('请先在正文中选中一段文字');
+        return;
+      }
+      if (!selectedRewrite && !document.getElementById('rewriteInstruction').value.trim()) {
+        showToast('请选择改写方式或输入要求');
+        return;
+      }
+      assistantStatus.textContent = `${selectedRewrite || '自定义'}改写待接入模型`;
+      showToast('改写参数已准备好');
+    });
+
+    document.getElementById('proofreadButton').addEventListener('click', () => {
+      const text = getPlainText();
+      const result = document.getElementById('checkResult');
+      if (!text) {
+        showToast('正文还是空的');
+        return;
+      }
+      const longSentences = text.split(/[。！？]/).filter((sentence) => sentence.replace(/\s/g, '').length > 70).length;
+      result.innerHTML = '';
+      const wrapper = document.createElement('div');
+      const strong = document.createElement('strong');
+      const detail = document.createElement('span');
+      strong.textContent = longSentences ? `发现 ${longSentences} 处长句` : '未发现明显的长句问题';
+      detail.textContent = longSentences ? '建议拆分句子，让阅读节奏更轻松。' : '当前文稿的基础阅读节奏良好。';
+      wrapper.append(strong, detail);
+      result.appendChild(wrapper);
+      assistantStatus.textContent = '本地基础检查完成';
+    });
+
+    document.getElementById('copyDocumentButton').addEventListener('click', async () => {
+      const fullText = [documentTitle.value.trim(), getPlainText()].filter(Boolean).join('\n\n');
+      if (!fullText) {
+        showToast('还没有可复制的内容');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(fullText);
+        showToast('全文已复制');
+      } catch {
+        showToast('浏览器未允许复制');
+      }
+    });
+
+    document.getElementById('exportDocumentButton').addEventListener('click', () => {
+      const fullText = [documentTitle.value.trim(), getPlainText()].filter(Boolean).join('\n\n');
+      if (!fullText) {
+        showToast('还没有可导出的内容');
+        return;
+      }
+      const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${documentTitle.value.trim() || '未命名文稿'}.txt`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('文稿已导出');
+    });
+
+    writingBrief.addEventListener('input', () => {
+      document.getElementById('briefCount').textContent = `${writingBrief.value.length} / 500`;
+    });
+    writingModelInputs.forEach((input) => input.addEventListener('change', updateWritingModelState));
+    document.getElementById('writingForm').addEventListener('submit', (event) => event.preventDefault());
+    toneSelect.addEventListener('change', updateDocumentStats);
+    documentEditor.addEventListener('input', () => {
+      updateDocumentStats();
+      updateOutline();
+    });
+    documentTitle.addEventListener('input', () => {
+      resizeTitle();
+      documentName.value = documentTitle.value || '未命名文稿';
+      updateOutline();
+    });
+    documentName.addEventListener('input', () => {
+      if (!documentTitle.value.trim()) documentTitle.value = documentName.value;
+      updateOutline();
+    });
+
+    updateDocumentStats();
+    updateOutline();
+    resizeTitle();
+    updateWritingModelState();
+  </script>
+</body>
+</html>

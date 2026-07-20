@@ -17,15 +17,6 @@
       "icon": "💬"
     },
     {
-      "name": "OpenClaw",
-      "url": "http://localhost:4312/",
-      "probe_host": "127.0.0.1",
-      "probe_port": 4312,
-      "hint": "按需启动 / 看门狗 :9120/kick",
-      "icon": "🖥️",
-      "on_demand_kick": "http://localhost:9120/kick"
-    },
-    {
       "name": "Hermes Gateway",
       "url": null,
       "probe_host": "127.0.0.1",

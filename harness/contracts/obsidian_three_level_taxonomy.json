@@ -1,0 +1,42 @@
+{
+  "feature": "obsidian_three_level_taxonomy",
+  "goal": "Generate one auditable three-level business classification path for every Obsidian RawRef while keeping entity, project, person, and department links as secondary dimensions.",
+  "acceptance_criteria": [
+    {
+      "id": "otl-001",
+      "description": "The canonical taxonomy has exactly three levels and covers 产品、项目、客户、合同、交付、售后、财务、行政、人事、技术、市场、待人工确认.",
+      "verification": "uv run pytest tests/test_generate_obsidian_refs.py::test_company_knowledge_taxonomy_is_valid_and_complete -q"
+    },
+    {
+      "id": "otl-002",
+      "description": "Every classified RawRef receives level ids, labels, a stable path, status, confidence, and evidence; unmatched or tied rules go to 待人工确认 instead of being forced into a business category.",
+      "verification": "uv run pytest tests/test_generate_obsidian_refs.py::test_classify_document_returns_auditable_paths_and_safe_fallbacks -q"
+    },
+    {
+      "id": "otl-003",
+      "description": "The generated vault contains a root taxonomy index plus level-1, level-2, and level-3 bridge pages, and leaf pages link to their RawRefs.",
+      "verification": "uv run pytest tests/test_generate_obsidian_refs.py::test_write_three_level_taxonomy_builds_all_levels_and_leaf_links -q"
+    },
+    {
+      "id": "otl-004",
+      "description": "RawRef frontmatter and note links expose the same three-level classification path without modifying NAS source files or data/nas_memory.db.",
+      "verification": "uv run pytest tests/test_generate_obsidian_refs.py::test_render_raw_ref_includes_three_level_taxonomy -q"
+    },
+    {
+      "id": "otl-005",
+      "description": "User-confirmed ownership rules classify 五菱产品族、柳汽产品族、执行部门筹备组（including 礼品与物料）、and AI应用组 server maintenance before falling back to manual review.",
+      "verification": "uv run pytest tests/test_generate_obsidian_refs.py::test_classify_document_applies_user_confirmed_business_ownership_rules -q"
+    }
+  ],
+  "boundaries": {
+    "source_data": "Read data/nas_memory.db and NAS source files without mutation.",
+    "generated_output": "Write only generated Obsidian pages under the configured vault root.",
+    "secondary_dimensions": ["entity", "project", "person", "department", "document_type"],
+    "fallback_policy": "Unmatched and tied classifications must use the 待人工确认 branch with evidence explaining why."
+  },
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_obsidian_three_level_taxonomy_contract.py -q",
+    "generator": "uv run pytest tests/test_generate_obsidian_refs.py -q",
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

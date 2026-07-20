@@ -437,6 +437,22 @@ def test_build_candidate_from_session_uses_friction_points_as_evidence() -> None
     assert candidate.evidence[0]["event_id"] == "evt_001"
 
 
+def test_build_candidate_from_session_has_stable_session_bound_id() -> None:
+    session = EmployeeInsightSession(
+        session_id="sess_stable",
+        employee_id="ou_001",
+        channel="lark_dm",
+        trigger_type="employee_reply",
+        scenario_id="general_need",
+    )
+
+    first = build_candidate_from_session(session, [])
+    second = build_candidate_from_session(session, [])
+
+    assert first.candidate_id == second.candidate_id
+    assert first.candidate_id.startswith("empins_")
+
+
 async def test_store_persists_sessions_events_candidates_and_audit(tmp_path) -> None:
     store = EmployeeInsightStore(tmp_path / "employee_insight.db")
     session = EmployeeInsightSession(

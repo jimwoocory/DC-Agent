@@ -14,6 +14,12 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from dc_engines.codex_capability import (
+    CODEX_DEVELOPMENT_DEFAULT_REASONING,
+    authorize_codex,
+    validate_codex_development_runtime,
+)
+
 try:
     from .paths import data_path
 except ImportError:  # pragma: no cover - direct file-load compatibility
@@ -148,9 +154,62 @@ class CliRunner:
         prompt: str,
         *,
         model: str = "gpt-5.4",
+        reasoning_effort: str | None = None,
+        task_kind: str = "analysis",
+        authorized_by: str = "user",
         timeout: float = 300,
     ) -> CliResult:
-        """Run Codex CLI in read-only one-shot mode and return the final message."""
+        """Run one Codex CLI task under the matching deterministic policy.
+
+        Args:
+            prompt: Complete prompt passed to Codex over standard input.
+            model: Codex model slug requested by the calling Adapter.
+            reasoning_effort: Reasoning level passed through Codex configuration.
+                Development defaults to ``max``; analysis defaults to ``high``.
+            task_kind: Either read-only ``analysis`` or local ``development``.
+            authorized_by: Authority responsible for the invocation.
+            timeout: Maximum subprocess runtime in seconds.
+
+        Returns:
+            The final Codex message or a stable policy/subprocess failure.
+        """
+        normalized_task_kind = str(task_kind or "").strip().lower()
+        effective_reasoning_effort = str(
+            reasoning_effort
+            or (
+                CODEX_DEVELOPMENT_DEFAULT_REASONING
+                if normalized_task_kind == "development"
+                else "high"
+            )
+        ).strip()
+        sandbox = "read-only"
+        if normalized_task_kind == "development":
+            authorization = authorize_codex(
+                "project_engineering",
+                authorized_by=authorized_by,
+                owns_schedule=False,
+            )
+            runtime_policy = validate_codex_development_runtime(
+                model=model,
+                reasoning_effort=effective_reasoning_effort,
+            )
+            if not authorization.allowed:
+                return CliResult(
+                    error_code="development_policy_denied",
+                    error=authorization.reason,
+                )
+            if not runtime_policy.allowed:
+                return CliResult(
+                    error_code="development_policy_denied",
+                    error=runtime_policy.reason,
+                )
+            sandbox = "workspace-write"
+        elif normalized_task_kind != "analysis":
+            return CliResult(
+                error_code="unsupported_codex_task_kind",
+                error="unsupported_codex_task_kind",
+            )
+
         started_at = time.perf_counter()
         with tempfile.NamedTemporaryFile(
             mode="w+",
@@ -165,9 +224,11 @@ class CliRunner:
                 "--color",
                 "never",
                 "--sandbox",
-                "read-only",
+                sandbox,
                 "--model",
                 model,
+                "-c",
+                f'model_reasoning_effort="{effective_reasoning_effort}"',
                 "--output-last-message",
                 out.name,
                 "-",

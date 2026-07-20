@@ -1,0 +1,99 @@
+{
+  "feature": "work_context_ledger",
+  "goal": "Make Harness the durable owner of stable work context, executor attempts, media artifacts, revision lineage, and follow-up recovery without reopening terminal tasks.",
+  "acceptance_criteria": [
+    {
+      "id": "work-context-ledger-001",
+      "description": "A stable work context binds the platform chat and subject across changing unified message origins without storing the full message body.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_work_context_survives_session_origin_changes -q"
+    },
+    {
+      "id": "work-context-ledger-002",
+      "description": "Harness records message references as metadata and a content digest instead of duplicating full conversation history.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_message_reference_keeps_digest_not_message_body -q"
+    },
+    {
+      "id": "work-context-ledger-003",
+      "description": "Every executor attempt has a typed status and an idempotency key, and replaying the same start request returns the existing execution.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_execution_start_is_idempotent -q"
+    },
+    {
+      "id": "work-context-ledger-004",
+      "description": "Successful execution settlement atomically records the artifact and terminal execution state without duplicating artifacts on callback replay.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_artifact_settlement_is_idempotent -q"
+    },
+    {
+      "id": "work-context-ledger-005",
+      "description": "A follow-up revision creates a child Harness task while the completed source task remains terminal and unchanged.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_revision_uses_child_task_and_preserves_terminal_source -q"
+    },
+    {
+      "id": "work-context-ledger-006",
+      "description": "Artifact revisions preserve the original artifact and form a root, parent, and monotonic version chain.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_revision_uses_child_task_and_preserves_terminal_source -q"
+    },
+    {
+      "id": "work-context-ledger-007",
+      "description": "Cancelling an active execution changes only execution and task state and never deletes completed artifacts or lineage.",
+      "verification": "uv run pytest dc_engines/tests/test_work_context_ledger.py::test_cancel_execution_preserves_completed_artifacts -q"
+    },
+    {
+      "id": "work-context-ledger-008",
+      "description": "After in-process image caches are cleared and the unified message origin changes, the Lark follow-up 人物再年轻一点 resolves the prior durable image artifact.",
+      "verification": "uv run pytest tests/dc_router/test_media_work_context_ledger.py::test_media_revision_survives_restart_and_session_origin_change -q"
+    },
+    {
+      "id": "work-context-ledger-009",
+      "description": "The Media adapter settles first generation and revision results through the shared Harness execution and artifact Interface.",
+      "verification": "uv run pytest tests/dc_router/test_media_work_context_ledger.py::test_media_revision_survives_restart_and_session_origin_change -q"
+    },
+    {
+      "id": "work-context-ledger-010",
+      "description": "A short revision-like message without a durable source artifact is not guessed as a media task.",
+      "verification": "uv run pytest tests/dc_router/test_media_work_context_ledger.py::test_revision_like_text_without_artifact_does_not_route -q"
+    }
+  ],
+  "runtime_model": {
+    "owner": "dc_engines.harness.HarnessTaskStore",
+    "entities": [
+      "work_context",
+      "message_reference",
+      "harness_task_link",
+      "execution",
+      "artifact"
+    ],
+    "terminal_task_policy": "create_revision_child_task",
+    "artifact_lineage": [
+      "root_artifact_id",
+      "parent_artifact_id",
+      "version"
+    ],
+    "first_adapter": "data.plugins.dc_router.preprocessing.media_route"
+  },
+  "scope_key_policy": {
+    "inputs": [
+      "platform_id",
+      "stable_chat_id",
+      "subject_ref",
+      "domain"
+    ],
+    "forbidden_as_sole_identity": [
+      "unified_msg_origin",
+      "process_memory_cache"
+    ]
+  },
+  "non_goals": [
+    "Do not make Harness the Router or scheduler.",
+    "Do not reopen terminal Harness tasks for revisions.",
+    "Do not duplicate complete conversation history in the work ledger.",
+    "Do not add employee permission resolution, long-term distillation, Obsidian publication, Codex settlement, or Hermes settlement in phase one.",
+    "Do not require a Dashboard redesign in phase one."
+  ],
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_work_context_ledger_contract.py -q",
+    "store": "uv run pytest dc_engines/tests/test_work_context_ledger.py -q",
+    "media_e2e": "uv run pytest tests/dc_router/test_media_work_context_ledger.py -q",
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

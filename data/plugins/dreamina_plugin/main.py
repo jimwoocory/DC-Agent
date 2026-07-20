@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,11 @@ from dc_engines.feishu_card_streamer import (
     WaitingCardHandle,
     build_media_generation_card,
     start_waiting_card_for_event,
+)
+from dc_engines.harness import (
+    HarnessArtifactSpec,
+    HarnessDeliveryReceipt,
+    HarnessTaskCreateRequest,
 )
 from dc_engines.media_sop import (
     build_media_generation_record,
@@ -44,6 +50,7 @@ class DreaminaPlugin(Star):
         super().__init__(context)
         self.context = context
         self.last_image_path: str | None = None  # 最近生成图片的本地临时文件路径
+        self._executor_attempts: dict[str, list[tuple[str, str, str]]] = {}
 
     async def initialize(self) -> None:
         """插件初始化"""
@@ -77,7 +84,21 @@ class DreaminaPlugin(Star):
         prompt: str,
         stage: str,
     ) -> WaitingCardHandle | None:
-        return await start_waiting_card_for_event(
+        """Start optional card delivery and the mandatory durable execution.
+
+        Args:
+            event: Current AstrBot message event.
+            title: User-facing task title.
+            prompt: Media-generation prompt.
+            stage: Initial progress stage.
+
+        Returns:
+            Waiting-card handle when the channel supports one, otherwise ``None``.
+
+        Raises:
+            RuntimeError: The Executor Settlement runtime or ledger start failed.
+        """
+        card = await start_waiting_card_for_event(
             self.context,
             event,
             title=title,
@@ -86,6 +107,77 @@ class DreaminaPlugin(Star):
             current_stage=stage,
             interval_sec=5.0,
         )
+        executor_settlement = getattr(self.context, "executor_settlement", None)
+        engine = getattr(self.context, "harness_engine", None)
+        if executor_settlement is None or engine is None:
+            raise RuntimeError("Executor Settlement runtime unavailable")
+        try:
+            session_id = str(getattr(event, "unified_msg_origin", "") or "")
+            platform_id = str(event.get_platform_id() or "")
+            subject_ref = str(event.get_sender_id() or "anonymous")
+            conversation_id = session_id
+            store = engine.store
+            work_context = await store.get_or_create_work_context(
+                scope_key=f"media:{platform_id}:{conversation_id}:{subject_ref}",
+                platform_id=platform_id,
+                conversation_id=conversation_id,
+                subject_ref=subject_ref,
+                session_id=session_id,
+            )
+            task = await engine.create_task(
+                HarnessTaskCreateRequest(
+                    title=title,
+                    conversation_id=conversation_id,
+                    platform_id=platform_id,
+                    session_id=session_id,
+                    domain="media",
+                    payload={"source": "dreamina_plugin", "prompt_chars": len(prompt)},
+                )
+            )
+            raw_message = getattr(
+                getattr(event, "message_obj", None), "raw_message", None
+            )
+            message_ref = await store.record_message_reference(
+                context_id=work_context.context_id,
+                task_id=task.task_id,
+                platform_message_id=str(getattr(raw_message, "message_id", "") or ""),
+                session_id=session_id,
+                direction="inbound",
+                content=str(getattr(event, "message_str", "") or prompt),
+            )
+            await store.link_task_to_context(
+                task_id=task.task_id,
+                context_id=work_context.context_id,
+                relation_type="root",
+                message_ref_id=message_ref.message_ref_id,
+            )
+            execution = await executor_settlement.begin(
+                task_id=task.task_id,
+                executor_kind="media",
+                capability="media_generation",
+                idempotency_key=f"dreamina:{task.task_id}:attempt:1",
+                request_digest=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                metadata={"title": title, "stage": stage},
+            )
+            await engine.mark_in_progress(
+                task.task_id, note="Dreamina execution started"
+            )
+            attempt_key = (
+                card.message_id
+                if card is not None
+                else hashlib.sha256(f"{title}\0{prompt}".encode()).hexdigest()
+            )
+            self._executor_attempts.setdefault(attempt_key, []).append(
+                (
+                    task.task_id,
+                    execution.execution_id,
+                    work_context.context_id,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[dreamina] Executor Settlement begin failed: %s", exc)
+            raise RuntimeError("Dreamina execution ledger start failed") from exc
+        return card
 
     async def _finish_waiting_card(
         self,
@@ -95,55 +187,128 @@ class DreaminaPlugin(Star):
         prompt: str,
         success: bool,
         detail: str,
+        output_uri: str = "",
     ) -> bool:
-        if card is None:
-            return False
-        stream = card.streamer.get_stream(card.message_id)
-        elapsed_sec = stream.elapsed_sec if stream else 0
+        """Finalize optional card delivery and settle the durable execution.
+
+        Args:
+            card: Optional waiting-card handle.
+            title: User-facing task title.
+            prompt: Media-generation prompt.
+            success: Whether provider execution succeeded.
+            detail: Result or failure summary.
+            output_uri: Durable output URI when available.
+
+        Returns:
+            Whether a waiting card was finalized successfully.
+        """
         media_kind = (
             "image2video"
             if "图片转视频" in title
             else ("video" if "视频" in title or "配音" in title else "image")
         )
-        record = build_media_generation_record(
-            media_kind=media_kind,
-            prompt=prompt,
-            engine="Dreamina 即梦",
-            status="succeeded" if success else "failed",
-            output_url=detail if success else "",
-            error_hint="" if success else detail,
-        )
-        if success:
-            final_card = build_media_generation_card(
-                task_title=title,
-                media_type=media_kind,
-                status="已完成",
-                prompt=record.to_card_detail(),
+        finalized = False
+        if card is not None:
+            stream = card.streamer.get_stream(card.message_id)
+            elapsed_sec = stream.elapsed_sec if stream else 0
+            record = build_media_generation_record(
+                media_kind=media_kind,
+                prompt=prompt,
                 engine="Dreamina 即梦",
-                task_id=record.record_id,
-                output_url=detail,
-                elapsed_sec=elapsed_sec,
+                status="succeeded" if success else "failed",
+                output_url=output_uri if success else "",
+                error_hint="" if success else detail,
             )
+            if success:
+                final_card = build_media_generation_card(
+                    task_title=title,
+                    media_type=media_kind,
+                    status="已完成",
+                    prompt=record.to_card_detail(),
+                    engine="Dreamina 即梦",
+                    task_id=record.record_id,
+                    output_url=output_uri or detail,
+                    elapsed_sec=elapsed_sec,
+                )
+            else:
+                final_card = build_media_generation_card(
+                    task_title=title,
+                    media_type=media_kind,
+                    status="失败",
+                    prompt=record.to_card_detail(),
+                    engine="Dreamina 即梦",
+                    task_id=record.record_id,
+                    error_hint=detail,
+                    elapsed_sec=elapsed_sec,
+                )
+            finalized = await finalize_card_via_runtime(
+                card.streamer,
+                card_type="media_generation",
+                message_id=card.message_id,
+                card=final_card,
+                platform_id="",
+                detail=f"dreamina media generation finalized record={record.record_id}",
+                retract_after_sec=None,
+            )
+            attempt_key = card.message_id
         else:
-            final_card = build_media_generation_card(
-                task_title=title,
-                media_type=media_kind,
-                status="失败",
-                prompt=record.to_card_detail(),
-                engine="Dreamina 即梦",
-                task_id=record.record_id,
-                error_hint=detail,
-                elapsed_sec=elapsed_sec,
+            attempt_key = hashlib.sha256(f"{title}\0{prompt}".encode()).hexdigest()
+        attempts = self._executor_attempts.get(attempt_key, [])
+        attempt = attempts.pop(0) if attempts else None
+        if not attempts:
+            self._executor_attempts.pop(attempt_key, None)
+        executor_settlement = getattr(self.context, "executor_settlement", None)
+        if attempt is not None and executor_settlement is not None:
+            _task_id, execution_id, context_id = attempt
+            has_artifact = success and bool(output_uri.strip())
+            outcome = (
+                "completed"
+                if has_artifact and finalized
+                else ("review_required" if success else "failed")
             )
-        return await finalize_card_via_runtime(
-            card.streamer,
-            card_type="media_generation",
-            message_id=card.message_id,
-            card=final_card,
-            platform_id="",
-            detail=f"dreamina media generation finalized record={record.record_id}",
-            retract_after_sec=8.0 if success else None,
-        )
+            try:
+                await executor_settlement.settle(
+                    execution_id=execution_id,
+                    idempotency_key=f"settle:{execution_id}:{outcome}",
+                    outcome=outcome,
+                    result={
+                        "summary": detail[:500],
+                        "output_sha256": hashlib.sha256(
+                            output_uri.encode("utf-8")
+                        ).hexdigest()
+                        if output_uri
+                        else "",
+                    },
+                    delivery=HarnessDeliveryReceipt(
+                        mode="confirmed" if finalized else "runtime_owned",
+                        reference_digest=hashlib.sha256(
+                            f"{attempt_key}:{detail}".encode()
+                        ).hexdigest(),
+                    ),
+                    artifact=(
+                        HarnessArtifactSpec(
+                            context_id=context_id,
+                            artifact_kind=media_kind,
+                            uri=output_uri,
+                            mime_type=(
+                                "image/png"
+                                if media_kind == "image"
+                                else "audio/mpeg"
+                                if "配音" in title
+                                else "video/mp4"
+                            ),
+                            metadata={
+                                "engine": "Dreamina",
+                                "prompt_chars": len(prompt),
+                            },
+                        )
+                        if has_artifact
+                        else None
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[dreamina] Executor Settlement failed: %s", exc)
+        return finalized
 
     async def _execute_dreamina(
         self, command: list, timeout: int = 300, _retry: int = 3
@@ -195,13 +360,19 @@ class DreaminaPlugin(Star):
                     output = f"命令执行成功但无输出 (返回码：{result.returncode})"
 
                 # 检测并发限制错误，等待后重试
-                if "ExceedConcurrencyLimit" in output and attempt < _retry:
-                    wait = 10 * attempt
-                    logger.warning(
-                        f"触发并发限制，{wait} 秒后重试（{attempt}/{_retry}）"
+                if "ExceedConcurrencyLimit" in output:
+                    if attempt < _retry:
+                        wait = 10 * attempt
+                        logger.warning(
+                            f"触发并发限制，{wait} 秒后重试（{attempt}/{_retry}）"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    return (
+                        False,
+                        "当前视频生成服务并发已满，本次未生成视频。"
+                        "请等待已有任务结束后再重试。",
                     )
-                    await asyncio.sleep(wait)
-                    continue
 
                 return result.returncode == 0, output
 
@@ -281,10 +452,13 @@ class DreaminaPlugin(Star):
         return True, payload
 
     def _check_gen_status(self, output: str) -> tuple[bool, str]:
-        """检查生成任务的实际状态（CLI 返回码可能为 0 但任务本身失败）
+        """检查生成任务的实际状态并生成可直接展示的失败原因。
+
+        Args:
+            output: Dreamina CLI 的标准输出与错误输出。
 
         Returns:
-            (is_success, fail_reason_or_empty)
+            是否可继续解析结果，以及面向用户的失败原因。
         """
         try:
             json_match = re.search(r'\{.*"gen_status".*\}', output, re.DOTALL)
@@ -292,8 +466,29 @@ class DreaminaPlugin(Star):
                 data = json.loads(json_match.group())
                 gen_status = data.get("gen_status", "")
                 if gen_status == "fail":
-                    fail_reason = data.get("fail_reason", "未知原因")
-                    return False, fail_reason
+                    raw_reason = str(data.get("fail_reason") or "").strip()
+                    if "ExceedConcurrencyLimit" in f"{raw_reason}\n{output}":
+                        return (
+                            False,
+                            "当前视频生成服务并发已满，本次未生成视频。"
+                            "请等待已有任务结束后再重试。",
+                        )
+                    code_match = re.search(r"ret=(\d+)", raw_reason)
+                    message_match = re.search(
+                        r"message=([^,\n}]+)", raw_reason, re.IGNORECASE
+                    )
+                    if code_match or message_match:
+                        code = f"（错误码 {code_match.group(1)}）" if code_match else ""
+                        message = (
+                            message_match.group(1).strip()
+                            if message_match
+                            else "服务返回失败"
+                        )
+                        return False, f"视频生成失败{code}：{message}"
+                    reason = re.sub(
+                        r",?\s*logid=[A-Za-z0-9_-]+", "", raw_reason
+                    ).strip()
+                    return False, reason[:240] or "视频生成失败，请稍后重试。"
         except Exception:
             pass
         return True, ""
@@ -341,6 +536,8 @@ class DreaminaPlugin(Star):
     @filter.command("生成图片")
     async def text2image(self, event: AstrMessageEvent, prompt: str = ""):
         """文生图功能"""
+        if not prompt and str(event.message_str or "").strip() == "生成图片":
+            return
         if not prompt:
             yield event.plain_result("请提供图片描述，例如：/生成图片 一只可爱的橘猫")
             return
@@ -399,28 +596,31 @@ class DreaminaPlugin(Star):
                     )
                     self.last_image_path = tmp.name
                     logger.info(f"图片已下载到：{tmp.name}")
+                    yield event.image_result(image_url)
                     await self._finish_waiting_card(
                         waiting_card,
                         title="Dreamina 生图",
                         prompt=prompt,
                         success=True,
                         detail="图片已生成，会在下一条消息里发送。",
+                        output_uri=image_url,
                     )
-                    yield event.image_result(image_url)
                     yield event.plain_result(
                         "图片已保存，可用 /图片转视频 <描述> 生成动画"
                     )
                 except Exception as e:
                     logger.warning(f"图片下载失败：{e}")
+                    yield event.image_result(image_url)
                     await self._finish_waiting_card(
                         waiting_card,
                         title="Dreamina 生图",
                         prompt=prompt,
                         success=True,
                         detail="图片已生成，但本地下载失败，已发送远程图片。",
+                        output_uri=image_url,
                     )
-                    yield event.image_result(image_url)
             else:
+                yield event.plain_result(f"生成成功！\n{output[:500]}")
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 生图",
@@ -428,7 +628,6 @@ class DreaminaPlugin(Star):
                     success=True,
                     detail="生成成功，但未解析到图片 URL，已回传 CLI 输出。",
                 )
-                yield event.plain_result(f"生成成功！\n{output[:500]}")
         else:
             await self._finish_waiting_card(
                 waiting_card,
@@ -442,6 +641,8 @@ class DreaminaPlugin(Star):
     @filter.command("生成视频")
     async def text2video(self, event: AstrMessageEvent, prompt: str = ""):
         """文生视频功能"""
+        if not prompt and str(event.message_str or "").strip() == "生成视频":
+            return
         if not prompt:
             yield event.plain_result(
                 "请提供视频描述，例如：/生成视频 海浪拍打礁石，慢动作"
@@ -489,23 +690,31 @@ class DreaminaPlugin(Star):
                 return
             url_match = re.search(r'https?://[^\s<>"]+\.mp4[^\s<>"]*', output)
             if url_match:
+                video_url = url_match.group()
+                yield event.plain_result(f"视频生成成功：{video_url}")
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 文生视频",
                     prompt=prompt,
                     success=True,
                     detail="视频已生成，链接会在下一条消息里发送。",
+                    output_uri=video_url,
                 )
-                yield event.plain_result(f"视频生成成功：{url_match.group()}")
             else:
+                submit_id = self._parse_submit_id(output)
+                task_note = f"（任务编号：{submit_id}）" if submit_id else ""
+                detail = (
+                    f"视频任务尚未取得可播放结果{task_note}。"
+                    "请稍后重试或使用任务编号查询。"
+                )
+                yield event.plain_result(detail)
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 文生视频",
                     prompt=prompt,
-                    success=True,
-                    detail="生成成功，但未解析到 mp4 链接，已回传 CLI 输出。",
+                    success=False,
+                    detail=detail,
                 )
-                yield event.plain_result(f"生成成功！\n{output[:500]}")
         else:
             await self._finish_waiting_card(
                 waiting_card,
@@ -567,23 +776,31 @@ class DreaminaPlugin(Star):
                 return
             url_match = re.search(r'https?://[^\s<>"]+\.mp4[^\s<>"]*', output)
             if url_match:
+                video_url = url_match.group()
+                yield event.plain_result(f"视频生成成功：{video_url}")
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 图片转视频",
                     prompt=prompt_text,
                     success=True,
                     detail="视频已生成，链接会在下一条消息里发送。",
+                    output_uri=video_url,
                 )
-                yield event.plain_result(f"视频生成成功：{url_match.group()}")
             else:
+                submit_id = self._parse_submit_id(output)
+                task_note = f"（任务编号：{submit_id}）" if submit_id else ""
+                detail = (
+                    f"视频任务尚未取得可播放结果{task_note}。"
+                    "请稍后重试或使用任务编号查询。"
+                )
+                yield event.plain_result(detail)
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 图片转视频",
                     prompt=prompt_text,
-                    success=True,
-                    detail="生成成功，但未解析到 mp4 链接，已回传 CLI 输出。",
+                    success=False,
+                    detail=detail,
                 )
-                yield event.plain_result(f"生成成功！\n{output[:500]}")
         else:
             await self._finish_waiting_card(
                 waiting_card,
@@ -656,18 +873,19 @@ class DreaminaPlugin(Star):
 
         payload = payload_or_error
         audio_path = str((payload.get("savedPaths") or [""])[0])
+        yield event.chain_result(
+            [
+                Record(file=audio_path, url=audio_path, text=prompt),
+                Plain(f"配音已生成（{voice}）：{audio_path}"),
+            ]
+        )
         await self._finish_waiting_card(
             waiting_card,
             title="Dreamina 配音",
             prompt=prompt,
             success=True,
             detail=f"配音已生成：{audio_path}",
-        )
-        yield event.chain_result(
-            [
-                Record(file=audio_path, url=audio_path, text=prompt),
-                Plain(f"配音已生成（{voice}）：{audio_path}"),
-            ]
+            output_uri=audio_path,
         )
 
     @filter.command("即梦任务列表")
@@ -766,28 +984,31 @@ class DreaminaPlugin(Star):
                         urllib.request.urlretrieve, image_url, tmp.name
                     )
                     self.last_image_path = tmp.name
+                    yield event.image_result(image_url)
                     await self._finish_waiting_card(
                         waiting_card,
                         title="Dreamina 生图",
                         prompt=prompt,
                         success=True,
                         detail="图片已生成，会在下一条消息里发送。",
+                        output_uri=image_url,
                     )
-                    yield event.image_result(image_url)
                     yield event.plain_result(
                         "图片已保存，可以直接说「把这张图做成视频」"
                     )
                 except Exception as e:
                     logger.warning(f"图片下载失败：{e}")
+                    yield event.image_result(image_url)
                     await self._finish_waiting_card(
                         waiting_card,
                         title="Dreamina 生图",
                         prompt=prompt,
                         success=True,
                         detail="图片已生成，但本地下载失败，已发送远程图片。",
+                        output_uri=image_url,
                     )
-                    yield event.image_result(image_url)
             else:
+                yield event.plain_result(f"生成成功！\n{output[:500]}")
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 生图",
@@ -795,7 +1016,6 @@ class DreaminaPlugin(Star):
                     success=True,
                     detail="生成成功，但未解析到图片 URL，已回传 CLI 输出。",
                 )
-                yield event.plain_result(f"生成成功！\n{output[:500]}")
         else:
             await self._finish_waiting_card(
                 waiting_card,
@@ -855,23 +1075,31 @@ class DreaminaPlugin(Star):
                 return
             url_match = re.search(r'https?://[^\s<>"]+\.mp4[^\s<>"]*', output)
             if url_match:
+                video_url = url_match.group()
+                yield event.plain_result(f"视频生成成功：{video_url}")
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 图片转视频",
                     prompt=prompt_text,
                     success=True,
                     detail="视频已生成，链接会在下一条消息里发送。",
+                    output_uri=video_url,
                 )
-                yield event.plain_result(f"视频生成成功：{url_match.group()}")
             else:
+                submit_id = self._parse_submit_id(output)
+                task_note = f"（任务编号：{submit_id}）" if submit_id else ""
+                detail = (
+                    f"视频任务尚未取得可播放结果{task_note}。"
+                    "请稍后重试或使用任务编号查询。"
+                )
+                yield event.plain_result(detail)
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 图片转视频",
                     prompt=prompt_text,
-                    success=True,
-                    detail="生成成功，但未解析到 mp4 链接，已回传 CLI 输出。",
+                    success=False,
+                    detail=detail,
                 )
-                yield event.plain_result(f"生成成功！\n{output[:500]}")
         else:
             await self._finish_waiting_card(
                 waiting_card,
@@ -927,23 +1155,31 @@ class DreaminaPlugin(Star):
                 return
             url_match = re.search(r'https?://[^\s<>"]+\.mp4[^\s<>"]*', output)
             if url_match:
+                video_url = url_match.group()
+                yield event.plain_result(f"视频生成成功：{video_url}")
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 文生视频",
                     prompt=prompt,
                     success=True,
                     detail="视频已生成，链接会在下一条消息里发送。",
+                    output_uri=video_url,
                 )
-                yield event.plain_result(f"视频生成成功：{url_match.group()}")
             else:
+                submit_id = self._parse_submit_id(output)
+                task_note = f"（任务编号：{submit_id}）" if submit_id else ""
+                detail = (
+                    f"视频任务尚未取得可播放结果{task_note}。"
+                    "请稍后重试或使用任务编号查询。"
+                )
+                yield event.plain_result(detail)
                 await self._finish_waiting_card(
                     waiting_card,
                     title="Dreamina 文生视频",
                     prompt=prompt,
-                    success=True,
-                    detail="生成成功，但未解析到 mp4 链接，已回传 CLI 输出。",
+                    success=False,
+                    detail=detail,
                 )
-                yield event.plain_result(f"生成成功！\n{output[:500]}")
         else:
             await self._finish_waiting_card(
                 waiting_card,
@@ -1008,16 +1244,17 @@ class DreaminaPlugin(Star):
 
         payload = payload_or_error
         audio_path = str((payload.get("savedPaths") or [""])[0])
+        yield event.chain_result(
+            [
+                Record(file=audio_path, url=audio_path, text=prompt),
+                Plain(f"配音已生成（{voice}）：{audio_path}"),
+            ]
+        )
         await self._finish_waiting_card(
             waiting_card,
             title="Dreamina 配音",
             prompt=prompt,
             success=True,
             detail=f"配音已生成：{audio_path}",
-        )
-        yield event.chain_result(
-            [
-                Record(file=audio_path, url=audio_path, text=prompt),
-                Plain(f"配音已生成（{voice}）：{audio_path}"),
-            ]
+            output_uri=audio_path,
         )

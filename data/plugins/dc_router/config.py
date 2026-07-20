@@ -30,6 +30,10 @@ class DCRouterConfig:
     enabled: bool = False
     dry_run: bool = True
     fallback_on_error: bool = True
+    architecture_mode: str = "legacy_front"
+    """Use ``middle`` for Agent-first routing or ``legacy_front`` for rollback."""
+    main_agent_provider_id: str = "codex/gpt-5.6-luna"
+    """Provider pinned only for the Agent-first business assistant path."""
     arbiter_enabled: bool = False
     """Enable L3 arbitration; false keeps PassThroughArbiter behavior."""
     classifier_enabled: bool = False
@@ -51,6 +55,12 @@ class DCRouterConfig:
     @property
     def is_dry_run(self) -> bool:
         return self.enabled and self.dry_run
+
+    @property
+    def uses_middle_router(self) -> bool:
+        """Return whether natural language should enter the main Agent first."""
+
+        return self.enabled and self.architecture_mode == "middle"
 
     def route_for_feishu_channel(self, agent_id: str) -> dict[str, str] | None:
         raw = self.feishu_channel_routes.get(agent_id)
@@ -125,6 +135,15 @@ def load_config(path: Path | None = None) -> DCRouterConfig:
         enabled=bool(data.get("enabled", False)),
         dry_run=bool(data.get("dry_run", True)),
         fallback_on_error=bool(data.get("fallback_on_error", True)),
+        architecture_mode=(
+            str(data.get("architecture_mode") or "legacy_front").strip().lower()
+            if str(data.get("architecture_mode") or "legacy_front").strip().lower()
+            in {"legacy_front", "middle"}
+            else "legacy_front"
+        ),
+        main_agent_provider_id=str(
+            data.get("main_agent_provider_id") or "codex/gpt-5.6-luna"
+        ).strip(),
         arbiter_enabled=bool(data.get("arbiter_enabled", False)),
         classifier_enabled=bool(data.get("classifier_enabled", False)),
         feishu_channel_routes=feishu_routes,

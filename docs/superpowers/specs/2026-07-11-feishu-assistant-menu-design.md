@@ -21,6 +21,8 @@ The approved menu structure is:
 - `办公`
   - `查资料/分析`
   - `处理文件`
+  - `物料报价`
+  - `AI转CDR`
 - `任务`
   - `继续最近`
   - `进行中`
@@ -135,7 +137,7 @@ The Feishu developer-console menu is updated only after the new card routes pass
 ## Acceptance Criteria
 
 1. The published bottom menu contains `创作 / 办公 / 任务` and no `工作台` entry.
-2. Copy, image, video, research, and file menu items open different dedicated cards.
+2. Copy, image, video, research, file, quotation, and AI-to-CDR menu items open different dedicated cards or NAS-hosted H5 workspaces.
 3. No image or video card displays copywriting examples or copywriting-only field labels.
 4. Image and video remain independent task types through confirmation and execution routing.
 5. Menu browsing, form filling, preview, and task-center views do not call an LLM.

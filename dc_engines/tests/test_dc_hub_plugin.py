@@ -79,7 +79,7 @@ def test_dc_hub_summary_groups_assistant_plugins(tmp_path: Path) -> None:
 
     assert summary["plugin"] == "dc_hub"
     assert summary["version"] == "0.1.0"
-    assert summary["total"] == 33
+    assert summary["total"] == 32
     assistant = next(c for c in summary["categories"] if c["id"] == "assistant_core")
     assistant_ids = {m["plugin_id"] for m in assistant["modules"]}
     assert {

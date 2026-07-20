@@ -145,3 +145,22 @@ async def test_workflow_intent_project_followup_auto_completes_when_allowed() ->
     assert payload["workflow_kind"] == "project_followup"
     assert payload["review_required_by_default"] is False
     assert payload["auto_complete_on_response"] is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_intent_task_contains_runtime_principal() -> None:
+    module = _load_workflow_intent_module()
+    engine = _FakeEngine()
+    plugin = module.WorkflowIntentPlugin(
+        _workflow_context(engine), {"implicit_create_tasks": True}
+    )
+
+    await plugin.on_message(_WorkflowEvent("今天的项目跟进汇报同步一下"))
+
+    payload = engine.requests[0].payload
+    assert payload["requester_open_id"] == "ou_user"
+    assert payload["requester_identity_source"] == "event_sender"
+    assert payload["requester_principal_type"] == "user"
+    assert {item["permission"] for item in payload["requester_dc_permissions"]} == {
+        "employee_self_service"
+    }

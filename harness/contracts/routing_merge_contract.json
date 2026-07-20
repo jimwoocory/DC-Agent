@@ -1,10 +1,11 @@
 {
   "contract_id": "routing_merge_contract",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "status": "active",
   "supersedes": "1.0.0",
+  "partially_superseded_by": "middle_router_architecture@1.0.0 for 巅池-Agent小助手 when architecture_mode=middle",
   "implemented_at": "2026-06-11",
-  "principle": "Single source of truth for intent classification and provider dispatch — dc_router is the sole entry point. llm_router is fully retired; no second classifier, no second prefix map, no second prefix→provider table exists in production.",
+  "principle": "Single source of truth for the legacy classifier/provider path. In middle mode GPT-5.6-Luna owns natural-language understanding and sends a structured capability request to the one deterministic middle Router; llm_router remains retired.",
   "scope": {
     "owner_plugin": "data/plugins/dc_router",
     "core_package": "dc_router_core",
@@ -21,8 +22,8 @@
   "rules": [
     {
       "id": "R1",
-      "title": "dc_router 是唯一意图分类入口",
-      "text": "当 dc_router_config.enabled=true 且 dry_run=false 时，意图分类只能由 dc_router_core.DCRouter.decide() 输出。任何代码路径（包括但不限于旧 llm_router 残留、helper 脚本、临时 patch）都不得再保留 prefix/keyword/classify 独立生效的分类逻辑。",
+      "title": "legacy_front 模式下 dc_router 是唯一意图分类入口",
+      "text": "当 architecture_mode=legacy_front 且 dc_router_config.enabled=true、dry_run=false 时，意图分类只能由 dc_router_core.DCRouter.decide() 输出。当 architecture_mode=middle 时，巅池-Agent小助手必须跳过该分类器并进入 middle_router_architecture 契约。",
       "enforcement": [
         "data/plugins/dc_router/test_routing_path.py::test_no_llm_router_package_anywhere confirms the retired plugin path does not reappear",
         "tests/dc_router/test_dc_router_contract.py locks dc_router_core as the canonical classifier/provider routing implementation",

@@ -1,0 +1,56 @@
+{
+  "feature": "governed_distillation_loop",
+  "goal": "Turn completed Harness task outcomes into durable, deduplicated, human-reviewable governed-memory candidates immediately, while keeping Obsidian as the approval adapter and periodic jobs as reconciliation only.",
+  "acceptance_criteria": [
+    {
+      "id": "gdl-001",
+      "description": "A completed Harness task with a promoted task_outcome memory immediately creates one need_review governed-memory candidate and one Obsidian Inbox note without waiting for cron.",
+      "verification": "uv run pytest tests/harness/test_governed_distillation_runtime.py::test_completed_task_immediately_creates_governed_candidate -q"
+    },
+    {
+      "id": "gdl-002",
+      "description": "Replaying the same task outcome is idempotent: the stable candidate, note, and state-changing audit are not duplicated.",
+      "verification": "uv run pytest dc_engines/tests/test_governed_distillation.py::test_task_outcome_distillation_is_idempotent -q"
+    },
+    {
+      "id": "gdl-003",
+      "description": "A reviewed candidate is never overwritten by event replay or reconciliation, and an unchanged reconciliation writes no audit event.",
+      "verification": "uv run pytest dc_engines/tests/test_governed_distillation.py::test_reviewed_candidate_is_not_overwritten -q"
+    },
+    {
+      "id": "gdl-004",
+      "description": "If immediate distillation fails, the completed task remains completed and records a distillation failure event so periodic reconciliation can repair the missing candidate.",
+      "verification": "uv run pytest tests/harness/test_governed_distillation_runtime.py::test_distillation_failure_does_not_roll_back_completed_task -q"
+    },
+    {
+      "id": "gdl-005",
+      "description": "The periodic task-outcome exporter uses the same candidate adapter and becomes a no-op after event-driven publication.",
+      "verification": "uv run pytest dc_engines/tests/test_governed_distillation.py::test_periodic_export_is_reconciliation_only -q"
+    },
+    {
+      "id": "gdl-006",
+      "description": "Only the bounded task summary and provenance are distilled; complete prompts, complete executor answers, and raw chat archives are not persisted into the candidate audit payload.",
+      "verification": "uv run pytest tests/harness/test_governed_distillation_contract.py -q"
+    }
+  ],
+  "runtime_model": {
+    "event_source": "dc_engines.harness.HarnessEngine",
+    "module": "dc_engines.memory_governance.TaskOutcomeGovernedDistiller",
+    "candidate_store": "data/governed_memory.db",
+    "approval_adapter": "ObsidianVault/40_MemoryGovernance/Inbox",
+    "reconciliation": "scripts-watchdog/knowledge_cycle.py obsidian_governance_export_tasks"
+  },
+  "non_goals": [
+    "Do not auto-approve task outcome candidates.",
+    "Do not make Obsidian the runtime fact database.",
+    "Do not persist complete prompts, complete task results, or full chat archives into governed memory.",
+    "Do not let distillation failure roll back completed business work."
+  ],
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_governed_distillation_contract.py -q",
+    "module": "uv run pytest dc_engines/tests/test_governed_distillation.py -q",
+    "runtime": "uv run pytest tests/harness/test_governed_distillation_runtime.py -q",
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

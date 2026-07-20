@@ -1,5 +1,8 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from dc_engines.card_system import (
     CARD_REGISTRY,
@@ -14,6 +17,7 @@ from dc_engines.card_system import (
     run_card_system_engineering_gate,
 )
 from dc_engines.feishu_card_streamer import (
+    FeishuCardStreamer,
     WaitingCardHandle,
     build_case_overview_card,
     build_casual_response_card,
@@ -186,7 +190,7 @@ def test_card_asset_matrix_is_complete_and_readable():
     manifest = build_card_asset_manifest()
     matrix = format_card_asset_matrix(manifest)
 
-    assert "Card Asset Matrix: 44 cards" in matrix
+    assert f"Card Asset Matrix: {len(CARD_REGISTRY)} cards" in matrix
     assert (
         "card_type | owner | builder | triggers | runtime_status | gateway_sites/runtime_refs | grey_push"
         in matrix
@@ -226,6 +230,31 @@ def test_daily_response_card_uses_explicit_markdown_text_sizes():
         "heading_3",
         "normal",
     ]
+
+
+def test_daily_response_card_can_append_material_completion_entry():
+    web_url = (
+        "http://192.168.1.35:6185/api/v1/assistant-attachments/copy-token?mode=revise"
+    )
+    app_link = (
+        "https://applink.feishu.cn/client/web_app/open?appId=cli_test"
+        f"&lk_target_url={quote(web_url, safe='')}"
+    )
+    card = build_daily_response_card(
+        content_md="文案已经生成。",
+        material_completion_url=app_link,
+    )
+
+    body = _body_elements(card)
+    buttons = _button_elements(card)
+    assert body[-1] == buttons[0]
+    assert buttons[0]["text"]["content"] == "补齐资料"
+    behavior = buttons[0]["behaviors"][0]
+    assert behavior["default_url"] == web_url
+    assert behavior["pc_url"] == app_link
+    assert behavior["android_url"] == app_link
+    assert behavior["ios_url"] == app_link
+    assert "不会自动生成" in "\n".join(_markdown_contents(card))
 
 
 def test_casual_response_card_renders_user_quote_inside_card():
@@ -722,6 +751,118 @@ def test_media_generation_card_covers_running_and_result_fields():
     assert "**引擎**：GPT Image 2" in contents
     assert "绿色科技感端午海报" in contents
     assert "已等待 42 秒" in contents
+
+
+def test_media_generation_compact_preview_card_contains_uploaded_image():
+    card = build_media_generation_card(
+        task_title="图片预览",
+        media_type="image",
+        status="已生成",
+        prompt="第 1/1 张",
+        preview_image_key="img_v2_preview",
+        preview_caption="第 1/1 张（GPT Image 2 · medium）。",
+        preview_only=True,
+    )
+
+    elements = _body_elements(card)
+    assert card["header"]["title"]["content"] == "图片预览"
+    assert card["header"]["template"] == "grey"
+    assert elements[0]["tag"] == "img"
+    assert elements[0]["img_key"] == "img_v2_preview"
+    assert elements[0]["alt"]["content"] == "第 1/1 张（GPT Image 2 · medium）。"
+    assert "第 1/1 张" in elements[1]["content"]
+
+
+def test_card_streamer_uploads_local_image_for_interactive_preview(
+    tmp_path: Path,
+):
+    image_path = tmp_path / "preview.png"
+    image_path.write_bytes(b"png-preview")
+    create_image = AsyncMock(
+        return_value=SimpleNamespace(
+            success=lambda: True,
+            data=SimpleNamespace(image_key="img_v2_uploaded"),
+        )
+    )
+    client = SimpleNamespace(
+        im=SimpleNamespace(
+            v1=SimpleNamespace(image=SimpleNamespace(acreate=create_image))
+        )
+    )
+    streamer = FeishuCardStreamer(client)
+
+    image_key = asyncio.run(streamer.upload_image(image_path))
+
+    assert image_key == "img_v2_uploaded"
+    create_image.assert_awaited_once()
+
+
+def test_video_generation_result_card_has_clickable_preview_action():
+    video_url = "https://cdn.example.com/result.mp4"
+    card = build_media_generation_card(
+        task_title="新品短片",
+        media_type="video",
+        status="已完成",
+        prompt="新能源车从城市夜景中驶出",
+        engine="Dreamina 即梦",
+        output_url=video_url,
+        player_origin="https://player.example.com",
+        player_app_id="cli_test",
+        aspect_ratio="16:9",
+        duration="5 秒",
+    )
+
+    contents = "\n".join(_markdown_contents(card))
+    buttons = _button_elements(card)
+    assert "结果预览" in contents
+    assert len(buttons) == 1
+    assert buttons[0]["text"]["content"] == "▶ 在右侧播放"
+    multi_url = buttons[0]["multi_url"]
+    result_url = multi_url["android_url"]
+    app_link_query = parse_qs(urlsplit(result_url).query)
+    assert app_link_query["appId"] == ["cli_test"]
+    assert app_link_query["mode"] == ["sidebar-semi"]
+    player_url = unquote(app_link_query["lk_target_url"][0])
+    player_query = parse_qs(urlsplit(player_url).query)
+    assert player_url.startswith(
+        "https://player.example.com/api/v1/assistant-attachments/media-player?"
+    )
+    assert player_query["src"] == [video_url]
+    assert player_query["ratio"] == ["16:9"]
+    assert player_query["duration"] == ["5 秒"]
+    assert unquote(multi_url["url"]) == player_url
+    assert multi_url["pc_url"] == result_url
+    assert multi_url["ios_url"] == result_url
+
+
+def test_media_generation_result_card_appends_material_completion_entry():
+    web_url = (
+        "http://192.168.1.35:6185/api/v1/assistant-attachments/video-token?mode=revise"
+    )
+    app_link = (
+        "https://applink.feishu.cn/client/web_app/open?appId=cli_test"
+        f"&lk_target_url={quote(web_url, safe='')}"
+    )
+    card = build_media_generation_card(
+        task_title="新品短片",
+        media_type="video",
+        status="已完成",
+        prompt="新能源车从城市夜景中驶出",
+        output_url="https://cdn.example.com/result.mp4",
+        material_completion_url=app_link,
+    )
+
+    buttons = _button_elements(card)
+    assert [button["text"]["content"] for button in buttons] == [
+        "▶ 在右侧播放",
+        "补齐资料",
+    ]
+    assert _body_elements(card)[-1] == buttons[-1]
+    behavior = buttons[-1]["behaviors"][0]
+    assert behavior["default_url"] == web_url
+    assert behavior["pc_url"] == app_link
+    assert behavior["android_url"] == app_link
+    assert behavior["ios_url"] == app_link
 
 
 def test_source_image_edit_card_covers_status_and_engine_fields():

@@ -213,6 +213,8 @@ def command_import(dc_root: Path, *, actor: str) -> dict[str, Any]:
     return {
         "ok": True,
         "imported_count": result.imported_count,
+        "skipped_count": result.skipped_count,
+        "ignored_count": result.ignored_count,
         "decision_count": result.decision_count,
         "audit_count": result.audit_count,
         "rule_proposal_count": result.rule_proposal_count,
@@ -241,6 +243,7 @@ def command_promote(dc_root: Path, *, actor: str, dry_run: bool) -> dict[str, An
         "ok": True,
         "dry_run": result.dry_run,
         "promoted_memory_ids": result.promoted_memory_ids,
+        "unchanged_memory_ids": result.unchanged_memory_ids,
         "skipped_memory_ids": result.skipped_memory_ids,
     }
 

@@ -515,7 +515,7 @@ class Context:
             message_chain: 消息链。
 
         Returns:
-            是否找到匹配的平台。
+            匹配平台确认投递成功时返回 True；找不到平台或投递失败时返回 False。
 
         Raises:
             ValueError: session 字符串不合法时抛出。
@@ -532,8 +532,8 @@ class Context:
 
         for platform in self.platform_manager.platform_insts:
             if platform.meta().id == session.platform_name:
-                await platform.send_by_session(session, message_chain)
-                return True
+                delivered = await platform.send_by_session(session, message_chain)
+                return delivered is not False
         logger.warning(
             f"cannot find platform for session {str(session)}, message not sent"
         )

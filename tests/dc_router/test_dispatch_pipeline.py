@@ -434,6 +434,30 @@ class TestStage1CardAction:
         result = await _dispatch.dispatch(ctx, event, cfg)
         assert result.handled is False
 
+    @pytest.mark.asyncio
+    async def test_confirmed_copy_card_skips_intake_and_sop_capture(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(
+            text="__card_action__:{}",
+            extras={"assistant_workbench_task_type": "copy"},
+        )
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["card"].return_value = types.SimpleNamespace(
+            handled=False,
+            stop=False,
+            resumed_text="#创意 直接写一段公众号开场文案",
+        )
+
+        await _dispatch.dispatch(ctx, event, cfg)
+
+        patched_dispatch["truth"].assert_not_awaited()
+        patched_dispatch["sop"].assert_not_called()
+        patched_dispatch["dept"].assert_not_called()
+        patched_dispatch["memory"].assert_not_awaited()
+        patched_dispatch["dc"].assert_awaited_once()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # 2. Stage 2 — slash command
@@ -579,9 +603,9 @@ class TestStage3Chitchat:
         event.get_group_id = MagicMock(return_value="")
         ctx = _make_context()
         cfg = _make_config()
-        patched_dispatch["chitchat"].side_effect = (
-            _dc_router_preprocessing.try_handle_chitchat
-        )
+        patched_dispatch[
+            "chitchat"
+        ].side_effect = _dc_router_preprocessing.try_handle_chitchat
 
         result = await _dispatch.dispatch(ctx, event, cfg)
 
@@ -610,9 +634,9 @@ class TestStage3Chitchat:
         event.get_group_id = MagicMock(return_value="")
         ctx = _make_context()
         cfg = _make_config()
-        patched_dispatch["chitchat"].side_effect = (
-            _dc_router_preprocessing.try_handle_chitchat
-        )
+        patched_dispatch[
+            "chitchat"
+        ].side_effect = _dc_router_preprocessing.try_handle_chitchat
 
         result = await _dispatch.dispatch(ctx, event, cfg)
 
@@ -668,6 +692,43 @@ class TestStage4ReasoningPrefix:
 
         result = await _dispatch.dispatch(ctx, event, cfg)
         assert result.decision_provider == "codex/gpt-5.5-xhigh"
+
+    @pytest.mark.asyncio
+    async def test_codex_tool_marker_routes_to_real_read_only_cli(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(text="#codex工具 复核系统方案")
+        ctx = _make_context()
+        cfg = _make_config()
+        patched_dispatch["apply"].return_value = True
+
+        result = await _dispatch.dispatch(ctx, event, cfg)
+
+        assert result.handled is True
+        assert result.source == "codex_tool"
+        assert result.decision_provider == "cli/codex/gpt-5.4"
+        decision = patched_dispatch["apply"].await_args.args[2]
+        assert decision.provider_id == "cli/codex/gpt-5.4"
+        assert decision.metadata == {
+            "capability": "deep_reasoning",
+            "owns_schedule": False,
+        }
+        assert event.message_str == "复核系统方案"
+        patched_dispatch["pin"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_codex_tool_marker_stops_without_model(
+        self, patched_dispatch: dict
+    ) -> None:
+        event = _make_event(text="#codex工具")
+
+        result = await _dispatch.dispatch(_make_context(), event, _make_config())
+
+        assert result.handled is True
+        assert result.source == "codex_tool_empty"
+        event.should_call_llm.assert_called_once_with(False)
+        patched_dispatch["apply"].assert_not_awaited()
+        patched_dispatch["pin"].assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_prefix_bypasses_chitchat_and_feishu(

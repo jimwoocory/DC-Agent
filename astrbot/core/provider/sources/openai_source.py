@@ -50,6 +50,7 @@ from .request_retry import retry_provider_request
 )
 class ProviderOpenAIOfficial(Provider):
     _ERROR_TEXT_CANDIDATE_MAX_CHARS = 4096
+    fallback_client: AsyncOpenAI | None = None
 
     @classmethod
     def _truncate_error_text_candidate(cls, text: str) -> str:
@@ -353,9 +354,31 @@ class ProviderOpenAIOfficial(Provider):
             pass
         return create_proxy_client("OpenAI", proxy, httpx_module=httpx_module)
 
+    @staticmethod
+    def _should_use_route_fallback(error: BaseException) -> bool:
+        """Return whether a primary-route failure may use the fallback route.
+
+        Args:
+            error: Error raised while opening the primary API response.
+
+        Returns:
+            True for connection and timeout failures or HTTP 408/502/503/504.
+        """
+        if is_connection_error(error) or type(error).__name__ in {
+            "APIConnectionError",
+            "APITimeoutError",
+        }:
+            return True
+        status_code = getattr(error, "status_code", None)
+        if not isinstance(status_code, int):
+            response = getattr(error, "response", None)
+            status_code = getattr(response, "status_code", None)
+        return status_code in {408, 502, 503, 504}
+
     def __init__(self, provider_config, provider_settings) -> None:
         super().__init__(provider_config, provider_settings)
         self.chosen_api_key = None
+        self.fallback_client: AsyncOpenAI | None = None
         self.api_keys: list = super().get_keys()
         self.chosen_api_key = self.api_keys[0] if len(self.api_keys) > 0 else None
         self.timeout = provider_config.get("timeout", 120)
@@ -381,13 +404,33 @@ class ProviderOpenAIOfficial(Provider):
             )
         else:
             # Using OpenAI Official API
+            fallback_api_base = str(
+                provider_config.get("fallback_api_base", "")
+            ).strip()
+            primary_client_options: dict[str, Any] = {}
+            if fallback_api_base:
+                # Route failover owns retries so one logical request performs at
+                # most one primary attempt and one fallback attempt.
+                primary_client_options["max_retries"] = 0
             self.client = AsyncOpenAI(
                 api_key=self.chosen_api_key,
                 base_url=provider_config.get("api_base", None),
                 default_headers=self.custom_headers,
                 timeout=self.timeout,
                 http_client=self._create_http_client(provider_config),
+                **primary_client_options,
             )
+            if fallback_api_base:
+                fallback_config = dict(provider_config)
+                fallback_config["proxy"] = provider_config.get("fallback_proxy", "")
+                self.fallback_client = AsyncOpenAI(
+                    api_key=self.chosen_api_key,
+                    base_url=fallback_api_base,
+                    default_headers=self.custom_headers,
+                    timeout=self.timeout,
+                    max_retries=0,
+                    http_client=self._create_http_client(fallback_config),
+                )
 
         self.default_params = inspect.signature(
             self.client.chat.completions.create,
@@ -421,10 +464,28 @@ class ProviderOpenAIOfficial(Provider):
     async def get_models(self):
         try:
             models_str = []
-            models = await retry_provider_request(
-                "OpenAI",
-                lambda: self.client.models.list(),
-            )
+            try:
+                models = await retry_provider_request(
+                    "OpenAI",
+                    lambda: self.client.models.list(),
+                    max_attempts=1 if self.fallback_client else None,
+                )
+            except Exception as error:
+                if not self.fallback_client or not self._should_use_route_fallback(
+                    error
+                ):
+                    raise
+                logger.warning(
+                    "[OpenAI] Primary model-list route failed; using configured "
+                    "fallback route once."
+                )
+                self.fallback_client.api_key = self.client.api_key
+                models = await retry_provider_request(
+                    "OpenAI fallback",
+                    lambda: self.fallback_client.models.list(),
+                    retry_rate_limits=False,
+                    max_attempts=1,
+                )
             models = sorted(models.data, key=lambda x: x.id)
             for model in models:
                 models_str.append(model.id)
@@ -549,15 +610,34 @@ class ProviderOpenAIOfficial(Provider):
 
         self._sanitize_assistant_messages(payloads)
 
-        completion = await retry_provider_request(
-            "OpenAI",
-            lambda: self.client.chat.completions.create(
-                **payloads,
-                stream=False,
-                extra_body=extra_body,
-            ),
-            max_attempts=request_max_retries,
-        )
+        try:
+            completion = await retry_provider_request(
+                "OpenAI",
+                lambda: self.client.chat.completions.create(
+                    **payloads,
+                    stream=False,
+                    extra_body=extra_body,
+                ),
+                max_attempts=1 if self.fallback_client else request_max_retries,
+            )
+        except Exception as error:
+            if not self.fallback_client or not self._should_use_route_fallback(error):
+                raise
+            logger.warning(
+                "[OpenAI] Primary API route failed; using configured fallback "
+                "route once."
+            )
+            self.fallback_client.api_key = self.client.api_key
+            completion = await retry_provider_request(
+                "OpenAI fallback",
+                lambda: self.fallback_client.chat.completions.create(
+                    **payloads,
+                    stream=False,
+                    extra_body=extra_body,
+                ),
+                retry_rate_limits=False,
+                max_attempts=1,
+            )
 
         if not isinstance(completion, ChatCompletion):
             raise Exception(
@@ -607,16 +687,36 @@ class ProviderOpenAIOfficial(Provider):
 
         self._sanitize_assistant_messages(payloads)
 
-        stream = await retry_provider_request(
-            "OpenAI",
-            lambda: self.client.chat.completions.create(
-                **payloads,
-                stream=True,
-                extra_body=extra_body,
-                stream_options={"include_usage": True},
-            ),
-            max_attempts=request_max_retries,
-        )
+        try:
+            stream = await retry_provider_request(
+                "OpenAI",
+                lambda: self.client.chat.completions.create(
+                    **payloads,
+                    stream=True,
+                    extra_body=extra_body,
+                    stream_options={"include_usage": True},
+                ),
+                max_attempts=1 if self.fallback_client else request_max_retries,
+            )
+        except Exception as error:
+            if not self.fallback_client or not self._should_use_route_fallback(error):
+                raise
+            logger.warning(
+                "[OpenAI] Primary streaming route failed before response; using "
+                "configured fallback route once."
+            )
+            self.fallback_client.api_key = self.client.api_key
+            stream = await retry_provider_request(
+                "OpenAI fallback",
+                lambda: self.fallback_client.chat.completions.create(
+                    **payloads,
+                    stream=True,
+                    extra_body=extra_body,
+                    stream_options={"include_usage": True},
+                ),
+                retry_rate_limits=False,
+                max_attempts=1,
+            )
 
         llm_response = LLMResponse("assistant", is_chunk=True)
 
@@ -968,6 +1068,11 @@ class ProviderOpenAIOfficial(Provider):
         model = model or self.get_model()
 
         payloads = {"messages": context_query, "model": model}
+        translation_options = kwargs.get("translation_options")
+        if translation_options is not None:
+            if not isinstance(translation_options, dict):
+                raise TypeError("translation_options must be a dictionary")
+            payloads["translation_options"] = copy.deepcopy(translation_options)
 
         self._finally_convert_payload(payloads)
 
@@ -1338,6 +1443,8 @@ class ProviderOpenAIOfficial(Provider):
 
     def set_key(self, key) -> None:
         self.client.api_key = key
+        if self.fallback_client:
+            self.fallback_client.api_key = key
 
     async def assemble_context(
         self,
@@ -1420,3 +1527,5 @@ class ProviderOpenAIOfficial(Provider):
     async def terminate(self):
         if self.client:
             await self.client.close()
+        if self.fallback_client:
+            await self.fallback_client.close()

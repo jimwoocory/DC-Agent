@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111F"/>
+      <stop offset="0.55" stop-color="#0A1627"/>
+      <stop offset="1" stop-color="#10192A"/>
+    </linearGradient>
+    <linearGradient id="timeline" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#55CFFF"/>
+      <stop offset="0.34" stop-color="#9D8CFF"/>
+      <stop offset="0.67" stop-color="#45E0B5"/>
+      <stop offset="1" stop-color="#FFB45E"/>
+    </linearGradient>
+    <linearGradient id="metric" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#15243A"/>
+      <stop offset="1" stop-color="#111D30"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#FFFFFF" stroke-opacity="0.025" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="glow-cyan" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .sans { font-family: "Hiragino Sans GB"; }
+      .title { font-size: 48px; font-weight: 700; letter-spacing: 1px; fill: #F6F9FF; }
+      .subtitle { font-size: 20px; font-weight: 400; fill: #90A4BF; }
+      .eyebrow { font-size: 15px; font-weight: 600; letter-spacing: 2px; fill: #91A5C0; }
+      .month { font-size: 18px; font-weight: 700; fill: #F8FAFF; }
+      .phase { font-size: 28px; font-weight: 700; fill: #F7FAFF; }
+      .bullet { font-size: 19px; font-weight: 400; fill: #B8C6D9; }
+      .micro { font-size: 16px; font-weight: 500; fill: #9FB0C5; }
+      .metric-number { font-size: 31px; font-weight: 750; fill: #F7FAFF; }
+      .metric-label { font-size: 15px; font-weight: 500; fill: #91A5C0; }
+      .conclusion { font-size: 17px; font-weight: 650; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <circle cx="1390" cy="72" r="250" fill="#456EFF" opacity="0.045"/>
+  <circle cx="123" cy="852" r="230" fill="#38D7B3" opacity="0.035"/>
+
+  <!-- Header -->
+  <g class="sans">
+    <rect x="70" y="54" width="238" height="32" rx="16" fill="#13243A" stroke="#2A405C"/>
+    <circle cx="89" cy="70" r="5" fill="#45E0B5" filter="url(#glow-cyan)"/>
+    <text x="104" y="76" class="eyebrow">杨总考核材料 · 项目复盘</text>
+    <text x="70" y="143" font-family="Arial" font-size="48" font-weight="700" fill="#F6F9FF">DC-Agent</text>
+    <text x="320" y="143" class="title">三个月开发成果时间轴</text>
+    <text x="72" y="181" class="subtitle">从系统摸底到平台工程化，再到员工入口与业务工具的产品化交付</text>
+
+    <rect x="1288" y="72" width="242" height="48" rx="24" fill="#101F34" stroke="#2B3D56"/>
+    <text x="1409" y="102" text-anchor="middle" font-size="17" font-weight="650" fill="#DCE7F7">2026.04.15 — 07.15</text>
+  </g>
+
+  <!-- Main timeline -->
+  <line x1="160" y1="235" x2="1440" y2="235" stroke="#22324A" stroke-width="10" stroke-linecap="round"/>
+  <line x1="160" y1="235" x2="1440" y2="235" stroke="url(#timeline)" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- April node and card -->
+  <g class="sans">
+    <circle cx="240" cy="235" r="24" fill="#0B1728" stroke="#55CFFF" stroke-width="4"/>
+    <circle cx="240" cy="235" r="8" fill="#55CFFF"/>
+    <text x="240" y="210" class="month" text-anchor="middle">4月</text>
+    <rect x="70" y="280" width="340" height="330" rx="24" fill="#101D2F" stroke="#26415A" filter="url(#shadow)"/>
+    <rect x="70" y="280" width="340" height="8" rx="4" fill="#55CFFF"/>
+    <rect x="94" y="310" width="74" height="28" rx="14" fill="#122F44"/>
+    <text x="131" y="330" text-anchor="middle" font-size="14" font-weight="700" fill="#67D5FF">摸底阶段</text>
+    <text x="94" y="380" class="phase">架构纠偏</text>
+    <circle cx="100" cy="421" r="4" fill="#55CFFF"/><text x="116" y="428" class="bullet">厘清三套系统职责边界</text>
+    <circle cx="100" cy="461" r="4" fill="#55CFFF"/><text x="116" y="468" class="bullet">修正绕过 Router 的旧链路</text>
+    <circle cx="100" cy="501" r="4" fill="#55CFFF"/><text x="116" y="508" class="bullet">建立二期开发与诊断方向</text>
+    <line x1="94" y1="542" x2="386" y2="542" stroke="#26384E"/>
+    <text x="94" y="572" class="micro">57 次调用</text>
+    <text x="207" y="572" class="micro">4 名用户</text>
+    <text x="299" y="572" font-size="16" font-weight="650" fill="#FF8896">21.1% 错误</text>
+  </g>
+
+  <!-- May node and card -->
+  <g class="sans">
+    <circle cx="613" cy="235" r="24" fill="#0B1728" stroke="#9D8CFF" stroke-width="4"/>
+    <circle cx="613" cy="235" r="8" fill="#9D8CFF"/>
+    <text x="613" y="210" class="month" text-anchor="middle">5月</text>
+    <rect x="443" y="280" width="340" height="330" rx="24" fill="#101D2F" stroke="#3A365E" filter="url(#shadow)"/>
+    <rect x="443" y="280" width="340" height="8" rx="4" fill="#9D8CFF"/>
+    <rect x="467" y="310" width="74" height="28" rx="14" fill="#29254B"/>
+    <text x="504" y="330" text-anchor="middle" font-size="14" font-weight="700" fill="#B3A8FF">闭环原型</text>
+    <text x="467" y="380" class="phase">业务链路打通</text>
+    <circle cx="473" cy="421" r="4" fill="#9D8CFF"/><text x="489" y="428" class="bullet">Hermes 结果自动回群</text>
+    <circle cx="473" cy="461" r="4" fill="#9D8CFF"/><text x="489" y="468" class="bullet">Case 聚合任务与交付物</text>
+    <circle cx="473" cy="501" r="4" fill="#9D8CFF"/><text x="489" y="508" class="bullet">群聊总结、卡片与 Watchdog</text>
+    <line x1="467" y1="542" x2="759" y2="542" stroke="#32324F"/>
+    <text x="467" y="572" class="micro">133 次调用</text>
+    <text x="592" y="572" class="micro">9 名用户</text>
+    <text x="684" y="572" font-size="16" font-weight="650" fill="#FFBF73">9.8% 错误</text>
+  </g>
+
+  <!-- June node and card -->
+  <g class="sans">
+    <circle cx="986" cy="235" r="24" fill="#0B1728" stroke="#45E0B5" stroke-width="4"/>
+    <circle cx="986" cy="235" r="8" fill="#45E0B5"/>
+    <text x="986" y="210" class="month" text-anchor="middle">6月</text>
+    <rect x="816" y="280" width="340" height="330" rx="24" fill="#101D2F" stroke="#245347" filter="url(#shadow)"/>
+    <rect x="816" y="280" width="340" height="8" rx="4" fill="#45E0B5"/>
+    <rect x="840" y="310" width="88" height="28" rx="14" fill="#133B35"/>
+    <text x="884" y="330" text-anchor="middle" font-size="14" font-weight="700" fill="#63E7C2">工程化</text>
+    <text x="840" y="380" class="phase">平台能力成型</text>
+    <circle cx="846" cy="421" r="4" fill="#45E0B5"/><text x="862" y="428" class="bullet">统一 Router 与合约验收</text>
+    <circle cx="846" cy="461" r="4" fill="#45E0B5"/><text x="862" y="468" class="bullet">记忆治理、归档与资料溯源</text>
+    <circle cx="846" cy="501" r="4" fill="#45E0B5"/><text x="862" y="508" class="bullet">员工洞察、Dashboard 与 CI</text>
+    <line x1="840" y1="542" x2="1132" y2="542" stroke="#24443F"/>
+    <text x="840" y="572" class="micro">217 次调用</text>
+    <text x="966" y="572" class="micro">97 名用户</text>
+    <text x="1064" y="572" font-size="16" font-weight="650" fill="#63E7C2">7.8% 错误</text>
+  </g>
+
+  <!-- July node and card -->
+  <g class="sans">
+    <circle cx="1359" cy="235" r="24" fill="#0B1728" stroke="#FFB45E" stroke-width="4"/>
+    <circle cx="1359" cy="235" r="8" fill="#FFB45E"/>
+    <text x="1359" y="210" class="month" text-anchor="middle">7月 · 截至15日</text>
+    <rect x="1189" y="280" width="340" height="330" rx="24" fill="#101D2F" stroke="#584328" filter="url(#shadow)"/>
+    <rect x="1189" y="280" width="340" height="8" rx="4" fill="#FFB45E"/>
+    <rect x="1213" y="310" width="88" height="28" rx="14" fill="#49351E"/>
+    <text x="1257" y="330" text-anchor="middle" font-size="14" font-weight="700" fill="#FFC77F">产品化</text>
+    <text x="1213" y="380" class="phase">员工与新业务</text>
+    <circle cx="1219" cy="421" r="4" fill="#FFB45E"/><text x="1235" y="428" class="bullet">桌面身份与员工体验闭环</text>
+    <circle cx="1219" cy="461" r="4" fill="#FFB45E"/><text x="1235" y="468" class="bullet">Dreamina、舆情与多平台采集</text>
+    <circle cx="1219" cy="501" r="4" fill="#FFB45E"/><text x="1235" y="508" class="bullet">控制面、报价、办公工具收口</text>
+    <line x1="1213" y1="542" x2="1505" y2="542" stroke="#493B2C"/>
+    <text x="1213" y="572" class="micro">21 次调用</text>
+    <text x="1324" y="572" class="micro">13 名用户</text>
+    <text x="1420" y="572" font-size="16" font-weight="650" fill="#FF8896">14.3% 错误</text>
+  </g>
+
+  <!-- Verified outcome metrics -->
+  <g class="sans">
+    <text x="70" y="663" font-size="17" font-weight="700" letter-spacing="1.2" fill="#A5B6CC">三个月可验证成果</text>
+
+    <rect x="70" y="688" width="260" height="100" rx="18" fill="url(#metric)" stroke="#2B3E58"/>
+    <text x="94" y="733" class="metric-number">15 → 52</text>
+    <text x="94" y="763" class="metric-label">已提交验收合约</text>
+
+    <rect x="350" y="688" width="292" height="100" rx="18" fill="url(#metric)" stroke="#2B3E58"/>
+    <text x="374" y="733" class="metric-number">1,483 → 3,239</text>
+    <text x="374" y="763" class="metric-label">测试函数 · 增长 118%</text>
+
+    <rect x="662" y="688" width="260" height="100" rx="18" fill="url(#metric)" stroke="#2B3E58"/>
+    <text x="686" y="733" class="metric-number">1,477</text>
+    <text x="686" y="763" class="metric-label">本次核心验证全部通过</text>
+
+    <rect x="942" y="688" width="240" height="100" rx="18" fill="url(#metric)" stroke="#2B3E58"/>
+    <text x="966" y="733" class="metric-number">122</text>
+    <text x="966" y="763" class="metric-label">近 90 天活跃用户</text>
+
+    <rect x="1202" y="688" width="327" height="100" rx="18" fill="#13233A" stroke="#355071"/>
+    <text x="1226" y="721" font-size="15" font-weight="700" fill="#8FA5C1">考核结论</text>
+    <rect x="1226" y="738" width="88" height="28" rx="14" fill="#123C35"/>
+    <text x="1270" y="758" text-anchor="middle" class="conclusion" fill="#5DE8C1">建设强</text>
+    <rect x="1323" y="738" width="88" height="28" rx="14" fill="#49371F"/>
+    <text x="1367" y="758" text-anchor="middle" class="conclusion" fill="#FFC275">验证中</text>
+    <rect x="1420" y="738" width="85" height="28" rx="14" fill="#492733"/>
+    <text x="1462" y="758" text-anchor="middle" class="conclusion" fill="#FF93A2">待收口</text>
+  </g>
+
+  <!-- Footer -->
+  <g class="sans">
+    <line x1="70" y1="828" x2="1530" y2="828" stroke="#22344B"/>
+    <text x="70" y="858" font-size="14" fill="#71859F">数据来源：Git、Harness 合约、pytest、运行数据库、任务控制面</text>
+    <circle cx="1253" cy="853" r="5" fill="#45E0B5"/>
+    <text x="1268" y="858" font-size="14" font-weight="600" fill="#9EB1C8">服务在线 · 44 项任务纳管 · Watchdog healthy</text>
+  </g>
+</svg>

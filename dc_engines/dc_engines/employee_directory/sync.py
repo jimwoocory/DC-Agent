@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -33,13 +35,37 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class SyncReport:
     success: bool
+    preview_only: bool = False
+    plan_id: str = ""
     departments_scanned: int = 0
     department_names: list[str] = field(default_factory=list)
     users_added: int = 0
     users_updated: int = 0
     users_skipped: int = 0
+    roster_enriched_count: int = 0
+    conflict_count: int = 0
+    review_required_count: int = 0
     error: str | None = None
     samples: list[str] = field(default_factory=list)  # 前几条 display_name 用于显示
+
+
+@dataclass(slots=True)
+class IdentitySyncAction:
+    """One exact open_id-matched employee change in a sync plan.
+
+    Attributes:
+        open_id: Stable Feishu identity used for the match.
+        create: Whether the employee row is new.
+        updates: Blank-field or explicitly authoritative profile updates.
+        conflicts: Existing values that differ and will not be overwritten.
+        projected_missing_fields: Identity fields still missing after the plan.
+    """
+
+    open_id: str
+    create: bool
+    updates: dict
+    conflicts: tuple[str, ...] = ()
+    projected_missing_fields: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -223,30 +249,54 @@ async def sync_from_feishu(
     platform_id: str = "lark",
     root_department_id: str | None = None,
     department_name_map: dict[str, str] | None = None,
-    authoritative: bool = True,
+    organization_people: dict[str, dict] | None = None,
+    authoritative: bool = False,
+    preview_only: bool = False,
+    expected_plan_id: str = "",
 ) -> SyncReport:
-    """同步主入口。
+    """Plan or apply an open_id-matched Feishu employee sync.
 
-    ``department_name_map``: 可选 open_department_id → 显示名映射。
-    ``authoritative``: 默认以飞书通讯录为组织权威源，覆盖本地旧姓名/部门/岗位。
+    Args:
+        store: Employee directory store receiving approved changes.
+        client: Enabled Feishu client used to read contact data.
+        platform_id: Platform identifier assigned to new employees.
+        root_department_id: Optional Feishu department subtree root.
+        department_name_map: Optional department ID to display-name overrides.
+        organization_people: Governed roster profiles used only after an exact
+            Feishu-name, local-name, and department match.
+        authoritative: Whether confirmed remote values may overwrite local values.
+        preview_only: Whether to return the plan without writing employee rows.
+        expected_plan_id: Exact preview plan required before a confirmed apply.
+
+    Returns:
+        Sync report containing the deterministic plan and projected results.
     """
     if not client or not client.enabled:
-        return SyncReport(success=False, error="Feishu credentials 未启用")
+        return SyncReport(
+            success=False,
+            preview_only=preview_only,
+            error="Feishu credentials 未启用",
+        )
 
     try:
         dept_records = await _list_department_records(
             client, root_department_id=root_department_id
         )
     except Exception as exc:  # noqa: BLE001
-        return SyncReport(success=False, error=f"list_department 失败: {exc}")
+        return SyncReport(
+            success=False,
+            preview_only=preview_only,
+            error=f"list_department 失败: {exc}",
+        )
 
     if not dept_records:
         return SyncReport(
             success=False,
+            preview_only=preview_only,
             error="未拿到任何部门——通常是 app 权限不足，需勾 contact:department.base:read",
         )
 
-    dept_ids = [record.open_department_id for record in dept_records]
+    dept_ids = sorted(record.open_department_id for record in dept_records)
     auto_department_name_map = {
         record.open_department_id: record.name for record in dept_records if record.name
     }
@@ -255,73 +305,211 @@ async def sync_from_feishu(
     org_index = load_department_org_index()
 
     seen_open_ids: set[str] = set()
-    added = 0
-    updated = 0
-    skipped = 0
+    actions: list[IdentitySyncAction] = []
+    duplicate_count = 0
+    unchanged_count = 0
+    conflict_count = 0
+    review_required_count = 0
+    roster_enriched_count = 0
     samples: list[str] = []
 
     for did in dept_ids:
         users = await _list_users_in_department(client, did)
         for u in users:
-            oid = u["open_id"]
+            oid = str(u.get("open_id") or "").strip()
+            if not oid:
+                continue
             if oid in seen_open_ids:
-                skipped += 1
+                duplicate_count += 1
                 continue
             seen_open_ids.add(oid)
 
-            dept_name = auto_department_name_map.get(did) or did[-8:]
+            dept_name = auto_department_name_map.get(did) or (
+                did[-8:] if authoritative else ""
+            )
+            remote_name = str(u.get("name") or "").strip()
+            remote_role = str(u.get("job_title") or "").strip()
             existing = await store.get_employee(oid)
+            role_from_roster = False
+            roster_profile = (organization_people or {}).get(remote_name)
+            if (
+                not remote_role
+                and existing is not None
+                and not str(existing.role or "").strip()
+                and remote_name
+                and remote_name == str(existing.display_name or "").strip()
+                and isinstance(roster_profile, dict)
+                and dept_name
+                and dept_name == str(existing.department or "").strip()
+                and dept_name == str(roster_profile.get("department") or "").strip()
+            ):
+                remote_role = str(roster_profile.get("role") or "").strip()
+                role_from_roster = bool(remote_role)
+            remote_values = {
+                "display_name": remote_name,
+                "department": dept_name,
+                "role": remote_role,
+            }
             if existing is None:
-                # 新增
-                emp, _ = await store.get_or_create(
-                    oid,
-                    platform_id=platform_id,
-                    display_name=u["name"],
-                )
-                # 立即补部门 / 岗位
-                await store.update_profile(
-                    oid,
-                    department=dept_name,
-                    role=u.get("job_title", ""),
-                    preferences=_sync_preferences(
-                        emp.preferences,
-                        did,
-                        department_name=dept_name,
-                        org_index=org_index,
+                updates = {
+                    **remote_values,
+                    "platform_id": platform_id,
+                    "preferences": _sync_preferences(
+                        {}, did, department_name=dept_name, org_index=org_index
                     ),
+                }
+                projected_missing = tuple(
+                    field_name
+                    for field_name, value in remote_values.items()
+                    if not value
                 )
-                added += 1
-                if len(samples) < 5 and u["name"]:
-                    samples.append(u["name"])
+                actions.append(
+                    IdentitySyncAction(
+                        open_id=oid,
+                        create=True,
+                        updates=updates,
+                        projected_missing_fields=projected_missing,
+                    )
+                )
             else:
-                # 更新。默认以飞书通讯录为组织权威源，纠正本地旧部门名。
-                upd: dict = {}
-                if u["name"] and (authoritative or not existing.display_name):
-                    upd["display_name"] = u["name"]
-                if authoritative or not existing.department:
-                    upd["department"] = dept_name
-                if u.get("job_title") and (authoritative or not existing.role):
-                    upd["role"] = u["job_title"]
-                next_preferences = _sync_preferences(
-                    existing.preferences,
+                updates: dict = {}
+                conflicts: list[str] = []
+                for field_name, remote_value in remote_values.items():
+                    if not remote_value:
+                        continue
+                    local_value = str(getattr(existing, field_name, "") or "").strip()
+                    if not local_value or authoritative:
+                        if local_value != remote_value:
+                            updates[field_name] = remote_value
+                    elif local_value != remote_value:
+                        conflicts.append(field_name)
+
+                desired_preferences = _sync_preferences(
+                    {},
                     did,
                     department_name=dept_name,
                     org_index=org_index,
                 )
-                if next_preferences != existing.preferences:
-                    upd["preferences"] = next_preferences
-                if upd:
-                    await store.update_profile(oid, **upd)
-                    updated += 1
+                if role_from_roster:
+                    desired_preferences["identity_role_source"] = (
+                        "company_org_structure"
+                    )
+                    roster_enriched_count += 1
+                if authoritative:
+                    next_preferences = {
+                        **existing.preferences,
+                        **desired_preferences,
+                    }
                 else:
-                    skipped += 1
+                    next_preferences = dict(existing.preferences)
+                    for key, remote_value in desired_preferences.items():
+                        local_value = next_preferences.get(key)
+                        if local_value in (None, "", [], {}):
+                            next_preferences[key] = remote_value
+                        elif local_value != remote_value:
+                            conflicts.append(f"preferences.{key}")
+                if next_preferences != existing.preferences:
+                    updates["preferences"] = next_preferences
 
-    return SyncReport(
+                projected_values = {
+                    "display_name": updates.get("display_name", existing.display_name),
+                    "department": updates.get("department", existing.department),
+                    "role": updates.get("role", existing.role),
+                }
+                projected_missing = tuple(
+                    field_name
+                    for field_name, value in projected_values.items()
+                    if not str(value or "").strip()
+                )
+                if updates:
+                    actions.append(
+                        IdentitySyncAction(
+                            open_id=oid,
+                            create=False,
+                            updates=updates,
+                            conflicts=tuple(sorted(set(conflicts))),
+                            projected_missing_fields=projected_missing,
+                        )
+                    )
+                else:
+                    unchanged_count += 1
+                    conflict_count += len(set(conflicts))
+                    if projected_missing:
+                        review_required_count += 1
+
+            if actions and actions[-1].open_id == oid:
+                action = actions[-1]
+                conflict_count += len(action.conflicts)
+                if action.projected_missing_fields:
+                    review_required_count += 1
+                display_name = str(
+                    action.updates.get("display_name") or u.get("name") or ""
+                ).strip()
+                if len(samples) < 5 and display_name:
+                    samples.append(display_name)
+
+    plan_payload = {
+        "authoritative": authoritative,
+        "actions": [
+            {
+                "open_id": action.open_id,
+                "create": action.create,
+                "updates": action.updates,
+                "conflicts": list(action.conflicts),
+                "projected_missing_fields": list(action.projected_missing_fields),
+            }
+            for action in sorted(actions, key=lambda item: item.open_id)
+        ],
+    }
+    plan_id = (
+        "identity_"
+        + hashlib.sha256(
+            json.dumps(
+                plan_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+    )
+    added = sum(1 for action in actions if action.create)
+    updated = sum(1 for action in actions if not action.create)
+    report = SyncReport(
         success=True,
+        preview_only=preview_only,
+        plan_id=plan_id,
         departments_scanned=len(dept_ids),
         department_names=sorted(set(auto_department_name_map.values())),
         users_added=added,
         users_updated=updated,
-        users_skipped=skipped,
+        users_skipped=duplicate_count + unchanged_count,
+        roster_enriched_count=roster_enriched_count,
+        conflict_count=conflict_count,
+        review_required_count=review_required_count,
         samples=samples,
     )
+    if not preview_only and not expected_plan_id:
+        report.success = False
+        report.error = "identity sync plan_id required; preview first"
+        return report
+    if expected_plan_id and expected_plan_id != plan_id:
+        report.success = False
+        report.error = "identity sync plan changed; preview again"
+        return report
+    if preview_only:
+        return report
+
+    for action in actions:
+        updates = dict(action.updates)
+        if action.create:
+            display_name = str(updates.pop("display_name", "") or "")
+            updates.pop("platform_id", None)
+            await store.get_or_create(
+                action.open_id,
+                platform_id=platform_id,
+                display_name=display_name,
+            )
+        if updates:
+            await store.update_profile(action.open_id, **updates)
+
+    return report

@@ -301,7 +301,10 @@ def build_candidate_from_session(
         f"目标：{session.normalized_goal or session.original_request or '未归一化'}。"
     )
     return EmployeeInsightCandidate(
-        candidate_id=f"empins_{uuid.uuid4().hex}",
+        candidate_id=(
+            "empins_"
+            f"{uuid.uuid5(uuid.NAMESPACE_URL, f'dc-agent:employee-insight:{session.session_id}').hex}"
+        ),
         candidate_type=candidate_type,
         source_session_ids=[session.session_id],
         department_id=session.department_id,

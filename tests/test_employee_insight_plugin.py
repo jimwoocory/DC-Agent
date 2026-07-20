@@ -291,6 +291,52 @@ async def test_employee_insight_plugin_closes_session_from_harness_lifecycle(
 
 
 @pytest.mark.asyncio
+async def test_employee_insight_plugin_distills_delivered_task_once(
+    tmp_path: Path,
+) -> None:
+    module = _load_plugin_module()
+    plugin = module.EmployeeInsightPlugin(_FakeContext(tmp_path))
+    await plugin.initialize()
+    store = EmployeeInsightStore(tmp_path / "employee_insight.db")
+    await store.upsert_profile(
+        EmployeeInsightProfile(
+            employee_id="ou_user",
+            employee_hash="hash_user",
+            pilot_status=PilotStatus.ACTIVE,
+        )
+    )
+    event = _FakeEvent("帮我整理项目计划")
+    await plugin.on_private_message(event)
+    await plugin.link_task_lifecycle(event, "task_123", source="test")
+
+    await plugin.update_task_lifecycle(
+        "task_123",
+        status="delivered",
+        source="harness_sensor",
+    )
+    await plugin.update_task_lifecycle(
+        "task_123",
+        status="closed",
+        source="task_cli",
+    )
+
+    session_id = event.extras["employee_insight_session_id"]
+    candidates = await store.list_candidates()
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.source_session_ids == [session_id]
+    assert candidate.review_status.value == "review_required"
+    assert candidate.is_runtime_eligible is False
+    assert candidate.obsidian_note_path
+    assert (tmp_path / candidate.obsidian_note_path).exists()
+    audits = await store.list_audit_events(candidate.candidate_id)
+    assert [item.action for item in audits] == [
+        "candidate_created",
+        "governance_exported",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_employee_insight_plugin_auto_observes_new_private_message_sender(
     tmp_path: Path,
 ):

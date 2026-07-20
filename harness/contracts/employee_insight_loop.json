@@ -100,7 +100,7 @@
     {
       "id": "eil-002f",
       "description": "Beginner outreach prefers the employee_insight_welcome interactive card, falls back to text when cards are unavailable, and grey verification records simulated_reply_recorded and simulated_pause_recorded checks before expanding beyond one test open_id.",
-      "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py dc_engines/tests/test_card_system_dedup.py tests/test_employee_insight_route.py -q"
+      "verification": "uv run python scripts/run_cross_suite_pytests.py --dc-engine dc_engines/tests/test_employee_insight_loop.py --dc-engine dc_engines/tests/test_card_system_dedup.py --root tests/test_employee_insight_route.py"
     },
     {
       "id": "eil-002g",
@@ -131,6 +131,11 @@
       "id": "eil-004",
       "description": "Harness distillation creates review_required insight candidates for needs, templates, skills, router improvements, knowledge gaps, onboarding fixes, and Hermes deep dives.",
       "verification": "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q"
+    },
+    {
+      "id": "eil-004a",
+      "description": "An authoritative Harness delivery creates one stable review_required candidate, exports it to the Obsidian approval inbox, and repeated delivery or closure events remain idempotent.",
+      "verification": "uv run pytest tests/test_employee_insight_plugin.py -q"
     },
     {
       "id": "eil-005",

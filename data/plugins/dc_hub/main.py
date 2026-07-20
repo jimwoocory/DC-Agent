@@ -105,7 +105,7 @@ DEFAULT_MODULES: tuple[HubModule, ...] = (
         "feishu_channel_control",
         "飞书通道治理",
         "assistant_feishu",
-        "OpenClaw 风格的飞书准入、配对、群策略、路由元数据和卡片回调防伪。",
+        "DC-Agent 原生飞书准入、配对、群策略、路由元数据和卡片回调防伪。",
     ),
     HubModule(
         "daily_card_renderer",
@@ -214,7 +214,7 @@ DEFAULT_MODULES: tuple[HubModule, ...] = (
         "system_entries",
         "系统入口",
         "ops_system",
-        "Hermes、OpenClaw、看门狗等服务入口和探活页。",
+        "Hermes、看门狗等服务入口和探活页。",
     ),
     HubModule(
         "devops_tools",
@@ -227,12 +227,6 @@ DEFAULT_MODULES: tuple[HubModule, ...] = (
         "Watchdog 状态",
         "ops_system",
         "读取 cron 写入的 alerts.jsonl 并返回状态。",
-    ),
-    HubModule(
-        "openclaw_on_demand",
-        "OpenClaw 按需启动",
-        "ops_system",
-        "OpenClaw Control Center 按需启停。",
     ),
     HubModule(
         "hermes_bridge",

@@ -1,0 +1,22 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用飞书综合/财务报告插件。",
+    "default": true
+  },
+  "db_path": {
+    "type": "string",
+    "description": "本地 SQLite 台账路径。留空默认 data/feishu_business_mvp.db。",
+    "default": ""
+  },
+  "business_config_path": {
+    "type": "string",
+    "description": "飞书综合/财务业务配置 JSON 路径，只存业务 app_token/table_id/approval_code/open_id/chat_id。",
+    "default": ""
+  },
+  "management_chat_id": {
+    "type": "string",
+    "description": "综合/财务周报推送群 chat_id，只存业务目标，不存 app_secret。",
+    "default": ""
+  }
+}

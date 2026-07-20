@@ -1,0 +1,172 @@
+{
+  "feature": "feishu_material_quotation",
+  "goal": "Separate the preparation team's internal cost calculation from the market department's estimate result, while reusing indexed Obsidian supplier evidence and never exposing internal pricing details on the market-facing surface.",
+  "scope": {
+    "menu": "办公 / 物料报价",
+    "owner": "筹备组",
+    "source_of_truth": "NAS projects/供应商价格库 archived with an Obsidian business note and indexed in data/nas_memory.db",
+    "internal_surface": "筹备组内部测算台",
+    "result_surface": "市场部估价结果",
+    "output_status": "估价方案"
+  },
+  "acceptance_criteria": [
+    {
+      "id": "fmq-001",
+      "description": "The Office menu routes 物料报价, 筹备组物料报价, and 报价系统 directly to one shared web/native H5 workspace containing a preparation-team calculation surface and a distinct market estimate-result surface without invoking an LLM.",
+      "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py -q"
+    },
+    {
+      "id": "fmq-002",
+      "description": "The preparation-team surface can add and remove material rows, enter specification, quantity, unit, unit price, supplier, item remarks, and price evidence, and always shows missing prices as 待询价.",
+      "verification": "uv run pytest tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "fmq-003",
+      "description": "The preparation-team surface can deterministically match indexed Obsidian price-table rows and return item, specification, unit, historical unit price, supplier, source path, and review status without calling a model.",
+      "verification": "uv run pytest tests/test_material_quotation.py -q"
+    },
+    {
+      "id": "fmq-004",
+      "description": "Item subtotal, loss, transport, installation, rush fee, profit, tax, pre-tax total, and grand total are recalculated server-side from normalized decimal inputs.",
+      "verification": "uv run pytest tests/test_material_quotation.py tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "fmq-005",
+      "description": "Saving a valid estimate recalculates the amount server-side and patches a market-facing estimate-result card without enqueuing an LLM task; the result contains only project context, final estimate, validity, and estimate status.",
+      "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "fmq-006",
+      "description": "The preparation-team calculation surface can generate and download a real internal Excel workbook whose first worksheet follows the reference-style nine-column cost list (序号、礼品/物料组合、规格、数量、单位、单价、小计、图示、备注), keeps formula-driven fee rows and a grand total, and retains supplier and historical-price traceability on a separate worksheet; that workbook is never linked from the market-facing result card.",
+      "verification": "uv run pytest tests/test_material_quotation_delivery.py tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "fmq-007",
+      "description": "The market estimate produces real Word and PDF deliverables containing only project, client or brand, final estimate, validity, estimate status, and public notes; internal material, supplier, source, unit-cost, cost-breakdown, and profit fields are absent.",
+      "verification": "uv run pytest tests/test_material_quotation_delivery.py tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "fmq-008",
+      "description": "After the market estimate exists, users may explicitly sync the sanitized market result to a Feishu cloud document; sync is optional, never automatic, and does not expose internal calculation fields.",
+      "verification": "uv run pytest tests/test_assistant_attachment_upload.py -q"
+    },
+    {
+      "id": "fmq-009",
+      "description": "The quotation tool home exposes a separate employee supplier-price intake with manual single-item and multi-item rows plus an optional source-file upload; this intake does not require creating a project estimate.",
+      "verification": "uv run pytest tests/test_assistant_attachment_upload.py tests/test_supplier_price_intake.py -q"
+    },
+    {
+      "id": "fmq-010",
+      "description": "Employee-entered supplier prices and original evidence are archived to the mounted NAS, mirrored as need-review Obsidian supplier notes, and immediately indexed in data/nas_memory.db; a missing historical unit stays empty and must be completed instead of being displayed as 待确认.",
+      "verification": "uv run pytest tests/test_material_quotation.py tests/test_supplier_price_intake.py -q"
+    },
+    {
+      "id": "fmq-011",
+      "description": "Every Feishu quotation-tool card uses the NAS LAN H5 origin during the internal pilot and the same domestic HTTPS origin as the unified workbench after domain cutover; switching DC_ASSISTANT_H5_ORIGIN does not change H5 routes or publish an employee-Mac address.",
+      "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/harness/test_feishu_material_quotation_contract.py -q"
+    },
+    {
+      "id": "fmq-012",
+      "description": "The NAS assistant process silently records only timestamp, source IP, method, status code, and service name for H5 requests, without recording capability URLs, query strings, request bodies, or quotation data.",
+      "verification": "uv run pytest tests/test_dashboard.py tests/harness/test_feishu_material_quotation_contract.py -q"
+    },
+    {
+      "id": "fmq-013",
+      "description": "Each material row accepts either one image or a batch of up to six validated images in one selection, shows working local thumbnail previews with click-to-enlarge lightbox viewing, archives every image to the mounted NAS knowledge share, and lays all selected images out in that row's Excel 图示 cell; every generated quotation revision is mirrored with a manifest under projects/筹备组物料报价/<draft>/v<version> while images remain in the sibling images directory.",
+      "verification": "uv run pytest tests/test_material_quotation_delivery.py tests/test_assistant_attachment_upload.py tests/harness/test_feishu_material_quotation_contract.py -q"
+    }
+  ],
+  "network_access": {
+    "shared_origin": "http://192.168.1.35:6185 during LAN phase; HTTPS origin configured by DC_ASSISTANT_H5_ORIGIN after domain cutover",
+    "external_port": 6185,
+    "forward_target": "http://127.0.0.1:6285",
+    "origin_environment": "DC_ASSISTANT_H5_ORIGIN",
+    "ingress": "NAS LAN forward during phase 1; Tencent Cloud domestic reverse tunnel after domain cutover",
+    "container_binding": "127.0.0.1:6285 -> dc-agent:6185",
+    "future_origin": "https://workbench.gx-dianchi.cn",
+    "public_nas_port_required": false,
+    "connection_audit": {
+      "path": "data/watchdog/h5_connections/history.jsonl",
+      "fields": [
+        "observed_at",
+        "source_ip",
+        "method",
+        "status_code",
+        "service"
+      ],
+      "forbidden": [
+        "url",
+        "query",
+        "request_body",
+        "capability_token",
+        "quotation_data"
+      ]
+    }
+  },
+  "surface_boundaries": {
+    "preparation_internal": [
+      "material rows",
+      "material images",
+      "supplier",
+      "historical source",
+      "unit cost",
+      "transport",
+      "installation",
+      "rush fee",
+      "loss",
+      "profit",
+      "tax"
+    ],
+    "market_result": [
+      "project name",
+      "client or brand",
+      "final estimate",
+      "validity",
+      "estimate status",
+      "sanitized Word and PDF downloads",
+      "optional Feishu cloud document sync"
+    ],
+    "must_not_expose_on_market_result": [
+      "material details",
+      "supplier",
+      "historical source",
+      "unit cost",
+      "cost breakdown",
+      "profit"
+    ]
+  },
+  "calculation_policy": {
+    "item_subtotal": "quantity * unit_price",
+    "loss_fee": "priced_items_subtotal * loss_rate",
+    "cost_base": "priced_items_subtotal + loss_fee + transport_fee + installation_fee + rush_fee",
+    "profit_fee": "cost_base * profit_rate",
+    "tax_fee": "(cost_base + profit_fee) * tax_rate",
+    "grand_total": "cost_base + profit_fee + tax_fee",
+    "missing_price": "待询价，不计入当前合计",
+    "market_result_gate": "待询价数量必须为 0，才能生成并发送市场部估价结果"
+  },
+  "supplier_price_intake": {
+    "entry": "报价工具首页 / 新增合作公司价格",
+    "modes": [
+      "手工单项",
+      "手工多项",
+      "上传原始报价资料"
+    ],
+    "review_status": "待复核",
+    "archive": {
+      "authoritative": "NAS projects/供应商价格库",
+      "obsidian_note": "ObsidianVault/20_Operations/供应商库/员工录入"
+    },
+    "index": "data/nas_memory.db",
+    "unit_policy": "单位使用含印刷、广告制作、搭建常用口径的下拉列表；历史资料未记录时保持空白并要求员工选择"
+  },
+  "quotation_archive": {
+    "root": "NAS knowledge/projects/筹备组物料报价",
+    "draft_layout": "<draft-token-prefix>/images and <draft-token-prefix>/v<version>",
+    "runtime_download_cache": "data/output/material_quotations/<capability-token>/v<version>",
+    "image_policy": "Single or batch PNG, JPEG, or WebP input; up to 6 images per material and 10 MB per image; server-normalized PNG; embedded only in the internal Excel workbook"
+  },
+  "verification": {
+    "targeted": "uv run pytest tests/test_material_quotation.py tests/test_material_quotation_delivery.py tests/test_supplier_price_intake.py tests/test_assistant_attachment_upload.py tests/dc_router/test_assistant_workbench.py tests/harness/test_feishu_material_quotation_contract.py -q"
+  }
+}

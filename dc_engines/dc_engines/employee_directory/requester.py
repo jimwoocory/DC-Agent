@@ -4,6 +4,7 @@ from typing import Any
 
 from dc_engines.org_permissions import (
     PermissionAssignment,
+    build_principal_context,
     build_principal_context_from_employee,
 )
 
@@ -16,6 +17,17 @@ def requester_meta_from_employee(
     | tuple[PermissionAssignment, ...]
     | None = None,
 ) -> dict[str, Any]:
+    """Build Runtime Principal metadata from a known employee profile.
+
+    Args:
+        emp: Employee directory record supplying organization identity.
+        admins_id: Legacy global DC administrator identifiers.
+        permission_assignments: Persisted DC runtime permission assignments.
+
+    Returns:
+        Subject-bound requester metadata for events and Harness tasks.
+    """
+
     preferences = getattr(emp, "preferences", None) or {}
     department_path = preferences.get("department_path") or []
     department_aliases = preferences.get("department_aliases") or []
@@ -26,6 +38,7 @@ def requester_meta_from_employee(
     )
     return {
         "requester_open_id": emp.open_id,
+        "requester_identity_source": "employee_directory",
         "requester_display_name": emp.display_name or "",
         "requester_department": emp.department or "",
         "requester_canonical_department": principal.department,
@@ -44,20 +57,23 @@ def requester_meta_from_employee(
         "requester_managed_departments": list(principal.managed_departments),
         "requester_principal_type": principal.principal_type,
         "requester_dc_permissions": [
-            {
-                "permission": assignment.permission,
-                "scope": assignment.scope,
-                "source": assignment.source,
-                "subject_type": assignment.subject_type,
-            }
-            for assignment in principal.permissions
+            assignment.to_record() for assignment in principal.permissions
         ],
         "requester_external_facts": principal.external_facts,
     }
 
 
 async def requester_meta_from_event(context: Any, event: Any) -> dict[str, Any]:
-    """Build a stable requester payload from the runtime event."""
+    """Resolve or reuse the Runtime Principal for an inbound event.
+
+    Args:
+        context: Shared runtime context exposing identity and permission stores.
+        event: Inbound event providing a stable sender identifier.
+
+    Returns:
+        Subject-bound requester metadata, or an empty mapping without a sender.
+    """
+
     try:
         sender_id = str(event.get_sender_id() or "").strip()
     except Exception:  # noqa: BLE001
@@ -65,17 +81,15 @@ async def requester_meta_from_event(context: Any, event: Any) -> dict[str, Any]:
     if not sender_id:
         return {}
 
-    payload: dict[str, Any] = {"requester_open_id": sender_id}
-    emp_store = getattr(context, "employee_store", None)
-    if emp_store is None:
-        return payload
-
     try:
-        emp = await emp_store.get_employee(sender_id)
+        cached = event.get_extra("dc_runtime_principal", default=None)
     except Exception:  # noqa: BLE001
-        return payload
-    if emp is None:
-        return payload
+        cached = None
+    if (
+        isinstance(cached, dict)
+        and str(cached.get("requester_open_id") or "").strip() == sender_id
+    ):
+        return dict(cached)
 
     admins_id: list[str] | tuple[str, ...] = ()
     try:
@@ -99,11 +113,32 @@ async def requester_meta_from_event(context: Any, event: Any) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             permission_assignments = []
 
-    payload.update(
-        requester_meta_from_employee(
-            emp,
+    emp = None
+    emp_store = getattr(context, "employee_store", None)
+    if emp_store is not None:
+        try:
+            emp = await emp_store.get_employee(sender_id)
+        except Exception:  # noqa: BLE001
+            emp = None
+
+    if emp is None:
+        principal = build_principal_context(
+            subject_id=sender_id,
             admins_id=admins_id,
             permission_assignments=permission_assignments,
         )
+        return {
+            "requester_open_id": sender_id,
+            "requester_identity_source": "event_sender",
+            "requester_principal_type": principal.principal_type,
+            "requester_dc_permissions": [
+                assignment.to_record() for assignment in principal.permissions
+            ],
+            "requester_external_facts": principal.external_facts,
+        }
+
+    return requester_meta_from_employee(
+        emp,
+        admins_id=admins_id,
+        permission_assignments=permission_assignments,
     )
-    return payload

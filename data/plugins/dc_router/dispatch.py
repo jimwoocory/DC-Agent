@@ -29,12 +29,19 @@ from types import SimpleNamespace
 from typing import Any
 
 from astrbot.api import logger
+from astrbot.api.event import MessageEventResult
 
-from .config import DCRouterConfig, is_dc_router_managed_platform, load_config
+from .config import (
+    DCRouterConfig,
+    is_business_platform,
+    is_dc_router_managed_platform,
+    load_config,
+)
 from .pet_live_tap import record_router_pet_event
 from .preprocessing import (
     try_apply_feishu_channel_route,
     try_capture_sop_signal,
+    try_handle_assistant_workbench,
     try_handle_card_action,
     try_handle_chitchat,
     try_handle_context_alignment,
@@ -49,6 +56,7 @@ from .routing import (
     apply_provider_pin,
     build_envelope,
     classify_intent_v1,
+    extract_codex_tool_request,
     match_reasoning_prefix,
     reason_with_llm_v1,
 )
@@ -453,13 +461,125 @@ async def dispatch(
                 handled=True,
                 source="card_action" if not card_result.stop else "card_action_stopped",
             )
+        resumed_text = str(getattr(card_result, "resumed_text", "") or "")
+        if resumed_text:
+            text = resumed_text
+            event.message_str = text
 
-    # ── 2) 斜杠命令 → 旁路 ────────────────────────────────────────────
+    # ── 2) 飞书助手工作台菜单（固定路由，不调用 LLM）────────────────────
+    if is_dc_router_managed_platform(platform_id):
+        if await try_handle_assistant_workbench(context, event, text):
+            return DispatchResult(handled=True, source="assistant_workbench")
+
+    # ── 3) 斜杠命令 → 旁路 ────────────────────────────────────────────
     if _SLASH_RE.match(text):
         logger.debug("[dc_router] 斜杠命令绕过路由: %s", text[:80])
         return DispatchResult(handled=False, source="slash_command")
 
-    # ── 3) chitchat (group event 需 at/wake) ──────────────────────────
+    # ── 4) 用户显式调用 Codex Advanced Executor（真实 CLI，只读）────────
+    codex_tool_request = extract_codex_tool_request(text)
+    if codex_tool_request is not None:
+        if not codex_tool_request:
+            event.should_call_llm(False)
+            event.set_result(
+                MessageEventResult()
+                .message("请在 #codex工具 后写明需要深度处理的问题。")
+                .use_t2i(False)
+                .stop_event()
+            )
+            return DispatchResult(handled=True, source="codex_tool_empty")
+        text = codex_tool_request
+        event.message_str = text
+        message_obj = getattr(event, "message_obj", None)
+        if message_obj is not None:
+            try:
+                message_obj.message_str = text
+            except Exception:  # noqa: BLE001
+                pass
+        decision = SimpleNamespace(
+            provider_id="cli/codex/gpt-5.4",
+            intent="deep_insight",
+            source="user_explicit",
+            reason="explicit Codex Advanced Executor request",
+            metadata={
+                "capability": "deep_reasoning",
+                "owns_schedule": False,
+            },
+        )
+        if await apply_decision(context, event, decision):
+            return DispatchResult(
+                handled=True,
+                source="codex_tool",
+                decision_provider=decision.provider_id,
+                decision_intent=decision.intent,
+            )
+        logger.warning("[dc_router] explicit Codex tool failed; continue fallback")
+
+    # ── Structured executor decisions ────────────────────────────────────
+    # Trusted cards use this path in both active and rollback architecture modes.
+    routed_executor = ""
+    try:
+        routed_executor = str(
+            event.get_extra("dc_middle_router_executor") or ""
+        ).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    if routed_executor == "media_route":
+        capability_id = str(
+            event.get_extra("dc_middle_router_capability") or ""
+        ).strip()
+        goal = str(event.get_extra("dc_middle_router_goal") or text).strip()
+        parameters = event.get_extra("dc_middle_router_parameters") or {}
+        if not isinstance(parameters, dict):
+            parameters = {}
+        if await try_handle_media_route(
+            context,
+            event,
+            goal,
+            capability_id=capability_id,
+            parameters=parameters,
+        ):
+            return DispatchResult(
+                handled=True,
+                source="middle_router:media_route",
+                decision_intent=capability_id,
+            )
+        logger.error("[dc_router] approved media capability was not handled")
+
+    # ── Main Agent-first architecture ────────────────────────────────────
+    # Natural language bypasses legacy classification and enters Luna.
+    if getattr(cfg, "uses_middle_router", False) and is_business_platform(platform_id):
+        memory_query_text = await _build_memory_query(context, event)
+        await _memory_injection(event, query_text=memory_query_text)
+        try_inject_assistant_tone(event, text)
+        try:
+            event.set_extra("dc_middle_router_enforce_handoffs", True)
+            event.set_extra("dc_router_architecture", "middle")
+        except Exception:  # noqa: BLE001
+            pass
+        provider_id = str(
+            getattr(cfg, "main_agent_provider_id", "") or "codex/gpt-5.6-luna"
+        ).strip()
+        pinned = await apply_provider_pin(
+            context,
+            event,
+            target_provider_id=provider_id,
+            source="main_agent",
+            intent="conversation_or_agent_decision",
+            reason="Agent-first architecture",
+        )
+        if not pinned:
+            logger.warning(
+                "[dc_router] Luna main Agent unavailable; using current provider"
+            )
+        return DispatchResult(
+            handled=False,
+            source="main_agent",
+            decision_provider=provider_id if pinned else "",
+            decision_intent="conversation_or_agent_decision",
+        )
+
+    # ── 5) chitchat (group event 需 at/wake) ──────────────────────────
     if is_dc_router_managed_platform(platform_id):
         chat = await try_handle_chitchat(event, text)
         if chat.handled:
@@ -513,59 +633,73 @@ async def dispatch(
         # material-collection loop for an ordinary creative draft.
         if await try_handle_media_route(context, event, text):
             return DispatchResult(handled=True, source="media_route")
-        if await _maybe_truth_intake(context, event, cfg):
-            return DispatchResult(handled=True, source="truth_intake")
-        sop_signal = try_capture_sop_signal(event, text=text)
-        if sop_signal.stop and sop_signal.pending_state is not None:
-            await _send_sop_signal_prompt(context, event, sop_signal.pending_state)
-            return DispatchResult(
-                handled=True,
-                source="sop_signal_prompt",
-                decision_intent="sop_signal_suggested",
+        workbench_task_type = ""
+        try:
+            workbench_task_type = str(
+                event.get_extra("assistant_workbench_task_type") or ""
             )
-        memory_query_text = await _build_memory_query(context, event)
-        dept_decision = try_handle_department_memory(
-            event,
-            raw_text=text,
-            query_text=memory_query_text,
-            send_prompt_response=False,
-        )
-        if dept_decision.stop and dept_decision.audit_state is not None:
-            await _send_dept_memory_prompt(context, event, dept_decision.audit_state)
-            return DispatchResult(
-                handled=True,
-                source="dept_memory_prompt",
-                decision_intent="dept_memory_suggested",
-            )
-        effective_text = dept_decision.effective_text or text
-        if dept_decision.inject_memory and await _memory_injection(
-            event,
-            query_text=dept_decision.memory_query_text or memory_query_text,
+        except Exception:  # noqa: BLE001
+            pass
+        if workbench_task_type != "copy" and await _maybe_truth_intake(
+            context, event, cfg
         ):
-            record_router_pet_event(
-                event,
-                event_type="memory_context_injected",
-                payload={
-                    "query_len": len(
-                        dept_decision.memory_query_text or memory_query_text
-                    )
-                },
-            )
-            try:
-                hits = event.get_extra("dc_agent_memory_hits") or {}
-                documents = int(hits.get("documents", 0) or 0)
-                governed_memories = int(hits.get("governed_memories", 0) or 0)
-                project_items = int(hits.get("project_items", 0) or 0)
-                logger.info(
-                    "[dc_router] memory injected platform=%s governed=%s docs=%s items=%s total=%s",
-                    platform_id,
-                    governed_memories,
-                    documents,
-                    project_items,
-                    governed_memories + documents + project_items,
+            return DispatchResult(handled=True, source="truth_intake")
+        if workbench_task_type != "copy":
+            sop_signal = try_capture_sop_signal(event, text=text)
+            if sop_signal.stop and sop_signal.pending_state is not None:
+                await _send_sop_signal_prompt(context, event, sop_signal.pending_state)
+                return DispatchResult(
+                    handled=True,
+                    source="sop_signal_prompt",
+                    decision_intent="sop_signal_suggested",
                 )
-            except Exception:  # noqa: BLE001
-                pass
+        effective_text = text
+        if workbench_task_type != "copy":
+            memory_query_text = await _build_memory_query(context, event)
+            dept_decision = try_handle_department_memory(
+                event,
+                raw_text=text,
+                query_text=memory_query_text,
+                send_prompt_response=False,
+            )
+            if dept_decision.stop and dept_decision.audit_state is not None:
+                await _send_dept_memory_prompt(
+                    context, event, dept_decision.audit_state
+                )
+                return DispatchResult(
+                    handled=True,
+                    source="dept_memory_prompt",
+                    decision_intent="dept_memory_suggested",
+                )
+            effective_text = dept_decision.effective_text or text
+            if dept_decision.inject_memory and await _memory_injection(
+                event,
+                query_text=dept_decision.memory_query_text or memory_query_text,
+            ):
+                record_router_pet_event(
+                    event,
+                    event_type="memory_context_injected",
+                    payload={
+                        "query_len": len(
+                            dept_decision.memory_query_text or memory_query_text
+                        )
+                    },
+                )
+                try:
+                    hits = event.get_extra("dc_agent_memory_hits") or {}
+                    documents = int(hits.get("documents", 0) or 0)
+                    governed_memories = int(hits.get("governed_memories", 0) or 0)
+                    project_items = int(hits.get("project_items", 0) or 0)
+                    logger.info(
+                        "[dc_router] memory injected platform=%s governed=%s docs=%s items=%s total=%s",
+                        platform_id,
+                        governed_memories,
+                        documents,
+                        project_items,
+                        governed_memories + documents + project_items,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         # assistant tone — 永远走，不阻塞
         if try_inject_assistant_tone(event, effective_text):
             logger.info(

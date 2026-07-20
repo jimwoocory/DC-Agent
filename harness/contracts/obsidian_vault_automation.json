@@ -26,6 +26,11 @@
       "id": "ova-005",
       "description": "The Phase 1 scope documents the later sync surfaces for company knowledge maps, RawRefs, and review workbench notes while explicitly excluding live write-back and bulk delete or move operations.",
       "verification": "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py::test_contract_records_phase1_scope_and_non_goals -q"
+    },
+    {
+      "id": "ova-006",
+      "description": "The NAS main Agent can search, read, and list the real mounted company Obsidian vault through bounded admin-only LLM tools while the container mount remains read-only.",
+      "verification": "uv run pytest tests/test_obsidian_vault_tools.py -q"
     }
   ],
   "permission_model": {
@@ -71,6 +76,17 @@
       "authoring_skill": "May propose note content or metadata.",
       "execution_skill": "May request wrapper operations and must receive policy decisions, dry-run plans, and audit ids."
     }
+  },
+  "runtime_integration": {
+    "vault_mount": "/AstrBot/ObsidianVault",
+    "mount_mode": "read_only",
+    "authorization": "AstrBot admins_id",
+    "llm_tools": [
+      "search_obsidian_vault",
+      "read_obsidian_note",
+      "list_obsidian_vault"
+    ],
+    "context_policy": "retrieve_on_demand"
   },
   "non_goals": [
     "Do not enable live write-back in Phase 1.",

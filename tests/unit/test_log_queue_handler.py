@@ -1,6 +1,12 @@
 import logging
+from unittest.mock import call, patch
 
-from astrbot.core.log import LogBroker, LogQueueHandler, SafeAstrBotFormatter
+from astrbot.core.log import (
+    LogBroker,
+    LogManager,
+    LogQueueHandler,
+    SafeAstrBotFormatter,
+)
 
 
 def test_log_queue_handler_enriches_plain_log_records() -> None:
@@ -44,3 +50,15 @@ def test_safe_astrbot_formatter_enriches_plain_log_records() -> None:
     )
 
     assert formatter.format(record) == "[Core] [INFO] [tmp.external:12]: hello"
+
+
+def test_log_manager_shutdown_closes_owned_file_sinks(monkeypatch) -> None:
+    monkeypatch.setattr(LogManager, "_file_sink_id", 101)
+    monkeypatch.setattr(LogManager, "_trace_sink_id", 202)
+
+    with patch.object(LogManager, "_remove_sink") as remove_sink:
+        LogManager.shutdown()
+
+    assert remove_sink.call_args_list == [call(202), call(101)]
+    assert LogManager._file_sink_id is None
+    assert LogManager._trace_sink_id is None

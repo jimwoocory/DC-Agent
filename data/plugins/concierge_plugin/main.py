@@ -33,6 +33,7 @@ from dc_engines.employee_directory import (
     EmployeeMemoryBridge,
     EmployeeStore,
     RelationType,
+    requester_meta_from_event,
     sync_from_feishu,
 )
 from dc_engines.feishu_reader import FeishuClient
@@ -41,6 +42,7 @@ from dc_engines.org_permissions import (
     DC_ADMIN,
     PermissionAssignment,
     PermissionAssignmentStore,
+    authorize_permission_records,
     build_principal_context_from_employee,
     can_view_employee_profile,
     normalize_department_name,
@@ -356,37 +358,47 @@ class ConciergePlugin(Star):
         report = await sync_from_feishu(
             self.store,
             self.feishu_client,
-            authoritative=bool(
-                self.config.get("employee_directory_sync_authoritative", True)
-            ),
+            organization_people=self._load_expected_org_people(),
+            authoritative=False,
+            preview_only=True,
         )
         result = {
             "success": report.success,
             "source": source,
+            "preview_only": report.preview_only,
+            "plan_id": report.plan_id,
             "departments_scanned": report.departments_scanned,
             "department_names": report.department_names[:50],
             "users_added": report.users_added,
             "users_updated": report.users_updated,
             "users_skipped": report.users_skipped,
+            "roster_enriched_count": report.roster_enriched_count,
+            "conflict_count": report.conflict_count,
+            "review_required_count": report.review_required_count,
             "error": report.error,
         }
         if report.success:
             result["org_coverage"] = await self._build_employee_org_coverage()
         if report.success:
             logger.info(
-                "[concierge] 员工目录自动同步完成 source=%s departments=%s added=%s updated=%s skipped=%s coverage=%s/%s missing=%s",
+                "[concierge] Employee directory sync completed source=%s preview=%s plan_id=%s departments=%s added=%s updated=%s skipped=%s roster_enriched=%s conflicts=%s review=%s coverage=%s/%s missing=%s",
                 source,
+                report.preview_only,
+                report.plan_id,
                 report.departments_scanned,
                 report.users_added,
                 report.users_updated,
                 report.users_skipped,
+                report.roster_enriched_count,
+                report.conflict_count,
+                report.review_required_count,
                 result.get("org_coverage", {}).get("matched_people", 0),
                 result.get("org_coverage", {}).get("expected_people", 0),
                 result.get("org_coverage", {}).get("missing_people", [])[:10],
             )
         else:
             logger.warning(
-                "[concierge] 员工目录自动同步失败 source=%s error=%s",
+                "[concierge] Employee directory sync failed source=%s error=%s",
                 source,
                 report.error,
             )
@@ -713,6 +725,23 @@ class ConciergePlugin(Star):
         return updated or emp
 
     # ─────────────────────── 交互追踪 + 自我介绍抽取 ───────────────────────
+
+    @filter.event_message_type(
+        EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE,
+        priority=190,
+    )
+    async def resolve_runtime_principal(self, event: AstrMessageEvent) -> None:
+        """Publish one Runtime Principal before Router execution.
+
+        Args:
+            event: Inbound platform event whose sender becomes the principal.
+        """
+
+        metadata = await requester_meta_from_event(self.context, event)
+        for key, value in metadata.items():
+            event.set_extra(key, value)
+        if metadata:
+            event.set_extra("dc_runtime_principal", metadata)
 
     @filter.event_message_type(
         EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE
@@ -1764,14 +1793,15 @@ class ConciergePlugin(Star):
             permission_rows = event.get_extra("requester_dc_permissions", default=[])
         except Exception:  # noqa: BLE001
             permission_rows = getattr(event, "requester_dc_permissions", [])
-        if not isinstance(permission_rows, list):
-            return False
-        for item in permission_rows:
-            if not isinstance(item, dict):
-                continue
-            if item.get("permission") == permission:
-                return True
-        return False
+        try:
+            subject_id = str(event.get_sender_id() or "").strip()
+        except Exception:  # noqa: BLE001
+            subject_id = ""
+        return authorize_permission_records(
+            subject_id=subject_id,
+            records=permission_rows,
+            permission=permission,
+        ).allowed
 
     def _is_private_event(self, event: AstrMessageEvent) -> bool:
         try:
@@ -1808,7 +1838,8 @@ class ConciergePlugin(Star):
             self._reply(
                 event,
                 "📒 员工目录命令：\n"
-                "  /employees sync — 从飞书通讯录拉全员（admin）\n"
+                "  /employees sync — 预览飞书通讯录安全补全计划（admin）\n"
+                "  /employees sync apply <plan_id> — 应用同一份已预览计划\n"
                 "  /employees ls [N] — 列出 N 条已记录员工（默认 20）\n"
                 "  /employees eval — 评估身份识别、称呼、长短期记忆是否生效\n"
                 "  /employees fix <open_id前缀> key=value ... — 手工校准档案\n"
@@ -1827,7 +1858,30 @@ class ConciergePlugin(Star):
                     "`contact:user.id:read` + `contact:department.base:read`。",
                 )
                 return
-            report = await sync_from_feishu(self.store, self.feishu_client)
+            apply_requested = len(parts) > 1 and parts[1].lower() == "apply"
+            expected_plan_id = parts[2].strip() if len(parts) > 2 else ""
+            if len(parts) > 1 and not apply_requested:
+                self._reply(
+                    event,
+                    "⚠️ 用法：/employees sync（预览）或 "
+                    "/employees sync apply <plan_id>（应用）。",
+                )
+                return
+            if apply_requested and not expected_plan_id:
+                self._reply(
+                    event,
+                    "⚠️ 请先执行 /employees sync 获取 plan_id，再执行 "
+                    "/employees sync apply <plan_id>。",
+                )
+                return
+            report = await sync_from_feishu(
+                self.store,
+                self.feishu_client,
+                organization_people=self._load_expected_org_people(),
+                authoritative=False,
+                preview_only=not apply_requested,
+                expected_plan_id=expected_plan_id,
+            )
             if not report.success:
                 self._reply(event, f"⚠️ 同步失败：{report.error}")
                 return
@@ -1837,19 +1891,37 @@ class ConciergePlugin(Star):
             missing_departments = (
                 "、".join(coverage["missing_departments"][:10]) or "无"
             )
-            self._reply(
-                event,
-                "✅ 同步完成：\n"
-                f"  • 扫描部门 {report.departments_scanned} 个\n"
-                f"  • 部门：{'、'.join(report.department_names[:8]) or '（无）'}\n"
-                f"  • 新增 {report.users_added}\n"
-                f"  • 更新 {report.users_updated}\n"
-                f"  • 跳过 {report.users_skipped}\n"
-                f"  • 公司组织覆盖 {coverage['matched_people']}/{coverage['expected_people']}\n"
-                f"  • 缺失部门：{missing_departments}\n"
-                f"  • 缺失人员：{missing_people}\n"
-                f"  • 示例：{samples}",
-            )
+            if report.preview_only:
+                self._reply(
+                    event,
+                    "🧾 员工身份同步预览（尚未修改本地档案）：\n"
+                    f"  • plan_id：{report.plan_id}\n"
+                    f"  • 扫描部门 {report.departments_scanned} 个\n"
+                    f"  • 预计新增 {report.users_added}\n"
+                    f"  • 预计补全 {report.users_updated}\n"
+                    f"  • 其中组织花名册岗位补全 {report.roster_enriched_count}\n"
+                    f"  • 保留本地值的冲突 {report.conflict_count}\n"
+                    f"  • 同步后仍需人工补充 {report.review_required_count}\n"
+                    f"  • 跳过 {report.users_skipped}\n"
+                    f"  • 公司组织覆盖 {coverage['matched_people']}/{coverage['expected_people']}\n"
+                    f"  • 缺失部门：{missing_departments}\n"
+                    f"  • 缺失人员：{missing_people}\n"
+                    f"  • 示例：{samples}\n"
+                    "确认后执行：/employees sync apply "
+                    f"{report.plan_id}",
+                )
+            else:
+                self._reply(
+                    event,
+                    "✅ 员工身份安全补全已应用：\n"
+                    f"  • plan_id：{report.plan_id}\n"
+                    f"  • 新增 {report.users_added}\n"
+                    f"  • 补全 {report.users_updated}\n"
+                    f"  • 其中组织花名册岗位补全 {report.roster_enriched_count}\n"
+                    f"  • 保留本地值的冲突 {report.conflict_count}\n"
+                    f"  • 仍需人工补充 {report.review_required_count}\n"
+                    "  • 未改动任何权限；员工下一条消息会自动按新档案重新识别。",
+                )
             return
 
         if sub == "ls":

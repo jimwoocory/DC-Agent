@@ -11,7 +11,6 @@
 # 不做的事（避坑）：
 #   - 不直接接管进程生命周期（让 launchd KeepAlive 自己处理）
 #   - failure 持续期间不重复诊断（30 分钟冷却）
-#   - 探不到 :4312（OpenClaw 按需启，不在线是正常）
 
 set -euo pipefail
 
@@ -25,6 +24,7 @@ export no_proxy="${no_proxy:+$no_proxy,}$LOCAL_NO_PROXY"
 
 DC_ROOT="/Users/dianchi/DC-Agent"
 WD_ROOT="$DC_ROOT/data/watchdog"
+PRIMARY_RUNTIME="${DC_AGENT_PRIMARY_RUNTIME:-nas}"
 STATE_FILE="$WD_ROOT/state.json"
 ALERTS_LOG="$WD_ROOT/alerts.jsonl"
 INCIDENT_DIR="$WD_ROOT/incidents"
@@ -49,6 +49,20 @@ if [ -f "$MAINT_LOCK" ]; then
         exit 0
     fi
 fi
+
+# Review reminders are independent from probe evaluation and run under their
+# own non-blocking lock. Notification failure never delays the health loop.
+nohup "$DC_ROOT/.venv/bin/python" \
+    "$DC_ROOT/scripts-watchdog/review_notifier.py" \
+    >/dev/null 2>>"$WD_ROOT/review_notifier.log" &
+disown $! 2>/dev/null || true
+
+# Refresh a derived, read-only repair reliability snapshot. The script gates
+# itself to one refresh per five minutes and never deletes audit history.
+nohup "$DC_ROOT/.venv/bin/python" \
+    "$DC_ROOT/scripts-watchdog/repair_analytics.py" \
+    >/dev/null 2>>"$WD_ROOT/repair_analytics.log" &
+disown $! 2>/dev/null || true
 
 now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 now_ts() { date +%s; }
@@ -213,7 +227,7 @@ trigger_diagnose() {
     if in_cooldown "$name"; then
         emit_event "$name" "$kind:$target" "$cur" "$cur" "cooldown_skipped_diagnose"
     else
-        incident_id=$(date +%s)
+        incident_id="$(date +%s)-$name"
         write_incident "$name" "$kind:$target" "$cur" "$incident_id"
         mark_diag_done "$name"
         # 异步跑 diagnose（不阻塞下次 cron）
@@ -285,9 +299,9 @@ snapshot = {
     'probe': '$probe',
     'cur_status': '$cur',
     'context': {
-        'launchctl_list': safe_run('launchctl list | grep -E \"astrbot|hermes|openclaw\" | head -30'),
+        'launchctl_list': safe_run('launchctl list | grep -E \"astrbot|hermes\" | head -30'),
         'pgrep_python': safe_run('ps -ef | grep -E \"python.*(main.py|hermes_cli|hermes-webui|server.py)\" | grep -v grep | head -20'),
-        'lsof_ports': safe_run('lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -E \":(6185|8644|8645|8787|9119|9120)\" | head -30'),
+        'lsof_ports': safe_run('lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -E \":(6185|8644|8645|8787|9119)\" | head -30'),
         'astrbot_log_tail': safe_run('tail -40 /Users/dianchi/DC-Agent/astrbot.log 2>/dev/null'),
         'hermes_log_tail': safe_run('tail -30 /Users/dianchi/DC-Agent/hermes-config/logs/gateway.log 2>/dev/null'),
         'hermes_err_tail': safe_run('tail -10 /Users/dianchi/DC-Agent/hermes-config/logs/gateway.error.log 2>/dev/null'),
@@ -333,12 +347,12 @@ json.dump(d, open(p, 'w'), indent=2)
 SERVICES=()
 while IFS= read -r entry; do
     [ -n "$entry" ] && SERVICES+=("$entry")
-done < <("$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" list-active)
+done < <("$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" list-active --runtime "$PRIMARY_RUNTIME")
 
 DISABLED_SERVICES=()
 while IFS= read -r entry; do
     [ -n "$entry" ] && DISABLED_SERVICES+=("$entry")
-done < <("$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" list-disabled)
+done < <("$DC_ROOT/.venv/bin/python" "$DC_ROOT/scripts-watchdog/watchdog_engine.py" list-disabled --runtime "$PRIMARY_RUNTIME")
 
 for entry in "${DISABLED_SERVICES[@]}"; do
     IFS='|' read -r name reason <<< "$entry"
@@ -419,7 +433,7 @@ for entry in "${SERVICES[@]}"; do
                 if in_cooldown "$name"; then
                     emit_event "$name" "$kind:$target" "$prev_status" "$cur" "cooldown_skipped_diagnose"
                 else
-                    incident_id=$(date +%s)
+                    incident_id="$(date +%s)-$name"
                     write_incident "$name" "$kind:$target" "$cur" "$incident_id"
                     mark_diag_done "$name"
                     # 异步跑 diagnose（不阻塞下次 cron）
@@ -429,7 +443,7 @@ for entry in "${SERVICES[@]}"; do
             elif in_cooldown "$name"; then
                 emit_event "$name" "$kind:$target" "$prev_status" "$cur" "cooldown_skipped_diagnose"
             else
-                incident_id=$(date +%s)
+                incident_id="$(date +%s)-$name"
                 write_incident "$name" "$kind:$target" "$cur" "$incident_id"
                 mark_diag_done "$name"
                 # 异步跑 diagnose（不阻塞下次 cron）

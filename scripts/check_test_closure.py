@@ -24,6 +24,7 @@ SCRIPT_SUFFIXES = {
 
 EXCLUDED_PREFIXES = (
     ".git/",
+    ".worktrees/",
     ".venv/",
     ".uv-cache/",
     ".antigravitycli/",
@@ -94,7 +95,12 @@ def looks_like_test_path(path: str) -> bool:
 
 def is_excluded(path: str) -> bool:
     parts = set(Path(path).parts)
-    if "node_modules" in parts or "__pycache__" in parts or ".venv" in parts:
+    if (
+        "node_modules" in parts
+        or "__pycache__" in parts
+        or ".venv" in parts
+        or ".worktrees" in parts
+    ):
         return True
     return path.startswith(EXCLUDED_PREFIXES)
 

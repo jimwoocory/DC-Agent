@@ -1,0 +1,73 @@
+{
+  "contract_id": "middle_router_architecture",
+  "version": "1.1.0",
+  "status": "active",
+  "supersedes": "routing_merge_contract@2.0.0 for the 巅池-Agent小助手 natural-language path",
+  "goal": "Use GPT-5.6-Luna as the main Agent for natural-language understanding while keeping one deterministic Router in the middle of Agent/menu/card requests and bounded executors.",
+  "architecture": {
+    "access_layer": "Feishu access control, Runtime Principal resolution, message normalization",
+    "natural_language_path": "Feishu -> GPT-5.6-Luna main Agent -> AgentDecision -> middle Router",
+    "deterministic_path": "Feishu menu or trusted card -> middle Router",
+    "ordinary_chat": "GPT-5.6-Luna replies directly without entering the Router",
+    "router_interface": "dc_router_core.middle_router.MiddleRouter.route",
+    "router_adapter": "data.plugins.dc_router.middle_router_adapter.route_capability_request",
+    "executors": [
+      "deterministic tools/services",
+      "H5 workbench",
+      "Harness-governed executors",
+      "AstrBot subagents",
+      "Codex Advanced Executor"
+    ],
+    "subagents": [
+      "research_agent",
+      "office_agent",
+      "analysis_agent"
+    ]
+  },
+  "invariants": [
+    "Router appears once in the runtime path and never performs natural-language classification.",
+    "The Codex OAuth main Agent honors provider-scoped proxy configuration on NAS and never assumes direct chatgpt.com egress.",
+    "AgentDecision contains a capability id and goal but cannot name an arbitrary provider or executor.",
+    "Only the deterministic catalog maps a capability to an implementation.",
+    "Menu and card callbacks use the same Router Interface as the main Agent.",
+    "Untrusted card callbacks cannot execute capabilities.",
+    "A main Agent handoff must be approved by the middle Router before transfer_to_* executes.",
+    "H5 navigation is reversible and does not create a task until the user explicitly confirms execution.",
+    "When the main Agent has a complete media prompt in real conversation context and the user explicitly confirms generation, execute.image or execute.video starts media_route directly with the complete prompt instead of reopening H5.",
+    "After the middle Router approves execute.image or execute.video, the executor consumes the approved capability, goal, and parameters directly and never reclassifies that goal with legacy trigger regexes.",
+    "Legacy media trigger regexes apply only to unstructured messages in legacy_front mode and never override or veto a middle Router decision.",
+    "Menu-only and incomplete media requests remain workspace.image or workspace.video navigation and never infer a prompt from a confirmation phrase alone.",
+    "Harness owns task lifecycle and settlement; Router and Advanced Executors never own scheduling."
+  ],
+  "rollout": {
+    "config": "data/config/dc_router_config.json",
+    "active_mode": "middle",
+    "rollback_mode": "legacy_front",
+    "main_agent_provider": "codex/gpt-5.6-luna",
+    "main_agent_model": "gpt-5.6-luna",
+    "main_agent_proxy_config_key": "proxy",
+    "required_main_agent_modality": "tool_use"
+  },
+  "acceptance_tests": [
+    {
+      "id": "MRA-001",
+      "title": "Unknown capabilities and untrusted cards are denied",
+      "verification": "uv run pytest tests/dc_router/test_middle_router.py -q"
+    },
+    {
+      "id": "MRA-002",
+      "title": "Middle mode bypasses legacy natural-language classification",
+      "verification": "uv run pytest tests/dc_router/test_middle_router_dispatch.py -q"
+    },
+    {
+      "id": "MRA-003",
+      "title": "AstrBot subagent handoffs require Router approval",
+      "verification": "uv run pytest tests/unit/test_astr_agent_tool_exec.py -q"
+    },
+    {
+      "id": "MRA-004",
+      "title": "Confirmed media context executes directly without legacy reclassification while incomplete requests remain workspace navigation",
+      "verification": "uv run pytest tests/dc_router/test_main_agent_media_execution.py tests/dc_router/test_middle_router.py tests/dc_router/test_media_route_policy.py -q"
+    }
+  ]
+}

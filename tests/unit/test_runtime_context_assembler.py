@@ -1,10 +1,24 @@
 from astrbot.core.provider.entities import ProviderRequest
-from astrbot.core.runtime_context.assembler import RuntimeContextAssembler
+from astrbot.core.runtime_context.assembler import (
+    RUNTIME_CONTEXT_SECTION_MAX_CHARS,
+    RuntimeContextAssembler,
+)
 from astrbot.core.runtime_context.models import (
+    RUNTIME_CONTEXT_SECTIONS_EXTRA_KEY,
     RuntimeContextPriority,
     RuntimeContextSection,
     RuntimeContextSource,
 )
+
+
+class _Event:
+    def __init__(self, sections: list[RuntimeContextSection]) -> None:
+        self.sections = sections
+
+    def get_extra(self, key: str):
+        if key == RUNTIME_CONTEXT_SECTIONS_EXTRA_KEY:
+            return self.sections
+        return None
 
 
 def test_runtime_context_section_defaults_to_transient_reference_when_memory() -> None:
@@ -73,3 +87,35 @@ def test_assembler_preserves_prompt_when_memory_marker_is_unclosed() -> None:
     )
     assert req.extra_user_content_parts == []
     assert "recent conversation history first" not in req.system_prompt
+
+
+def test_assembler_orders_deduplicates_and_bounds_event_sections() -> None:
+    req = ProviderRequest(prompt="不满意")
+    memory = RuntimeContextSection.memory_reference(
+        text="长期记忆" * 5_000,
+        source_id="dc_memory_context",
+    )
+    background = RuntimeContextSection(
+        text="后台状态",
+        source=RuntimeContextSource.SYSTEM,
+        priority=RuntimeContextPriority.BACKGROUND,
+        no_save=True,
+        source_id="runtime_status",
+    )
+    event = _Event([background, memory, memory])
+    assembler = RuntimeContextAssembler()
+
+    assembler.normalize(req, event=event)
+    assembler.normalize(req, event=event)
+
+    assert req.prompt == "不满意"
+    assert len(req.extra_user_content_parts) == 2
+    assert "priority=reference" in req.extra_user_content_parts[0].text
+    assert "priority=background" in req.extra_user_content_parts[1].text
+    assert req.extra_user_content_parts[0].text.count("长期记忆") < 5_000
+    assert len(req.extra_user_content_parts[0].text) < (
+        RUNTIME_CONTEXT_SECTION_MAX_CHARS + 500
+    )
+    assert all(
+        getattr(part, "_no_save") is True for part in req.extra_user_content_parts
+    )

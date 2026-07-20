@@ -121,6 +121,18 @@ class PrincipalContext:
         return has_permission(self.permissions, permission, scope=scope)
 
 
+@dataclass(frozen=True, slots=True)
+class AuthorizationDecision:
+    """Deterministic result of one scoped DC permission check."""
+
+    allowed: bool
+    subject_id: str
+    permission: str
+    scope: str
+    reason: str
+    matched_assignment: PermissionAssignment | None = None
+
+
 _PERMISSION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS dc_permission_assignments (
     subject_id TEXT NOT NULL,
@@ -360,6 +372,17 @@ def has_permission(
     *,
     scope: str = "*",
 ) -> bool:
+    """Check an exact DC permission and organization scope.
+
+    Args:
+        assignments: Subject-bound permission assignments to inspect.
+        permission: Exact permission required by the caller.
+        scope: Exact scope required; ``*`` requires a global assignment.
+
+    Returns:
+        Whether one enabled assignment grants the requested authority.
+    """
+
     requested_scope = normalize_department_name(scope)
     for assignment in assignments:
         if not assignment.enabled:
@@ -367,13 +390,109 @@ def has_permission(
         if assignment.permission != permission:
             continue
         assignment_scope = normalize_department_name(assignment.scope)
-        if (
-            assignment_scope == "*"
-            or requested_scope == "*"
-            or assignment_scope == requested_scope
-        ):
+        if assignment_scope == "*" or assignment_scope == requested_scope:
             return True
     return False
+
+
+def authorize_permission_records(
+    *,
+    subject_id: str,
+    records: Any,
+    permission: str,
+    scope: str = "*",
+) -> AuthorizationDecision:
+    """Authorize subject-bound serialized permission records.
+
+    Args:
+        subject_id: Runtime Principal subject requesting authorization.
+        records: Serialized permission records published by Principal resolution.
+        permission: Exact DC runtime permission required by the caller.
+        scope: Exact organization scope required by the caller.
+
+    Returns:
+        A deterministic decision including the matched assignment when allowed.
+    """
+
+    normalized_subject_id = (subject_id or "").strip()
+    normalized_permission = (permission or "").strip()
+    normalized_scope = normalize_department_name(scope or "*")
+    if not normalized_subject_id:
+        return AuthorizationDecision(
+            allowed=False,
+            subject_id="",
+            permission=normalized_permission,
+            scope=normalized_scope,
+            reason="missing_subject",
+        )
+    if not normalized_permission:
+        return AuthorizationDecision(
+            allowed=False,
+            subject_id=normalized_subject_id,
+            permission="",
+            scope=normalized_scope,
+            reason="missing_permission",
+        )
+    if not isinstance(records, list | tuple):
+        return AuthorizationDecision(
+            allowed=False,
+            subject_id=normalized_subject_id,
+            permission=normalized_permission,
+            scope=normalized_scope,
+            reason="invalid_permission_records",
+        )
+
+    principal_type: PrincipalType = (
+        "app" if is_app_principal(normalized_subject_id) else "user"
+    )
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if str(record.get("subject_id") or "").strip() != normalized_subject_id:
+            continue
+        raw_subject_type = str(record.get("subject_type") or "").strip()
+        if raw_subject_type not in {"user", "app"}:
+            continue
+        record_subject_type: PrincipalType = (
+            "app" if raw_subject_type == "app" else "user"
+        )
+        if record_subject_type != principal_type:
+            continue
+        enabled = record.get("enabled")
+        if enabled is not True and enabled != 1:
+            continue
+        record_permission = str(record.get("permission") or "").strip()
+        record_scope = str(record.get("scope") or "").strip()
+        record_source = str(record.get("source") or "").strip()
+        if not record_permission or not record_scope or not record_source:
+            continue
+        if principal_type == "app" and record_permission != APP_RUNTIME:
+            continue
+        assignment = PermissionAssignment(
+            subject_id=normalized_subject_id,
+            subject_type=record_subject_type,
+            permission=record_permission,
+            scope=normalize_department_name(record_scope),
+            source=record_source,
+            enabled=True,
+            updated_at=str(record.get("updated_at") or ""),
+        )
+        if has_permission([assignment], normalized_permission, scope=normalized_scope):
+            return AuthorizationDecision(
+                allowed=True,
+                subject_id=normalized_subject_id,
+                permission=normalized_permission,
+                scope=normalized_scope,
+                reason="permission_granted",
+                matched_assignment=assignment,
+            )
+    return AuthorizationDecision(
+        allowed=False,
+        subject_id=normalized_subject_id,
+        permission=normalized_permission,
+        scope=normalized_scope,
+        reason="permission_denied",
+    )
 
 
 def can_view_employee_profile(

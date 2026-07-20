@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from PIL import Image as PILImage
@@ -53,6 +54,9 @@ class _HandledEvent(_Event):
 
     def set_extra(self, key: str, value: str) -> None:
         self.extras[key] = value
+
+    def get_extra(self, key: str, default=None):
+        return self.extras.get(key, default)
 
     def get_platform_id(self) -> str:
         return "巅池-Agent小助手"
@@ -105,12 +109,451 @@ async def test_generic_image_request_keeps_gpt_image_first_policy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_card_media_parameters_survive_route_detection() -> None:
+    image_route = await media_route._detect_route(
+        _Event(),
+        "#生图 夏季新品的小红书封面\n画面比例：3:4\n输出数量：2 张\n生成质量：高质量",
+    )
+    video_route = await media_route._detect_route(
+        _Event(),
+        "#视频 新品从水面升起，镜头环绕\n视频时长：10 秒\n画面比例：9:16\n视频质量：1080p",
+    )
+
+    assert image_route is not None
+    assert image_route.aspect_ratio == "portrait"
+    assert image_route.quality == "high"
+    assert image_route.image_count == 2
+    assert video_route is not None
+    assert video_route.kind == "text2video"
+    assert video_route.duration == 10
+    assert video_route.aspect_ratio == "portrait"
+    assert video_route.video_quality == "1080p"
+
+
+@pytest.mark.asyncio
+async def test_structured_image_parameters_build_route_without_trigger_text() -> None:
+    route = await media_route._route_from_structured_capability(
+        _Event(),
+        "第二张视觉变体",
+        SimpleNamespace(),
+        capability_id="execute.image",
+        parameters={
+            "visual_prompt": "北欧冰雪足球怪兽商业海报",
+            "aspect_ratio": "3:4",
+            "image_count": "2",
+            "quality": "high",
+            "model_choice": "dreamina",
+        },
+    )
+
+    assert route is not None
+    assert route.kind == "image"
+    assert route.prompt == "北欧冰雪足球怪兽商业海报"
+    assert route.aspect_ratio == "portrait"
+    assert route.image_count == 2
+    assert route.quality == "high"
+    assert route.image_provider_strategy == "dreamina_only"
+
+
+@pytest.mark.asyncio
+async def test_structured_image_capability_does_not_reclassify_confirmed_goal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execute the approved image capability even without legacy trigger wording."""
+    goal = (
+        "启动第二张变体：以哈兰德为主体，呈现挪威红蓝白视觉、北欧冰雪环境、"
+        "足球怪兽化力量感与商业海报质感，采用不同于上一张的构图和动作，并避免"
+        "使用未经授权的官方赛事标识或队徽。"
+    )
+    event = _HandledEvent()
+    stored_records: list[dict] = []
+
+    async def fake_background_job(*_args, **_kwargs):
+        return None
+
+    def fake_create_task(coro):
+        coro.close()
+        return SimpleNamespace(done=lambda: True, cancel=lambda: None)
+
+    monkeypatch.setattr(
+        media_route, "_start_waiting_card", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(media_route, "_background_job_with_record", fake_background_job)
+    monkeypatch.setattr(
+        media_route,
+        "_upsert_pending_media_task",
+        lambda record: stored_records.append(record),
+    )
+    monkeypatch.setattr(
+        media_route,
+        "search_company_creative_memory",
+        lambda *_args, **_kwargs: [],
+        raising=False,
+    )
+    monkeypatch.setattr(media_route.asyncio, "create_task", fake_create_task)
+
+    legacy_route = await media_route._detect_route(event, goal)
+    handled = await media_route.try_handle_media_route(
+        SimpleNamespace(),
+        event,
+        goal,
+        capability_id="execute.image",
+        parameters={},
+    )
+
+    assert legacy_route is None
+    assert handled is True
+    assert event.extras["dc_media_route_handled"] == "image"
+    assert stored_records[0]["route"]["prompt"] == goal
+
+
+@pytest.mark.asyncio
+async def test_structured_media_prompt_injects_governed_obsidian_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = _HandledEvent()
+    stored_records: list[dict] = []
+
+    async def fake_background_job(*_args, **_kwargs):
+        return None
+
+    def fake_create_task(coro):
+        coro.close()
+        return SimpleNamespace(done=lambda: True, cancel=lambda: None)
+
+    monkeypatch.setattr(
+        media_route,
+        "search_company_creative_memory",
+        lambda *_args, **_kwargs: [
+            {
+                "title": "五菱春节传播口径",
+                "source_path": "30_Entities/五菱/春节传播.md",
+                "excerpt": "围绕返乡场景表达可靠陪伴，不使用未经确认的销量数字。",
+                "review_status": "confirmed",
+                "source_status": "已复核",
+                "usage_policy": "facts_and_style",
+            },
+            {
+                "title": "旧版短片脚本",
+                "source_path": "00_Inbox/旧版短片脚本.md",
+                "excerpt": "采用清晨出发、夜间抵达的双时空结构。",
+                "review_status": "need_review",
+                "source_status": "待复核",
+                "usage_policy": "style_reference_only",
+            },
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(
+        media_route, "_start_waiting_card", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(media_route, "_background_job_with_record", fake_background_job)
+    monkeypatch.setattr(
+        media_route,
+        "_upsert_pending_media_task",
+        lambda record: stored_records.append(record),
+    )
+    monkeypatch.setattr(media_route.asyncio, "create_task", fake_create_task)
+
+    handled = await media_route.try_handle_media_route(
+        SimpleNamespace(),
+        event,
+        "为五菱之光 EV 生成春节返乡主视觉",
+        capability_id="execute.image",
+        parameters={"visual_prompt": "五菱之光 EV 春节返乡主视觉"},
+    )
+
+    prompt = stored_records[0]["route"]["prompt"]
+    assert handled is True
+    assert "<dc_creative_memory_context>" in prompt
+    assert "可用于相关事实、术语与风格" in prompt
+    assert "仅可用于风格与结构，不可作为事实" in prompt
+    assert "30_Entities/五菱/春节传播.md" in prompt
+    assert "00_Inbox/旧版短片脚本.md" in prompt
+    assert event.extras["dc_creative_memory_sources"] == [
+        {
+            "title": "五菱春节传播口径",
+            "source_path": "30_Entities/五菱/春节传播.md",
+            "source_status": "已复核",
+            "usage_policy": "facts_and_style",
+        },
+        {
+            "title": "旧版短片脚本",
+            "source_path": "00_Inbox/旧版短片脚本.md",
+            "source_status": "待复核",
+            "usage_policy": "style_reference_only",
+        },
+    ]
+
+
+def test_dreamina_concurrency_failure_is_parsed_and_sanitized() -> None:
+    output = (
+        '{"submit_id":"task-123","gen_status":"fail",'
+        '"fail_reason":"api error: ret=1310, message=ExceedConcurrencyLimit,'
+        ' logid=202607132130181921680021624064C42"}'
+    )
+
+    ok, reason, gen_status, submit_id = media_route._check_dreamina_status(output)
+
+    assert ok is False
+    assert gen_status == "fail"
+    assert submit_id == "task-123"
+    assert "并发已满" in reason
+    assert "ExceedConcurrencyLimit" not in reason
+    assert "logid" not in reason
+
+
+@pytest.mark.asyncio
+async def test_video_job_does_not_report_concurrency_failure_as_completed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = (
+        '{"submit_id":"task-123","gen_status":"fail",'
+        '"fail_reason":"api error: ret=1310, message=ExceedConcurrencyLimit,'
+        ' logid=internal-log"}'
+    )
+    monkeypatch.setattr(
+        media_route,
+        "_run_dreamina_command",
+        AsyncMock(return_value=(True, output)),
+    )
+    finalize = AsyncMock(return_value=False)
+    monkeypatch.setattr(media_route, "_finalize_waiting_card", finalize)
+    context = SimpleNamespace(send_message=AsyncMock())
+    route = media_route.MediaRoute(kind="text2video", prompt="新能源车城市短片")
+
+    result = await media_route._run_video_job(context, "test-video", route, None)
+
+    assert result.success is False
+    assert "并发已满" in result.detail
+    assert "完成" not in result.detail
+    assert "ExceedConcurrencyLimit" not in result.detail
+    assert "logid" not in result.detail
+    sent_text = context.send_message.await_args.args[1].chain[0].text
+    assert "并发已满" in sent_text
+    assert "完成" not in sent_text
+
+
+@pytest.mark.asyncio
+async def test_video_job_uses_sidebar_card_without_duplicate_native_video(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    video_path = tmp_path / "result.mp4"
+    video_path.touch()
+    monkeypatch.setattr(
+        media_route,
+        "_run_dreamina_command",
+        AsyncMock(
+            return_value=(
+                True,
+                '{"submit_id":"task-456","gen_status":"success",'
+                '"video_url":"https://example.com/result.mp4"}',
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        media_route,
+        "_download_url_to_cache",
+        AsyncMock(return_value=str(video_path)),
+    )
+    finalize = AsyncMock(return_value=True)
+    monkeypatch.setattr(media_route, "_finalize_waiting_card", finalize)
+    context = SimpleNamespace(send_message=AsyncMock())
+    route = media_route.MediaRoute(kind="text2video", prompt="新能源车城市短片")
+
+    result = await media_route._run_video_job(context, "test-video", route, object())
+
+    assert result.success is True
+    assert finalize.await_args.kwargs["output_url"] == (
+        "https://example.com/result.mp4"
+    )
+    assert "结果卡中点击右侧播放" in finalize.await_args.kwargs["detail"]
+    context.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_image_job_generates_the_confirmed_number_of_images(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.touch()
+    second.touch()
+    generate = AsyncMock(
+        side_effect=[
+            (True, str(first), "GPT Image 2 · high"),
+            (True, str(second), "GPT Image 2 · high"),
+        ]
+    )
+    finalize = AsyncMock(return_value=True)
+    monkeypatch.setattr(media_route, "_load_gpt_image_module", lambda: object())
+    monkeypatch.setattr(media_route, "_run_image_gpt_first", generate)
+    monkeypatch.setattr(media_route, "_finalize_waiting_card", finalize)
+    context = SimpleNamespace(send_message=AsyncMock())
+    route = media_route.MediaRoute(
+        kind="image",
+        prompt="夏季新品封面",
+        quality="high",
+        aspect_ratio="portrait",
+        image_count=2,
+    )
+
+    await media_route._run_image_job(context, "test-image-count", route, None)
+
+    assert generate.await_count == 2
+    assert context.send_message.await_count == 2
+    assert media_route._LAST_IMAGE_BY_SESSION["test-image-count"] == str(second)
+    assert "已生成 2 张图片" in finalize.await_args.kwargs["detail"]
+
+
+@pytest.mark.asyncio
+async def test_image_job_prefers_card_conversation_and_retries_original_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "generated.png"
+    image_path.touch()
+    monkeypatch.setattr(media_route, "_load_gpt_image_module", lambda: object())
+    monkeypatch.setattr(
+        media_route,
+        "_run_image_gpt_first",
+        AsyncMock(return_value=(True, str(image_path), "GPT Image 2 · medium")),
+    )
+    monkeypatch.setattr(
+        media_route,
+        "_finalize_waiting_card",
+        AsyncMock(return_value=True),
+    )
+    context = SimpleNamespace(send_message=AsyncMock(side_effect=[False, True]))
+    card = SimpleNamespace(chat_id="oc_card_chat", receive_id_type="chat_id")
+    original_session = "lark-test:FriendMessage:ou_user"
+
+    result = await media_route._run_image_job(
+        context,
+        original_session,
+        media_route.MediaRoute(kind="image", prompt="NAS preview regression"),
+        card,
+    )
+
+    assert result.success is True
+    assert context.send_message.await_count == 2
+    assert str(context.send_message.await_args_list[0].args[0]) == (
+        "lark-test:GroupMessage:oc_card_chat"
+    )
+    assert context.send_message.await_args_list[1].args[0] == original_session
+
+
+@pytest.mark.asyncio
+async def test_image_job_sends_interactive_preview_card_without_native_post(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "generated.png"
+    image_path.touch()
+    monkeypatch.setattr(media_route, "_load_gpt_image_module", lambda: object())
+    monkeypatch.setattr(
+        media_route,
+        "_run_image_gpt_first",
+        AsyncMock(return_value=(True, str(image_path), "GPT Image 2 · medium")),
+    )
+    monkeypatch.setattr(
+        media_route,
+        "_finalize_waiting_card",
+        AsyncMock(return_value=True),
+    )
+    send_card = AsyncMock(return_value=SimpleNamespace(message_id="om_preview"))
+    monkeypatch.setattr("dc_engines.card_runtime.send_card_via_runtime", send_card)
+    streamer = SimpleNamespace(upload_image=AsyncMock(return_value="img_v2_preview"))
+    card = SimpleNamespace(
+        chat_id="oc_card_chat",
+        receive_id_type="chat_id",
+        streamer=streamer,
+    )
+    context = SimpleNamespace(send_message=AsyncMock())
+
+    result = await media_route._run_image_job(
+        context,
+        "lark-test:FriendMessage:ou_user",
+        media_route.MediaRoute(kind="image", prompt="独立图片预览卡"),
+        card,
+    )
+
+    assert result.success is True
+    streamer.upload_image.assert_awaited_once_with(str(image_path))
+    send_card.assert_awaited_once()
+    assert send_card.await_args.kwargs["card_type"] == "media_generation"
+    assert send_card.await_args.kwargs["event"] == "preview"
+    assert send_card.await_args.kwargs["card"]["body"]["elements"][0] == {
+        "tag": "img",
+        "img_key": "img_v2_preview",
+        "alt": {
+            "tag": "plain_text",
+            "content": "第 1/1 张（GPT Image 2 · medium）。",
+        },
+    }
+    context.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_explicit_dreamina_request_uses_dreamina_first_policy() -> None:
     route = await media_route._detect_route(_Event(), "用即梦帮我生成一张中秋宣传海报")
 
     assert route is not None
     assert route.kind == "image"
     assert route.image_provider_strategy == "dreamina_first"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("choice", "strategy"),
+    [
+        ("Image2（仅使用）", "gpt_only"),
+        ("即梦（仅使用）", "dreamina_only"),
+    ],
+)
+async def test_workspace_provider_choice_uses_strict_image_policy(
+    choice: str,
+    strategy: str,
+) -> None:
+    route = await media_route._detect_route(
+        _Event(),
+        f"#生图 新车发布主视觉\n生图模型：{choice}",
+    )
+
+    assert route is not None
+    assert route.image_provider_strategy == strategy
+
+
+@pytest.mark.asyncio
+async def test_explicit_image2_policy_does_not_fallback_to_dreamina() -> None:
+    dreamina = AsyncMock()
+    module = SimpleNamespace(
+        _call_codex_image_gen=lambda *_args: (False, "Image2 unavailable"),
+        _dreamina_text2image_sync=dreamina,
+    )
+
+    success, detail, provider = await media_route._run_image_gpt_first(
+        SimpleNamespace(send_message=AsyncMock()),
+        "test-session",
+        asyncio.get_running_loop(),
+        module,
+        image2_prompt="prompt",
+        dreamina_prompt="prompt",
+        route=media_route.MediaRoute(
+            kind="image",
+            prompt="prompt",
+            image_provider_strategy="gpt_only",
+        ),
+        card=None,
+        allow_fallback=False,
+    )
+
+    assert success is False
+    assert "Image2 unavailable" in detail
+    assert provider == ""
+    dreamina.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -214,6 +657,11 @@ async def test_source_image_cutout_sends_and_finalizes_card(
     event = _HandledEvent([ImageComp.fromFileSystem(str(source_path))])
     streamer = _FakeCardStreamer()
     context = SimpleNamespace(feishu_streamers={"巅池-Agent小助手": streamer})
+    archived = {}
+    monkeypatch.setattr(
+        "dc_engines.card_runtime.archive_card_result",
+        lambda **kwargs: archived.update(kwargs) or kwargs,
+    )
 
     handled = await media_route.try_handle_source_image_edit(
         context, event, "[image] 帮我把这张图片去掉背景，人物抠出来"
@@ -229,7 +677,17 @@ async def test_source_image_cutout_sends_and_finalizes_card(
         streamer.finalized["card"]["header"]["title"]["content"] == "源图编辑 · 已完成"
     )
     assert event.result is not None
-    assert Path(event.result.chain[0].path).suffix == ".png"
+    output_path = Path(event.result.chain[0].path)
+    assert output_path.suffix == ".png"
+    assert archived["source"] == "dc_router.source_image_edit"
+    assert archived["task_id"] == "om_source_edit"
+    assert archived["delivery_files"] == [
+        {
+            "kind": "transparent_png",
+            "name": output_path.name,
+            "path": str(output_path),
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -388,8 +846,84 @@ def test_dreamina_image_tool_description_does_not_claim_festival_posters() -> No
 
 
 @pytest.mark.asyncio
+async def test_media_route_final_card_uses_runtime_media_card_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finalize a real media result without mocking the builder import boundary."""
+    finalize = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "dc_engines.card_runtime.finalize_card_via_runtime",
+        finalize,
+    )
+    stream = SimpleNamespace(elapsed_sec=12.0)
+    card = SimpleNamespace(
+        message_id="om_media_result",
+        streamer=SimpleNamespace(get_stream=lambda _message_id: stream),
+    )
+
+    finalized = await media_route._finalize_waiting_card(
+        SimpleNamespace(),
+        card,
+        route=media_route.MediaRoute(kind="image", prompt="冰雪足球怪兽海报"),
+        success=True,
+        detail="已生成 1 张图片",
+        output_path="/tmp/result.png",
+    )
+
+    assert finalized is True
+    finalize.assert_awaited_once()
+    assert finalize.await_args.kwargs["card_type"] == "media_generation"
+    assert finalize.await_args.kwargs["retract_after_sec"] is None
+
+
+@pytest.mark.asyncio
+async def test_media_route_sends_independent_result_card_before_retracting_waiting_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deliver a visible terminal card instead of relying only on a long-lived patch."""
+    send = AsyncMock(return_value=SimpleNamespace(message_id="om_result"))
+    finalize = AsyncMock(return_value=True)
+    monkeypatch.setattr("dc_engines.card_runtime.send_card_via_runtime", send)
+    monkeypatch.setattr(
+        "dc_engines.card_runtime.finalize_card_via_runtime",
+        finalize,
+    )
+    streamer = SimpleNamespace(
+        get_stream=lambda _message_id: SimpleNamespace(elapsed_sec=12.0),
+        retract=AsyncMock(return_value=True),
+    )
+    card = SimpleNamespace(
+        message_id="om_waiting",
+        chat_id="oc_chat",
+        receive_id_type="chat_id",
+        streamer=streamer,
+    )
+
+    finalized = await media_route._finalize_waiting_card(
+        SimpleNamespace(),
+        card,
+        route=media_route.MediaRoute(kind="image", prompt="冰雪足球怪兽海报"),
+        success=True,
+        detail="已生成 1 张图片",
+        output_path="/tmp/result.png",
+    )
+
+    assert finalized is True
+    send.assert_awaited_once()
+    assert send.await_args.kwargs["card_type"] == "media_generation"
+    assert send.await_args.kwargs["chat_id"] == "oc_chat"
+    streamer.retract.assert_awaited_once_with("om_waiting")
+    finalize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_media_route_with_waiting_card_suppresses_plain_ack(monkeypatch) -> None:
     event = _HandledEvent()
+    event.set_extra("assistant_workbench_task_type", "image")
+    event.set_extra(
+        "assistant_workbench_workspace_url",
+        "http://127.0.0.1:6185/api/v1/assistant-attachments/image-token",
+    )
     stored_records: list[dict] = []
 
     async def fake_start_waiting_card(_context, _event, route):
@@ -420,7 +954,13 @@ async def test_media_route_with_waiting_card_suppresses_plain_ack(monkeypatch) -
     monkeypatch.setattr(media_route.asyncio, "create_task", fake_create_task)
 
     handled = await media_route.try_handle_media_route(
-        SimpleNamespace(), event, "帮我生成一张未来城市图片"
+        SimpleNamespace(
+            get_platform_inst=lambda _platform_id: SimpleNamespace(
+                config={"app_id": "cli_test"}
+            )
+        ),
+        event,
+        "帮我生成一张未来城市图片",
     )
 
     assert handled is True
@@ -433,6 +973,57 @@ async def test_media_route_with_waiting_card_suppresses_plain_ack(monkeypatch) -
     assert event.result.chain == []
     assert stored_records
     assert stored_records[0]["card"]["message_id"] == "om_waiting"
+    assert stored_records[0]["assistant_workbench"] is True
+    assert "mode%3Drevise" in stored_records[0]["route"]["material_completion_url"]
+    assert "reload=true" in stored_records[0]["route"]["material_completion_url"]
+
+
+@pytest.mark.asyncio
+async def test_completed_workbench_media_task_sends_session_choice(
+    monkeypatch,
+) -> None:
+    from data.plugins.dc_router.preprocessing import session_choice
+
+    record = {
+        "task_id": "task-media",
+        "umo": "lark:FriendMessage:ou_test",
+        "platform_id": "巅池-Agent小助手",
+        "assistant_workbench": True,
+        "card": {"chat_id": "ou_test", "receive_id_type": "open_id"},
+    }
+    result = media_route.MediaJobResult(
+        success=True,
+        artifact_kind="image",
+        uri="/tmp/result.png",
+        mime_type="image/png",
+        engine="test",
+        detail="completed",
+        metadata={},
+    )
+    monkeypatch.setattr(media_route, "_load_pending_media_tasks", lambda: [record])
+    monkeypatch.setattr(media_route, "_background_job", AsyncMock(return_value=result))
+    monkeypatch.setattr(
+        media_route, "_remove_pending_media_task", lambda _task_id: None
+    )
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(session_choice, "send_session_choice", send)
+
+    await media_route._background_job_with_record(
+        SimpleNamespace(),
+        record["umo"],
+        media_route.MediaRoute(kind="image", prompt="future city"),
+        None,
+        record["task_id"],
+    )
+
+    send.assert_awaited_once_with(
+        ANY,
+        task_id="task-media",
+        unified_msg_origin="lark:FriendMessage:ou_test",
+        platform_id="巅池-Agent小助手",
+        chat_id="ou_test",
+        receive_id_type="open_id",
+    )
 
 
 @pytest.mark.asyncio

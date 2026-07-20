@@ -6,7 +6,6 @@
 #   safe_restart.sh hermes-gateway   # 重启 Hermes Gateway
 #   safe_restart.sh hermes-webui     # 重启 Hermes 官方 WebUI
 #   safe_restart.sh hermes-webui-thirdparty  # 重启 Hermes 第三方 WebUI
-#   safe_restart.sh openclaw         # 重启 OpenClaw watchdog
 #
 # 比直接 launchctl kickstart 多做的：
 #   1. 重启前写 data/watchdog/maintenance.lock
@@ -18,6 +17,7 @@ set -euo pipefail
 
 DC_ROOT="/Users/dianchi/DC-Agent"
 WD_ROOT="$DC_ROOT/data/watchdog"
+PRIMARY_RUNTIME="${DC_AGENT_PRIMARY_RUNTIME:-nas}"
 LOCK_FILE="$WD_ROOT/maintenance.lock"
 WATCHDOG_QUIET_SECONDS="${SAFE_RESTART_WATCHDOG_QUIET_SECONDS:-120}"
 ASTRBOT_TMUX_SESSION="${SAFE_RESTART_ASTRBOT_TMUX_SESSION:-dc-agent-astrbot}"
@@ -25,7 +25,7 @@ SERVICE="${1:-}"
 
 usage() {
     echo "用法: $(basename "$0") <service>"
-    echo "  service: astrbot | hermes-gateway | hermes | hermes-webui | hermes-webui-thirdparty | openclaw"
+    echo "  service: astrbot | hermes-gateway | hermes | hermes-webui | hermes-webui-thirdparty"
     exit 1
 }
 
@@ -33,6 +33,10 @@ usage() {
 
 case "$SERVICE" in
     astrbot)
+        if [ "$PRIMARY_RUNTIME" = "nas" ]; then
+            echo "Local AstrBot restart skipped: NAS is the primary assistant runtime."
+            exit 0
+        fi
         LABEL="io.astrbot.bot"
         HEALTH_CMD="curl --noproxy '*' -sf --max-time 2 http://127.0.0.1:6185/api/stat/start-time"
         POST_HEALTH_CMD="$DC_ROOT/scripts-tools/card-system-health.py"
@@ -55,12 +59,6 @@ case "$SERVICE" in
         HEALTH_CMD="lsof -nP -iTCP:8787 -sTCP:LISTEN"
         POST_HEALTH_CMD=""
         DESC="Hermes 第三方 WebUI"
-        ;;
-    openclaw)
-        LABEL="com.dcagent.openclaw-watchdog"
-        HEALTH_CMD="lsof -nP -iTCP:9120 -sTCP:LISTEN"
-        POST_HEALTH_CMD=""
-        DESC="OpenClaw Watchdog"
         ;;
     *)
         echo "❌ 未知服务: $1"

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -94,7 +95,9 @@ def load_credentials(
         永不抛异常。
     """
     if repo_root is None:
-        repo_root = os.environ.get("DC_AGENT_ROOT") or "/Users/dianchi/DC-Agent"
+        repo_root = (
+            os.environ.get("DC_AGENT_ROOT") or Path(__file__).resolve().parents[3]
+        )
     repo = Path(repo_root)
 
     paths = explicit_paths or _DEFAULT_PATHS
@@ -104,6 +107,32 @@ def load_credentials(
         if raw is None:
             continue
         extracted = _extract(raw)
+        if extracted is None and full.name == "feishu_whitelist.yaml":
+            # NAS already stores the active Lark credential in cmd_config.json.
+            # Reuse the matching app instead of creating another secret file.
+            feishu = raw.get("feishu") or {}
+            app_id = _expand_env(str(feishu.get("app_id") or ""))
+            cmd_config_path = repo / "data" / "cmd_config.json"
+            if app_id and cmd_config_path.exists():
+                try:
+                    cmd_config = json.loads(
+                        cmd_config_path.read_text(encoding="utf-8-sig")
+                    )
+                    for platform in cmd_config.get("platform", []):
+                        if not isinstance(platform, dict):
+                            continue
+                        if str(platform.get("app_id") or "") != app_id:
+                            continue
+                        app_secret = str(platform.get("app_secret") or "").strip()
+                        if app_secret:
+                            extracted = (
+                                app_id,
+                                app_secret,
+                                bool(feishu.get("enable", True)),
+                            )
+                            break
+                except (OSError, json.JSONDecodeError, TypeError):
+                    pass
         if extracted is None:
             continue
         app_id, app_secret, enable = extracted

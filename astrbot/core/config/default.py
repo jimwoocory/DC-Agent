@@ -1348,8 +1348,10 @@ CONFIG_METADATA_2 = {
                         "enable": True,
                         "key": [],
                         "timeout": 120,
-                        "api_base": "https://aihubmix.com/v1",
+                        "api_base": "https://api.inferera.com/v1",
                         "proxy": "",
+                        "fallback_api_base": "https://aihubmix.com/v1",
+                        "fallback_proxy": "",
                         "custom_headers": {},
                     },
                     "OpenRouter": {

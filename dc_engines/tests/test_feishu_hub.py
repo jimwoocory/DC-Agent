@@ -95,6 +95,25 @@ def test_credentials_explicit_paths_override(tmp_path: Path) -> None:
     assert creds.app_id == "cli_custom"
 
 
+def test_credentials_reuse_matching_platform_secret(tmp_path: Path) -> None:
+    """Missing env secret reuses the matching NAS platform credential."""
+    _write_yaml(
+        tmp_path / "data/feishu_whitelist.yaml",
+        "feishu:\n  app_id: cli_nas\n  app_secret: ${FEISHU_APP_SECRET}\n",
+    )
+    (tmp_path / "data/cmd_config.json").write_text(
+        '{"platform":[{"type":"lark","app_id":"cli_nas",'
+        '"app_secret":"secret_from_runtime"}]}',
+        encoding="utf-8",
+    )
+
+    creds = load_credentials(repo_root=tmp_path)
+
+    assert creds is not None
+    assert creds.app_id == "cli_nas"
+    assert creds.app_secret == "secret_from_runtime"
+
+
 def test_credentials_app_secret_allows_literal_dollar(tmp_path: Path) -> None:
     """飞书 app_secret 可能包含普通 $ 字符，不能误判为未展开环境变量。"""
     _write_yaml(
@@ -106,6 +125,13 @@ def test_credentials_app_secret_allows_literal_dollar(tmp_path: Path) -> None:
 
     assert creds is not None
     assert creds.app_secret == "sec$ret"
+
+
+def test_credentials_default_root_does_not_depend_on_mac_home() -> None:
+    source = Path(load_credentials.__code__.co_filename).read_text(encoding="utf-8")
+
+    assert "/Users/dianchi" not in source
+    assert "Path(__file__).resolve().parents[3]" in source
 
 
 # ────────────────────────── FeishuHub 单例 ──────────────────────────

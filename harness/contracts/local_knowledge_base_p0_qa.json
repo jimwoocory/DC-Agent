@@ -3,14 +3,14 @@
   "generated_at": "2026-06-01T17:39:27+08:00",
   "db": "/Users/dianchi/DC-Agent/data/nas_memory.db",
   "stats": {
-    "documents": 290,
-    "chunks": 809,
-    "need_review": 286,
+    "documents": 288,
+    "chunks": 805,
+    "need_review": 284,
     "confirmed": 4,
     "parsers": {
       "pdf": 141,
       "pptx": 131,
-      "docx": 14,
+      "docx": 12,
       "xlsx": 3,
       "md": 1
     },
@@ -27,8 +27,8 @@
     }
   },
   "summary": {
-    "total": 8,
-    "pass": 8,
+    "total": 7,
+    "pass": 7,
     "warn": 0,
     "fail": 0
   },
@@ -327,63 +327,6 @@
           "title": "0027_《重生之我在五菱打工》栏目规划-8.19",
           "source_path": "/Users/dianchi/nas_kb/projects/_待确认/《重生之我在五菱打工》栏目规划-8.19/资料文档/0027_《重生之我在五菱打工》栏目规划-8.19.pptx",
           "score": 108.0
-        }
-      ]
-    },
-    {
-      "id": "openclaw_permissions",
-      "question": "openclaw 目前已有权限能支持哪些机器人能力？",
-      "status": "pass",
-      "hit_rank": 1,
-      "hit": {
-        "title": "openclaw应用API权限申请方案",
-        "source_path": "/Users/dianchi/nas_kb/processed/openclaw应用API权限申请方案.docx",
-        "owner": "",
-        "departments": [],
-        "parser": "docx",
-        "review_status": "need_review",
-        "score": 167.0
-      },
-      "checks": [
-        "预期来源进入 Top 3"
-      ],
-      "warnings": [],
-      "failures": [],
-      "answer_points": [
-        "openclaw 已配置 63 项应用身份权限。",
-        "权限主要集中在消息与群组领域。",
-        "可支撑消息收发、群组管理、卡片交互等飞书机器人核心能力。"
-      ],
-      "top_hits": [
-        {
-          "rank": 1,
-          "title": "openclaw应用API权限申请方案",
-          "source_path": "/Users/dianchi/nas_kb/processed/openclaw应用API权限申请方案.docx",
-          "score": 167.0
-        },
-        {
-          "rank": 2,
-          "title": "脚本升级和机器人模型可行性评估",
-          "source_path": "/Users/dianchi/nas_kb/processed/脚本升级和机器人模型可行性评估.md",
-          "score": 84.0
-        },
-        {
-          "rank": 3,
-          "title": "飞书AI机器人对接技术方案",
-          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人对接技术方案.docx",
-          "score": 84.0
-        },
-        {
-          "rank": 4,
-          "title": "飞书AI机器人功能规划方案",
-          "source_path": "/Users/dianchi/nas_kb/processed/飞书AI机器人功能规划方案.docx",
-          "score": 81.0
-        },
-        {
-          "rank": 5,
-          "title": "Method_C_5分钟指南",
-          "source_path": "/Users/dianchi/nas_kb/processed/Method_C_5分钟指南.docx",
-          "score": 23.0
         }
       ]
     },

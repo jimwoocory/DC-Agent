@@ -1,0 +1,69 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用财务审批插件。",
+    "default": true
+  },
+  "db_path": {
+    "type": "string",
+    "description": "本地 SQLite 台账路径。留空默认 data/feishu_business_mvp.db。",
+    "default": ""
+  },
+  "approval_codes": {
+    "type": "object",
+    "description": "审批类型到飞书 approval_code 的映射，不存 app_secret。",
+    "items": {
+      "reimbursement": {
+        "type": "string",
+        "description": "报销审批 approval_code。",
+        "default": ""
+      },
+      "petty_cash": {
+        "type": "string",
+        "description": "备用金申请 approval_code。",
+        "default": ""
+      },
+      "payment": {
+        "type": "string",
+        "description": "付款审批 approval_code。",
+        "default": ""
+      },
+      "purchase": {
+        "type": "string",
+        "description": "采购审批 approval_code。",
+        "default": ""
+      },
+      "contract": {
+        "type": "string",
+        "description": "合同审批 approval_code。",
+        "default": ""
+      }
+    }
+  },
+  "required_attachments": {
+    "type": "object",
+    "description": "各审批类型必需附件标签。",
+    "items": {
+      "reimbursement": {
+        "type": "list",
+        "description": "报销审批必需附件。",
+        "default": ["发票"]
+      },
+      "petty_cash": {
+        "type": "list",
+        "description": "备用金申请必需附件。",
+        "default": []
+      },
+      "payment": {
+        "type": "list",
+        "description": "付款审批必需附件。",
+        "default": ["合同", "付款截图"]
+      },
+      "purchase": {
+        "type": "list",
+        "description": "采购审批必需附件。",
+        "default": ["报价单", "合同"]
+      }
+    }
+  }
+}

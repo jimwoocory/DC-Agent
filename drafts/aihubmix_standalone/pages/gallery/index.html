@@ -1,0 +1,1802 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>巅池 Agent 工具箱</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f7;
+      --panel: #ffffff;
+      --panel-soft: #fbfbfb;
+      --text: #151515;
+      --muted: #8f8f8f;
+      --muted-strong: #656565;
+      --line: #e9e9e9;
+      --line-strong: #d8d8d8;
+      --button: #171717;
+      --button-text: #ffffff;
+      --chip: #eeeeee;
+      --chip-active: #ffffff;
+      --accent: #0f0f0f;
+      --danger: #b42318;
+      --success: #11845b;
+      --warning: #8a6116;
+      --shadow: 0 18px 70px rgba(0, 0, 0, .10);
+      --shadow-soft: 0 12px 34px rgba(0, 0, 0, .07);
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    button {
+      color: inherit;
+      cursor: pointer;
+    }
+
+    .app-shell {
+      min-width: 1280px;
+      height: 100vh;
+      background: var(--bg);
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 40;
+      display: grid;
+      grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+      align-items: center;
+      gap: 18px;
+      height: 57px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .82);
+      backdrop-filter: blur(16px);
+    }
+
+    .product-title {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+      justify-self: start;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .mode-nav {
+      width: 246px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: center;
+      justify-self: center;
+      gap: 6px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f4f4f4;
+    }
+
+    .mode-nav a,
+    .mode-nav button {
+      height: 30px;
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 13px;
+      background: transparent;
+      color: var(--muted-strong);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mode-nav .active {
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-self: end;
+      gap: 12px;
+    }
+
+    .view-switch {
+      display: inline-flex;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f5f5f5;
+    }
+
+    .view-switch button {
+      height: 30px;
+      min-width: 64px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted-strong);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .view-switch button.active {
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+    }
+
+    .icon-button {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 16px;
+      background: transparent;
+      color: #444;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .icon-button:hover {
+      background: #eeeeee;
+    }
+
+    .icon-button svg {
+      width: 19px;
+      height: 19px;
+      stroke-width: 2.2;
+    }
+
+    .workbench-layout {
+      position: fixed;
+      top: 57px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(860px, 1fr) 400px;
+      overflow: hidden;
+    }
+
+    .gallery-workbench {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background: #fafafa;
+    }
+
+    .gallery-toolbar {
+      height: 76px;
+      display: grid;
+      grid-template-columns: auto auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 23px max(16px, calc((100% - 1248px) / 2)) 10px;
+      background: transparent;
+      border-bottom: 0;
+    }
+
+    .tool-square {
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      color: #666;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, .04);
+    }
+
+    .tool-square svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .filter-select {
+      height: 42px;
+      min-width: 112px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0 12px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, .04);
+    }
+
+    .search-shell {
+      height: 42px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 0 14px;
+      color: var(--muted);
+      min-width: 0;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, .04);
+    }
+
+    .search-shell input {
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .search-shell input::placeholder {
+      color: #b4b4b4;
+    }
+
+    .layout-hint {
+      display: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .gallery-stage {
+      position: relative;
+      min-height: 0;
+      overflow: auto;
+      padding: 0 max(16px, calc((100% - 1248px) / 2)) 170px;
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      align-content: start;
+    }
+
+    .empty-state {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      width: min(360px, calc(100% - 32px));
+      color: #a8a8a8;
+      text-align: center;
+      user-select: none;
+    }
+
+    .empty-state svg {
+      width: 54px;
+      height: 54px;
+      stroke-width: 1.5;
+      color: #d5d5d5;
+    }
+
+    .empty-state strong {
+      color: #9c9c9c;
+      font-size: 15px;
+      font-weight: 500;
+    }
+
+    .empty-state span {
+      color: #b0b0b0;
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .task-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .06);
+    }
+
+    .task-preview {
+      aspect-ratio: 4 / 3;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(90deg, rgba(0, 0, 0, .035) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(0, 0, 0, .035) 1px, transparent 1px),
+        #f2f2f2;
+      background-size: 20px 20px;
+      color: #8f8f8f;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .task-body {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .task-prompt {
+      height: 40px;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    .task-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .task-actions button {
+      height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fafafa;
+      color: #444;
+      padding: 0 9px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .input-dock {
+      position: absolute;
+      left: 50%;
+      bottom: 24px;
+      width: min(872px, calc(100% - 32px));
+      transform: translateX(-50%);
+      border: 1px solid rgba(255, 255, 255, .72);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, .72);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, .08);
+      backdrop-filter: blur(28px);
+      outline: 1px solid rgba(0, 0, 0, .04);
+      padding: 14px;
+    }
+
+    .prompt-row {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .prompt-input {
+      height: 44px;
+      resize: none;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      outline: none;
+      padding: 11px 15px;
+      background: rgba(255, 255, 255, .72);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    .prompt-input:focus {
+      border-color: #a7a7a7;
+      box-shadow: inset 0 0 0 1px #a7a7a7;
+    }
+
+    .prompt-input::placeholder {
+      color: #c1c1c1;
+    }
+
+    .attach-button,
+    .submit-button {
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .attach-button {
+      background: #ececef;
+      color: #555;
+    }
+
+    .submit-button {
+      background: #d1d1d6;
+      color: #ffffff;
+    }
+
+    .attach-button svg,
+    .submit-button svg {
+      width: 18px;
+      height: 18px;
+      stroke-width: 2.2;
+    }
+
+    .param-action-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 10px;
+      margin-top: 11px;
+    }
+
+    .param-row {
+      display: grid;
+      grid-template-columns: minmax(126px, 1.25fr) repeat(6, minmax(76px, 1fr));
+      gap: 8px;
+      margin-top: 0;
+    }
+
+    .param-field {
+      display: grid;
+      grid-template-rows: 16px 34px;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .param-field label {
+      display: flex;
+      align-items: center;
+      height: 16px;
+      padding: 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1;
+    }
+
+    .param-field select,
+    .param-field input {
+      height: 34px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(255, 255, 255, .70);
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .size-trigger {
+      height: 34px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(255, 255, 255, .70);
+      color: var(--text);
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 400;
+      text-align: left;
+    }
+
+    .size-trigger svg {
+      width: 15px;
+      height: 15px;
+      color: #777;
+      flex: 0 0 auto;
+    }
+
+    .input-actions {
+      display: flex;
+      align-items: end;
+      gap: 8px;
+      padding-bottom: 0;
+    }
+
+    .size-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+    }
+
+    .size-modal.hidden {
+      display: none !important;
+    }
+
+    .size-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, .30);
+      backdrop-filter: blur(4px);
+    }
+
+    .size-dialog {
+      position: relative;
+      z-index: 1;
+      width: min(520px, calc(100vw - 36px));
+      border: 1px solid rgba(255, 255, 255, .62);
+      border-radius: 28px;
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .18);
+      outline: 1px solid rgba(0, 0, 0, .05);
+      padding: 22px;
+    }
+
+    .size-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .size-head h3 {
+      margin: 0;
+      color: var(--text);
+      font-size: 20px;
+      font-weight: 650;
+    }
+
+    .size-head p {
+      margin: 7px 0 0;
+      color: #9a9aa3;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .size-close {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 12px;
+      background: #f1f1f1;
+      color: #555;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .size-close svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    .size-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .size-tabs button,
+    .size-choice {
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f7f7f7;
+      color: #555;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .size-tabs button.active,
+    .size-choice.active {
+      border-color: #141414;
+      background: #141414;
+      color: #fff;
+    }
+
+    .size-content {
+      min-height: 164px;
+    }
+
+    .size-panel.hidden {
+      display: none;
+    }
+
+    .size-auto {
+      min-height: 164px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed var(--line-strong);
+      border-radius: 20px;
+      background: #fafafa;
+      text-align: center;
+    }
+
+    .size-auto > div {
+      display: grid;
+      justify-items: center;
+      gap: 10px;
+    }
+
+    .size-auto-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      background: #111;
+      color: #fff;
+    }
+
+    .size-auto-icon svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .size-auto strong {
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .size-auto span {
+      color: #8d8d8d;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.5;
+    }
+
+    .size-section {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .size-section-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .size-button-grid,
+    .ratio-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .size-choice.ratio {
+      height: 62px;
+      display: grid;
+      place-items: center;
+      gap: 4px;
+    }
+
+    .ratio-shape {
+      width: 32px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+    }
+
+    .ratio-shape span {
+      display: block;
+      max-width: 32px;
+      max-height: 22px;
+      border: 2px solid currentColor;
+      border-radius: 4px;
+    }
+
+    .custom-size-row {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: end;
+      gap: 10px;
+    }
+
+    .custom-size-row label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .custom-size-row input {
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0 12px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .cross {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 42px;
+    }
+
+    .size-preview {
+      margin-top: 18px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-radius: 16px;
+      background: #f7f7f7;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .size-preview strong {
+      color: var(--text);
+      font-weight: 650;
+    }
+
+    .size-actions {
+      margin-top: 18px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .size-actions button {
+      height: 40px;
+      border-radius: 13px;
+      padding: 0 18px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .size-cancel {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+    }
+
+    .size-confirm {
+      border: 0;
+      background: #111;
+      color: #fff;
+    }
+
+    .assistant-panel {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: rgba(250, 250, 250, .78);
+      backdrop-filter: blur(18px);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .assistant-head {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: grid;
+      gap: 11px;
+      padding: 18px 18px 15px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(250, 250, 250, .90);
+      backdrop-filter: blur(18px);
+    }
+
+    .assistant-kicker {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .assistant-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .assistant-title h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .assistant-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .assistant-body {
+      min-height: 0;
+      padding: 16px 18px 22px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .panel-section {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, .78);
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .section-title small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .natural-input {
+      min-height: 118px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      outline: none;
+      background: rgba(255, 255, 255, .62);
+      padding: 12px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 650;
+      line-height: 1.55;
+    }
+
+    .natural-input:focus {
+      border-color: #a7a7a7;
+      box-shadow: inset 0 0 0 1px #a7a7a7;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .control-field {
+      display: grid;
+      gap: 5px;
+    }
+
+    .control-field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .control-field select {
+      height: 38px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, .62);
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .chip {
+      height: 30px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: var(--chip);
+      color: #383838;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .chip.active {
+      border-color: #121212;
+      background: var(--chip-active);
+      color: var(--text);
+    }
+
+    .primary-wide {
+      height: 42px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--button);
+      color: var(--button-text);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .secondary-wide {
+      height: 40px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .candidate-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .candidate-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfbfb;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .candidate-card.selected {
+      border-color: #111;
+      background: #fff;
+      box-shadow: inset 0 0 0 1px #111;
+    }
+
+    .candidate-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: var(--mono);
+    }
+
+    .candidate-text {
+      max-height: 130px;
+      overflow: auto;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 1.58;
+      white-space: pre-wrap;
+    }
+
+    .transfer-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .transfer-grid button {
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: #222;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .transfer-grid button.primary {
+      border-color: #111;
+      background: #111;
+      color: #fff;
+    }
+
+    .status-line {
+      min-height: 20px;
+      color: var(--success);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .request-preview {
+      display: grid;
+      gap: 8px;
+    }
+
+    .request-preview {
+      display: none;
+    }
+
+    .request-preview pre {
+      max-height: 170px;
+      overflow: auto;
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #111;
+      color: #f1f1f1;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .mini-note {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.55;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 1439px) {
+      .workbench-layout {
+        grid-template-columns: minmax(820px, 1fr) 400px;
+      }
+
+      .param-row {
+        grid-template-columns: repeat(3, minmax(104px, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="product-title" href="/" title="返回巅池 Agent 工具箱">巅池 Agent 工具箱</a>
+
+      <nav class="mode-nav" aria-label="生成模式">
+        <button class="active" type="button">生图</button>
+        <a href="/video/" title="打开视频生成工作台">生视频</a>
+        <a href="/writing/" title="打开文字写作工作台">写作</a>
+      </nav>
+
+      <div class="top-actions">
+        <div class="view-switch" aria-label="视图">
+          <button class="active" id="galleryViewButton" type="button">画廊</button>
+          <button id="agentViewButton" type="button">Agent</button>
+        </div>
+        <button class="icon-button" type="button" title="导出">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
+        <button class="icon-button" type="button" title="帮助">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 0 1 4.4 1.4c0 1.6-1.5 2.1-2.1 3"/><path d="M12 17h.01"/></svg>
+        </button>
+        <button class="icon-button" type="button" title="设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.04.04a2.1 2.1 0 0 1-2.97 2.97l-.04-.04a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.08 1.65V21a2.1 2.1 0 0 1-4.2 0v-.06a1.8 1.8 0 0 0-1.08-1.65 1.8 1.8 0 0 0-2 .36l-.04.04a2.1 2.1 0 1 1-2.97-2.97l.04-.04a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.08H3a2.1 2.1 0 0 1 0-4.2h.06a1.8 1.8 0 0 0 1.65-1.08 1.8 1.8 0 0 0-.36-2l-.04-.04a2.1 2.1 0 0 1 2.97-2.97l.04.04a1.8 1.8 0 0 0 2 .36 1.8 1.8 0 0 0 1.08-1.65V3a2.1 2.1 0 0 1 4.2 0v.06a1.8 1.8 0 0 0 1.08 1.65 1.8 1.8 0 0 0 2-.36l.04-.04a2.1 2.1 0 0 1 2.97 2.97l-.04.04a1.8 1.8 0 0 0-.36 2 1.8 1.8 0 0 0 1.65 1.08H21a2.1 2.1 0 0 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="workbench-layout">
+      <section class="gallery-workbench" aria-label="图片生产主界面">
+        <div class="gallery-toolbar">
+          <button class="tool-square" type="button" title="收藏筛选">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 21l1.1-6.5-4.7-4.6 6.5-.9L12 3Z"/></svg>
+          </button>
+          <select class="filter-select" aria-label="状态筛选">
+            <option>全部</option>
+            <option>成功</option>
+            <option>生成中</option>
+            <option>失败</option>
+            <option>草稿</option>
+          </select>
+          <label class="search-shell">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+            <input id="gallerySearch" type="search" placeholder="搜索提示词、参数、模型..." />
+          </label>
+          <span class="layout-hint">右侧 Prompt 生成器常驻</span>
+        </div>
+
+        <div class="gallery-stage" id="galleryStage">
+          <div class="gallery-grid" id="galleryGrid"></div>
+          <div class="empty-state" id="emptyState">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+            <strong>输入提示词开始生成图片</strong>
+            <span></span>
+          </div>
+        </div>
+
+        <form class="input-dock" id="inputDock">
+          <div class="prompt-row">
+            <textarea class="prompt-input" id="promptInput" placeholder="描述你想生成的图片，可输入 @ 来指定参考图..." spellcheck="false"></textarea>
+          </div>
+
+          <div class="param-action-row">
+            <div class="param-row">
+              <div class="param-field">
+                <label for="generationModelSelect">模型</label>
+                <select id="generationModelSelect">
+                  <option value="local-codex-gpt-image-2" selected>Image2</option>
+                  <option value="local-dreamina-mcp-image">即梦 MCP</option>
+                </select>
+              </div>
+              <div class="param-field">
+                <label for="sizeSelect">尺寸</label>
+                <input id="sizeSelect" type="hidden" value="auto" />
+                <button class="size-trigger" id="sizeTrigger" type="button" aria-haspopup="dialog">
+                  <span id="sizeDisplay">auto</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+              </div>
+              <div class="param-field">
+                <label for="qualitySelect">质量</label>
+                <select id="qualitySelect">
+                  <option>auto</option>
+                  <option selected>medium</option>
+                  <option>high</option>
+                  <option>low</option>
+                </select>
+              </div>
+              <div class="param-field">
+                <label for="formatSelect">格式</label>
+                <select id="formatSelect">
+                  <option selected>PNG</option>
+                  <option>WEBP</option>
+                  <option>JPEG</option>
+                </select>
+              </div>
+              <div class="param-field">
+                <label for="transparentSelect">透明背景</label>
+                <select id="transparentSelect">
+                  <option selected>false</option>
+                  <option>true</option>
+                </select>
+              </div>
+              <div class="param-field">
+                <label for="reviewSelect">审核</label>
+                <select id="reviewSelect">
+                  <option selected>auto</option>
+                  <option>low</option>
+                </select>
+              </div>
+              <div class="param-field">
+                <label for="countInput">数量</label>
+                <input id="countInput" type="number" min="1" max="4" value="1" />
+              </div>
+            </div>
+            <div class="input-actions">
+              <button class="attach-button" type="button" title="上传参考图">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="m21.4 11.6-8.8 8.8a5 5 0 0 1-7.1-7.1l9.5-9.5a3.4 3.4 0 0 1 4.8 4.8l-9.5 9.5a1.8 1.8 0 1 1-2.5-2.5l8.8-8.8"/></svg>
+              </button>
+              <button class="submit-button" type="submit" title="生成图片">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <aside class="assistant-panel" aria-label="提示词生成器">
+        <div class="assistant-head">
+          <div class="assistant-kicker">提示词生成器</div>
+          <div class="assistant-title">
+            <h2>提示词生成器</h2>
+            <span id="assistantModeLabel">画廊模式</span>
+          </div>
+        </div>
+
+        <div class="assistant-body">
+          <section class="panel-section">
+            <div class="section-title">
+              <span>小白自然语言</span>
+              <small>先想法，后工程化</small>
+            </div>
+            <textarea class="natural-input" id="naturalInput" placeholder="例如：五菱新能源系列马年拜年图，里面还有哪吒和敖丙，要喜庆、有汽车、有春节气氛。"></textarea>
+            <div class="control-grid">
+              <div class="control-field">
+                <label for="promptModel">目标模型</label>
+                <select id="promptModel">
+                  <option value="image2" selected>Image2 提示词</option>
+                  <option value="dreamina">即梦 MCP 提示词</option>
+                </select>
+              </div>
+              <div class="control-field">
+                <label for="promptUseCase">用途</label>
+                <select id="promptUseCase">
+                  <option>社媒海报</option>
+                  <option>产品主视觉</option>
+                  <option>电商主图</option>
+                  <option>角色设定</option>
+                  <option>品牌活动图</option>
+                </select>
+              </div>
+            </div>
+            <div class="chip-row" id="styleChips">
+              <button class="chip active" type="button" data-style="cinematic">电影感</button>
+              <button class="chip" type="button" data-style="commercial">商业广告</button>
+              <button class="chip" type="button" data-style="chinese">国风</button>
+              <button class="chip" type="button" data-style="clean">干净高级</button>
+              <button class="chip" type="button" data-style="cute">Q 萌</button>
+            </div>
+            <button class="primary-wide" id="makeCandidatesButton" type="button">生成候选 Prompt</button>
+            <div class="status-line" id="assistantStatus"></div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <span>候选 Prompt</span>
+              <small id="candidateCount">0 个候选</small>
+            </div>
+            <div class="candidate-list" id="candidateList">
+              <div class="mini-note">右侧生成候选后，选中一条即可传送到左侧输入框。这里先做本地规则草稿，不消耗任何模型额度。</div>
+            </div>
+            <div class="transfer-grid">
+              <button class="primary" id="replacePromptButton" type="button">替换输入框</button>
+              <button id="appendPromptButton" type="button">追加到末尾</button>
+              <button id="insertPromptButton" type="button">插入光标处</button>
+              <button id="copyPromptButton" type="button">复制候选</button>
+            </div>
+          </section>
+
+          <section class="panel-section request-preview">
+            <div class="section-title">
+              <span>请求草稿</span>
+              <small>人工确认前</small>
+            </div>
+            <pre id="requestPreview">{}</pre>
+            <button class="secondary-wide" id="syncRequestButton" type="button">刷新请求草稿</button>
+            <div class="mini-note">这块后续会接真实 request body、实际参数对比和诊断日志；现在先让布局跑起来。</div>
+          </section>
+        </div>
+      </aside>
+    </main>
+
+    <div class="size-modal hidden" id="sizeModal" role="dialog" aria-modal="true" aria-labelledby="sizeModalTitle">
+      <div class="size-overlay" data-size-close></div>
+      <div class="size-dialog">
+        <div class="size-head">
+          <div>
+            <h3 id="sizeModalTitle">设置图像尺寸</h3>
+            <p>当前：<span id="sizeCurrentText">auto</span></p>
+          </div>
+          <button class="size-close" type="button" title="关闭" data-size-close>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="size-tabs">
+          <button class="active" type="button" data-size-mode="auto">自动</button>
+          <button type="button" data-size-mode="ratio">按比例</button>
+          <button type="button" data-size-mode="resolution">自定义宽高</button>
+        </div>
+
+        <div class="size-content">
+          <div class="size-panel" data-size-panel="auto">
+            <div class="size-auto">
+              <div>
+                <div class="size-auto-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7Z"/></svg>
+                </div>
+                <strong>自动尺寸</strong>
+                <span>不向模型传递具体的分辨率参数<br />由模型自己决定生成尺寸</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="size-panel hidden" data-size-panel="ratio">
+            <section class="size-section">
+              <div class="size-section-title">基准分辨率</div>
+              <div class="size-button-grid" id="sizeTierButtons"></div>
+            </section>
+            <section class="size-section">
+              <div class="size-section-title">图像比例</div>
+              <div class="ratio-grid" id="sizeRatioButtons"></div>
+            </section>
+          </div>
+
+          <div class="size-panel hidden" data-size-panel="resolution">
+            <section class="size-section">
+              <div class="size-section-title">输入具体像素值</div>
+              <div class="custom-size-row">
+                <label>宽度
+                  <input id="customWidthInput" type="number" min="16" step="16" value="1024" />
+                </label>
+                <span class="cross">x</span>
+                <label>高度
+                  <input id="customHeightInput" type="number" min="16" step="16" value="1024" />
+                </label>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="size-preview">
+          <span>将使用</span>
+          <strong id="sizePreviewText">auto</strong>
+        </div>
+
+        <div class="size-actions">
+          <button class="size-cancel" type="button" data-size-close>取消</button>
+          <button class="size-confirm" id="sizeConfirmButton" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const promptInput = document.getElementById('promptInput');
+    const naturalInput = document.getElementById('naturalInput');
+    const promptModel = document.getElementById('promptModel');
+    const generationModelSelect = document.getElementById('generationModelSelect');
+    const promptUseCase = document.getElementById('promptUseCase');
+    const makeCandidatesButton = document.getElementById('makeCandidatesButton');
+    const candidateList = document.getElementById('candidateList');
+    const candidateCount = document.getElementById('candidateCount');
+    const assistantStatus = document.getElementById('assistantStatus');
+    const requestPreview = document.getElementById('requestPreview');
+    const galleryGrid = document.getElementById('galleryGrid');
+    const emptyState = document.getElementById('emptyState');
+    const inputDock = document.getElementById('inputDock');
+    const galleryViewButton = document.getElementById('galleryViewButton');
+    const agentViewButton = document.getElementById('agentViewButton');
+    const assistantModeLabel = document.getElementById('assistantModeLabel');
+    const styleChips = Array.from(document.querySelectorAll('#styleChips .chip'));
+    const sizeSelect = document.getElementById('sizeSelect');
+    const sizeDisplay = document.getElementById('sizeDisplay');
+    const sizeTrigger = document.getElementById('sizeTrigger');
+    const sizeModal = document.getElementById('sizeModal');
+    const sizeCurrentText = document.getElementById('sizeCurrentText');
+    const sizePreviewText = document.getElementById('sizePreviewText');
+    const customWidthInput = document.getElementById('customWidthInput');
+    const customHeightInput = document.getElementById('customHeightInput');
+
+    let selectedCandidate = '';
+    let activeStyle = 'cinematic';
+    let cardCount = 0;
+    let sizeMode = 'auto';
+    let selectedTier = '1K';
+    let selectedRatio = '1:1';
+
+    const sizeTiers = ['1K', '2K', '4K'];
+    const sizeRatios = ['1:1', '3:2', '2:3', '16:9', '9:16', '4:3', '3:4', '21:9'];
+    const tierMaxSide = { '1K': 1024, '2K': 2048, '4K': 3840 };
+
+    const styleText = {
+      cinematic: {
+        zh: '电影级光影、强构图、清晰主体、空间层次丰富',
+        en: 'cinematic lighting, strong composition, clear subject hierarchy, rich spatial depth'
+      },
+      commercial: {
+        zh: '商业广告质感、产品清晰、背景干净、视觉卖点突出',
+        en: 'commercial advertising look, clear product visibility, clean background, strong selling points'
+      },
+      chinese: {
+        zh: '现代国风视觉、春节红金配色、祥云纹理、精致东方装饰',
+        en: 'modern Chinese visual style, festive red and gold palette, cloud patterns, refined oriental ornament'
+      },
+      clean: {
+        zh: '干净高级的视觉语言、克制配色、留白明确、细节精致',
+        en: 'clean premium visual language, restrained palette, deliberate negative space, refined details'
+      },
+      cute: {
+        zh: 'Q 萌角色比例、圆润造型、明亮色彩、亲和力强',
+        en: 'cute chibi proportions, rounded forms, bright colors, friendly and playful mood'
+      }
+    };
+
+    function setStatus(text) {
+      assistantStatus.textContent = text;
+      if (text) {
+        window.setTimeout(() => {
+          if (assistantStatus.textContent === text) assistantStatus.textContent = '';
+        }, 2400);
+      }
+    }
+
+    function roundTo16(value) {
+      return Math.max(16, Math.round(value / 16) * 16);
+    }
+
+    function calculateSizeFromRatio(tier, ratio) {
+      const [rw, rh] = ratio.split(':').map((part) => Number(part));
+      if (!rw || !rh) return '1024x1024';
+      const maxSide = tierMaxSide[tier] || 1024;
+      if (rw >= rh) {
+        return `${maxSide}x${roundTo16(maxSide * rh / rw)}`;
+      }
+      return `${roundTo16(maxSide * rw / rh)}x${maxSide}`;
+    }
+
+    function currentSizePreview() {
+      if (sizeMode === 'auto') return 'auto';
+      if (sizeMode === 'ratio') return calculateSizeFromRatio(selectedTier, selectedRatio);
+      const width = roundTo16(Number(customWidthInput.value || 1024));
+      const height = roundTo16(Number(customHeightInput.value || 1024));
+      return `${width}x${height}`;
+    }
+
+    function setSizeMode(nextMode) {
+      sizeMode = nextMode;
+      document.querySelectorAll('[data-size-mode]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.sizeMode === sizeMode);
+      });
+      document.querySelectorAll('[data-size-panel]').forEach((panel) => {
+        panel.classList.toggle('hidden', panel.dataset.sizePanel !== sizeMode);
+      });
+      updateSizePreview();
+    }
+
+    function updateSizePreview() {
+      sizePreviewText.textContent = currentSizePreview();
+      sizeCurrentText.textContent = sizeSelect.value || 'auto';
+      document.querySelectorAll('[data-tier]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.tier === selectedTier);
+      });
+      document.querySelectorAll('[data-ratio]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.ratio === selectedRatio);
+      });
+    }
+
+    function openSizeModal() {
+      const value = sizeSelect.value || 'auto';
+      if (value === 'auto') {
+        setSizeMode('auto');
+      } else if (/^\d+x\d+$/i.test(value)) {
+        const [w, h] = value.split('x');
+        customWidthInput.value = w;
+        customHeightInput.value = h;
+        setSizeMode('resolution');
+      }
+      sizeCurrentText.textContent = value;
+      sizeModal.classList.remove('hidden');
+    }
+
+    function closeSizeModal() {
+      sizeModal.classList.add('hidden');
+    }
+
+    function applySizeSelection() {
+      const nextSize = currentSizePreview();
+      sizeSelect.value = nextSize;
+      sizeDisplay.textContent = nextSize;
+      sizeSelect.dispatchEvent(new Event('input', { bubbles: true }));
+      closeSizeModal();
+      updateRequestPreview();
+    }
+
+    function ratioShapeStyle(ratio) {
+      const [rw, rh] = ratio.split(':').map((part) => Number(part));
+      if (!rw || !rh || rw === rh) return 'width:20px;height:20px';
+      if (rw > rh) return `width:20px;height:${Math.max(7, Math.round(20 * rh / rw))}px`;
+      return `width:${Math.max(7, Math.round(20 * rw / rh))}px;height:20px`;
+    }
+
+    function renderSizePickerOptions() {
+      document.getElementById('sizeTierButtons').innerHTML = sizeTiers.map((tier) => (
+        `<button class="size-choice${tier === selectedTier ? ' active' : ''}" type="button" data-tier="${tier}">${tier}</button>`
+      )).join('');
+      document.getElementById('sizeRatioButtons').innerHTML = sizeRatios.map((ratio) => (
+        `<button class="size-choice ratio${ratio === selectedRatio ? ' active' : ''}" type="button" data-ratio="${ratio}">
+          <span class="ratio-shape"><span style="${ratioShapeStyle(ratio)}"></span></span>
+          <span>${ratio}</span>
+        </button>`
+      )).join('');
+
+      document.querySelectorAll('[data-tier]').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedTier = button.dataset.tier || selectedTier;
+          updateSizePreview();
+        });
+      });
+      document.querySelectorAll('[data-ratio]').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedRatio = button.dataset.ratio || selectedRatio;
+          updateSizePreview();
+        });
+      });
+    }
+
+    function getParams() {
+      return {
+        model: generationModelSelect.value,
+        model_label: generationModelSelect.options[generationModelSelect.selectedIndex].text,
+        api_model: generationModelSelect.value === 'local-codex-gpt-image-2' ? 'gpt-image-2' : 'dreamina-mcp-image',
+        request_mode: generationModelSelect.value === 'local-codex-gpt-image-2' ? 'codex' : 'dreamina_mcp',
+        size: document.getElementById('sizeSelect').value,
+        quality: document.getElementById('qualitySelect').value,
+        format: document.getElementById('formatSelect').value,
+        transparent_background: document.getElementById('transparentSelect').value === 'true',
+        moderation: document.getElementById('reviewSelect').value,
+        n: Number(document.getElementById('countInput').value || 1)
+      };
+    }
+
+    function updateRequestPreview() {
+      const payload = {
+        mode: 'image',
+        request_mode: 'framework_preview',
+        prompt: promptInput.value.trim(),
+        params: getParams(),
+        references: [],
+        note: '框架预览页暂不主动调用真实生成接口'
+      };
+      requestPreview.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    function buildCandidate(seed, variant) {
+      const model = promptModel.value;
+      const useCase = promptUseCase.value;
+      const style = styleText[activeStyle] || styleText.cinematic;
+      const cleanSeed = seed.trim() || '一张品牌视觉图，主体明确，适合社媒传播';
+
+      if (model === 'image2') {
+        const variantLine = variant === 1
+          ? 'Focus on a polished key visual with readable composition and production-ready details.'
+          : variant === 2
+            ? 'Emphasize visual storytelling, layered atmosphere, and a strong hero subject.'
+            : 'Create a refined campaign image with clean hierarchy, controlled color, and usable negative space.';
+        return [
+          `Create a ${useCase} image based on this brief: ${cleanSeed}.`,
+          variantLine,
+          `Style direction: ${style.en}.`,
+          'Make the main subject immediately recognizable, avoid clutter, keep all important elements inside the frame, and use professional lighting.',
+          'If text appears, keep it minimal, large, legible, and visually integrated.'
+        ].join(' ');
+      }
+
+      if (model === 'dreamina') {
+        const variantLine = variant === 1
+          ? '画面要像成熟品牌主视觉，主体清楚，构图稳定。'
+          : variant === 2
+            ? '强化故事感和氛围层次，适合第一眼吸引注意。'
+            : '强调可交付的商业视觉，信息层级清楚，留白可用于排版。';
+        return [
+          `根据这个想法生成一张${useCase}：${cleanSeed}。`,
+          variantLine,
+          `风格方向：${style.zh}。`,
+          '主体必须明确，画面不要拥挤，关键元素完整入画，光影自然，细节精致。',
+          '如需出现文字，文字要少、要大、要清晰，并与画面风格统一。'
+        ].join('');
+      }
+
+      const shot = variant === 1 ? '主视觉构图' : variant === 2 ? '产品叙事构图' : '海报留白构图';
+      return [
+        `【用途】${useCase}`,
+        `【原始想法】${cleanSeed}`,
+        `【画面结构】${shot}，主体居中偏左，背景保留可排版区域，层次从前景主体到后景环境逐步展开。`,
+        `【风格】${style.zh}`,
+        '【要求】主体清晰完整，色彩统一，避免无意义元素堆叠；文字如出现必须可读；整体适合继续做图生视频或二次编辑。'
+      ].join('\n');
+    }
+
+    function renderCandidates(candidates) {
+      candidateList.innerHTML = '';
+      selectedCandidate = candidates[0] || '';
+      candidateCount.textContent = `${candidates.length} 个候选`;
+
+      candidates.forEach((candidate, index) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `candidate-card${index === 0 ? ' selected' : ''}`;
+        card.innerHTML = `
+          <div class="candidate-meta">
+            <span>#${String(index + 1).padStart(2, '0')}</span>
+            <span>${promptModel.options[promptModel.selectedIndex].text}</span>
+          </div>
+          <div class="candidate-text"></div>
+        `;
+        card.querySelector('.candidate-text').textContent = candidate;
+        card.addEventListener('click', () => {
+          selectedCandidate = candidate;
+          document.querySelectorAll('.candidate-card').forEach((node) => node.classList.remove('selected'));
+          card.classList.add('selected');
+          setStatus('已选中候选 Prompt');
+        });
+        candidateList.appendChild(card);
+      });
+    }
+
+    function transferCandidate(mode) {
+      if (!selectedCandidate) {
+        setStatus('先生成或选中一个候选 Prompt');
+        return;
+      }
+      const current = promptInput.value;
+      if (mode === 'replace') {
+        promptInput.value = selectedCandidate;
+      } else if (mode === 'append') {
+        promptInput.value = current.trim() ? `${current.trim()}\n${selectedCandidate}` : selectedCandidate;
+      } else if (mode === 'insert') {
+        const start = promptInput.selectionStart || 0;
+        const end = promptInput.selectionEnd || start;
+        promptInput.value = `${current.slice(0, start)}${selectedCandidate}${current.slice(end)}`;
+        promptInput.focus();
+        promptInput.selectionStart = promptInput.selectionEnd = start + selectedCandidate.length;
+      }
+      updateRequestPreview();
+      setStatus('已传送到左侧输入框');
+    }
+
+    function addDraftCard() {
+      const prompt = promptInput.value.trim();
+      if (!prompt) {
+        setStatus('左侧输入框还没有 Prompt');
+        return;
+      }
+
+      cardCount += 1;
+      emptyState.classList.add('hidden');
+      const params = getParams();
+      const card = document.createElement('article');
+      card.className = 'task-card';
+      card.dataset.prompt = prompt.toLowerCase();
+      card.innerHTML = `
+        <div class="task-preview"></div>
+        <div class="task-body">
+          <div class="task-prompt"></div>
+          <div class="task-meta">
+            <span>#${String(cardCount).padStart(3, '0')}</span>
+            <span>${params.model_label} · ${params.size} · ${params.quality}</span>
+          </div>
+          <div class="task-actions">
+            <button type="button" data-action="reuse">复用</button>
+            <button type="button" data-action="reference">作为参考</button>
+            <button type="button" data-action="detail">请求草稿</button>
+          </div>
+        </div>
+      `;
+      card.querySelector('.task-prompt').textContent = prompt;
+      card.querySelector('[data-action="reuse"]').addEventListener('click', () => {
+        promptInput.value = prompt;
+        updateRequestPreview();
+        setStatus('已复用到输入框');
+      });
+      card.querySelector('[data-action="reference"]').addEventListener('click', () => {
+        promptInput.value = `${promptInput.value.trim()} @草稿图${cardCount}`.trim();
+        updateRequestPreview();
+        setStatus('已添加参考图占位');
+      });
+      card.querySelector('[data-action="detail"]').addEventListener('click', updateRequestPreview);
+      galleryGrid.prepend(card);
+      setStatus('已加入框架预览画廊');
+    }
+
+    styleChips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        styleChips.forEach((node) => node.classList.remove('active'));
+        chip.classList.add('active');
+        activeStyle = chip.dataset.style || 'cinematic';
+      });
+    });
+
+    makeCandidatesButton.addEventListener('click', () => {
+      const seed = naturalInput.value.trim() || promptInput.value.trim();
+      const candidates = [1, 2, 3].map((variant) => buildCandidate(seed, variant));
+      renderCandidates(candidates);
+      setStatus('候选已生成，本地规则不消耗额度');
+    });
+
+    document.getElementById('replacePromptButton').addEventListener('click', () => transferCandidate('replace'));
+    document.getElementById('appendPromptButton').addEventListener('click', () => transferCandidate('append'));
+    document.getElementById('insertPromptButton').addEventListener('click', () => transferCandidate('insert'));
+    document.getElementById('copyPromptButton').addEventListener('click', async () => {
+      if (!selectedCandidate) {
+        setStatus('先生成或选中一个候选 Prompt');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(selectedCandidate);
+        setStatus('已复制候选 Prompt');
+      } catch {
+        setStatus('浏览器未允许复制，可手动选中复制');
+      }
+    });
+
+    document.getElementById('syncRequestButton').addEventListener('click', updateRequestPreview);
+    promptInput.addEventListener('input', updateRequestPreview);
+    ['generationModelSelect', 'sizeSelect', 'qualitySelect', 'formatSelect', 'transparentSelect', 'reviewSelect', 'countInput'].forEach((id) => {
+      document.getElementById(id).addEventListener('input', updateRequestPreview);
+    });
+
+    renderSizePickerOptions();
+    updateSizePreview();
+    sizeTrigger.addEventListener('click', openSizeModal);
+    document.querySelectorAll('[data-size-close]').forEach((node) => {
+      node.addEventListener('click', closeSizeModal);
+    });
+    document.querySelectorAll('[data-size-mode]').forEach((button) => {
+      button.addEventListener('click', () => setSizeMode(button.dataset.sizeMode || 'auto'));
+    });
+    customWidthInput.addEventListener('input', updateSizePreview);
+    customHeightInput.addEventListener('input', updateSizePreview);
+    document.getElementById('sizeConfirmButton').addEventListener('click', applySizeSelection);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !sizeModal.classList.contains('hidden')) {
+        closeSizeModal();
+      }
+    });
+
+    inputDock.addEventListener('submit', (event) => {
+      event.preventDefault();
+      addDraftCard();
+      updateRequestPreview();
+    });
+
+    document.getElementById('gallerySearch').addEventListener('input', (event) => {
+      const q = event.target.value.trim().toLowerCase();
+      document.querySelectorAll('.task-card').forEach((card) => {
+        card.classList.toggle('hidden', q && !card.dataset.prompt.includes(q));
+      });
+    });
+
+    galleryViewButton.addEventListener('click', () => {
+      galleryViewButton.classList.add('active');
+      agentViewButton.classList.remove('active');
+      assistantModeLabel.textContent = '画廊模式';
+      setStatus('右侧保持为提示词生成器');
+    });
+
+    agentViewButton.addEventListener('click', () => {
+      agentViewButton.classList.add('active');
+      galleryViewButton.classList.remove('active');
+      assistantModeLabel.textContent = 'Agent 草稿';
+      naturalInput.focus();
+      setStatus('Agent 入口先收敛在右侧生成器');
+    });
+
+    updateRequestPreview();
+  </script>
+</body>
+</html>

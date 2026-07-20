@@ -41,8 +41,11 @@ from astrbot.core.provider.register import register_provider_adapter
 CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 
-# 支持的模型（hermes_cli/codex_models.py 列表）
+# Supported Codex subscription models exposed by the local runtime.
 SUPPORTED_MODELS = [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.5",
     "gpt-5.4",
     "gpt-5.3-codex",
@@ -51,7 +54,7 @@ SUPPORTED_MODELS = [
 ]
 
 # 合法 reasoning effort
-VALID_EFFORTS = {"minimal", "low", "medium", "high", "xhigh"}
+VALID_EFFORTS = {"minimal", "low", "medium", "high", "xhigh", "max"}
 
 
 # ─────────────────── OAuth 辅助函数 ───────────────────
@@ -237,6 +240,7 @@ class ProviderCodexOAuth(Provider):
         super().__init__(provider_config, provider_settings)
 
         self.timeout = int(provider_config.get("timeout", 300))
+        self.proxy = str(provider_config.get("proxy", "") or "").strip()
         model_name = provider_config.get("model_config", {}).get(
             "model"
         ) or provider_config.get("model", "gpt-5.5")
@@ -275,12 +279,16 @@ class ProviderCodexOAuth(Provider):
         token = _read_codex_access_token() or self.token or ""
         self.token = token
         headers = _codex_cloudflare_headers(token)
+        http_client_kwargs: dict[str, Any] = {"timeout": self.timeout}
+        if self.proxy:
+            http_client_kwargs["proxy"] = self.proxy
+            logger.info("[codex_oauth] HTTP proxy enabled")
         self._client = AsyncOpenAI(
             api_key=token or "dummy",  # SDK 要求非空，OAuth 走 headers
             base_url=CODEX_BASE_URL,
             default_headers=headers,
             timeout=self.timeout,
-            http_client=httpx.AsyncClient(timeout=self.timeout),
+            http_client=httpx.AsyncClient(**http_client_kwargs),
         )
 
     # ─── 必须实现的抽象方法 ───

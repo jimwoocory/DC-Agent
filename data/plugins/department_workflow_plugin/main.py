@@ -16,7 +16,7 @@ from dc_engines.department_workflows import (
     strip_internal_memory_context,
     workflow_catalog,
 )
-from dc_engines.employee_directory.requester import requester_meta_from_employee
+from dc_engines.employee_directory.requester import requester_meta_from_event
 from dc_engines.harness import allows_auto_complete_on_response
 from dc_engines.harness.content_sop_runtime import plan_content_sop_dispatch
 
@@ -95,7 +95,7 @@ class DepartmentWorkflowPlugin(Star):
             return
 
         sender_id = _get_sender_id(event)
-        requester_meta = await self._load_requester_meta(sender_id)
+        requester_meta = await self._load_requester_meta(event)
         department = self._workflow_department_text(requester_meta)
         role = str(requester_meta.get("requester_role") or "")
         relation_type = str(requester_meta.get("requester_relation_type") or "")
@@ -337,20 +337,20 @@ class DepartmentWorkflowPlugin(Star):
             "workflows": workflow_catalog(),
         }
 
-    async def _load_requester_meta(self, sender_id: str) -> dict[str, Any]:
-        if not sender_id:
-            return {}
-        emp_store = getattr(self.context, "employee_store", None)
-        if emp_store is None:
-            return {"requester_open_id": sender_id}
-        try:
-            emp = await emp_store.get_employee(sender_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[department_workflow] employee lookup failed: %s", exc)
-            return {"requester_open_id": sender_id}
-        if emp is None:
-            return {"requester_open_id": sender_id}
-        return requester_meta_from_employee(emp)
+    async def _load_requester_meta(
+        self,
+        event: AstrMessageEvent,
+    ) -> dict[str, Any]:
+        """Resolve the task requester through the Runtime Principal Adapter.
+
+        Args:
+            event: Inbound event that triggered the Harness task.
+
+        Returns:
+            Subject-bound requester metadata for the task ledger.
+        """
+
+        return await requester_meta_from_event(self.context, event)
 
     def _workflow_department_text(self, requester_meta: dict[str, Any]) -> str:
         parts: list[str] = []

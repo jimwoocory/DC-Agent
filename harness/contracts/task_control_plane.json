@@ -1,0 +1,122 @@
+{
+  "feature": "task_control_plane",
+  "goal": "Expose one read-only operational view across DC-Agent task sources while keeping Codex an optional advanced executor instead of runtime authority.",
+  "acceptance_criteria": [
+    {
+      "id": "task-control-plane-001",
+      "description": "The Task Control Plane normalizes launchd, crontab, Codex automation, watchdog probe, Knowledge Cycle, AstrBot Cron, and Harness task records into one stable task shape.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-002",
+      "description": "Codex-backed records are explicitly classified as advanced_executor and never as deterministic_controller.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-003",
+      "description": "A paused Feishu knowledge workflow is reported as paused even when its last worker exit code was successful.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-004",
+      "description": "watchdogctl JSON status preserves legacy sections and adds the unified control_plane snapshot without mutating runtime state.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_watchdog_engineering.py -q"
+    },
+    {
+      "id": "task-control-plane-005",
+      "description": "Knowledge Cycle records a paused Feishu workflow without spawning its worker until the operator removes the pause marker.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-006",
+      "description": "The legacy AstrBot HTTP restart cron is marked superseded by launchd lifecycle ownership and the unified watchdog probes.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-007",
+      "description": "watchdogctl can retire only an explicitly superseded scheduler entry while preserving every unrelated crontab line.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-008",
+      "description": "Group and single-task resume operations never reactivate superseded schedulers or Codex automation heartbeats.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-009",
+      "description": "The legacy Feishu launchd scheduler is superseded by the paused Knowledge Cycle Feishu/NAS workflow and cannot be restored by group resume.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-010",
+      "description": "Knowledge Cycle never automatically schedules the legacy Feishu repair step, while the shared feishu_sync Implementation remains available to the authoritative targeted workflow.",
+      "verification": "uv run pytest tests/test_task_control_plane.py -q"
+    },
+    {
+      "id": "task-control-plane-011",
+      "description": "Group resume first returns an Activation Plan containing only inactive authoritative tasks; superseded tasks and Codex automations never enter the plan.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-012",
+      "description": "Group resume executes only when the caller confirms the exact current plan_id, and rejects missing or stale confirmations without mutating runtime state.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-013",
+      "description": "Group pause first returns a Deactivation Plan containing only active controllable tasks, while the authoritative dc-watchdog remains protected from group operations.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-014",
+      "description": "Pause and resume share one Control Plan Interface and both reject missing, expired, stale, or wrong-operation confirmations without runtime mutations.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-015",
+      "description": "Critical single-task pauses expose their operational impact and require an item-scoped Control Plan bound to the exact scheduler kind, key, operation, state, and execution identity.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-016",
+      "description": "A missing, expired, stale, group-scoped, wrong-operation, or wrong-target plan cannot authorize a critical single-task pause or mutate runtime state.",
+      "verification": "uv run pytest tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-017",
+      "description": "watchdog repair budgets, recent outcomes, and circuit-breaker state are projected into the read-only control plane and Dashboard without adding repair execution controls.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "task-control-plane-018",
+      "description": "Manual repair reviews are visible in the control plane, while acknowledgement and resolution use item-scoped Control Plans that never execute runtime repair commands.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "mode": "read_only",
+    "entrypoint": "scripts-watchdog/watchdogctl.py status --json",
+    "module": "scripts-watchdog/task_control_plane.py",
+    "codex_role": "advanced_executor",
+    "repair_review_control": "item_scoped_control_plan",
+    "astrbot_lifecycle_owner": "launchd:astrbot-runtime",
+    "astrbot_health_owner": "crontab:dc-watchdog",
+    "feishu_nas_owner": "knowledge_cycle:feishu_nas_workflow",
+    "deterministic_sources": [
+      "launchd",
+      "crontab",
+      "watchdog_probe",
+      "watchdog_repair",
+      "knowledge_cycle",
+      "astrbot_cron",
+      "harness"
+    ]
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "manual": [
+      "scripts-watchdog/watchdogctl.sh status all --json",
+      "uv run pytest tests/test_task_control_plane.py tests/test_watchdog_engineering.py -q"
+    ]
+  }
+}

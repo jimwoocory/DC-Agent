@@ -12,7 +12,7 @@ from .contracts import (
 )
 from .guardrails import assess_harness_guardrails
 from .loop_runtime import LoopOrchestrator
-from .memory_promotion import HarnessMemoryPromoter
+from .memory_promotion import HarnessMemoryDistiller, HarnessMemoryPromoter
 from .source_provenance_guard import assert_completion_source_provenance
 from .task_store import HarnessTaskStore
 
@@ -77,12 +77,14 @@ class HarnessEngine:
         ]
         | None = None,
         memory_promoter: HarnessMemoryPromoter | None = None,
+        memory_distiller: HarnessMemoryDistiller | None = None,
         pet_live_store: PetLiveStore | None = None,
     ) -> None:
         self.store = store
         self.session_snapshot_getter = session_snapshot_getter
         self.cognitive_snapshot_getter = cognitive_snapshot_getter
         self.memory_promoter = memory_promoter
+        self.memory_distiller = memory_distiller
         self.pet_live_store = pet_live_store
 
     async def create_task(self, request: HarnessTaskCreateRequest) -> HarnessTask:
@@ -189,6 +191,22 @@ class HarnessEngine:
         return await self._transition_task_status(
             task_id,
             "failed",
+            event_payload={"reason": reason},
+        )
+
+    async def cancel_task(self, task_id: str, *, reason: str) -> HarnessTask:
+        """Cancel one non-terminal Harness task.
+
+        Args:
+            task_id: Harness task identifier.
+            reason: Redacted cancellation reason.
+
+        Returns:
+            Cancelled task.
+        """
+        return await self._transition_task_status(
+            task_id,
+            "cancelled",
             event_payload={"reason": reason},
         )
 
@@ -600,5 +618,28 @@ class HarnessEngine:
                 "memory_id": record.memory_id,
                 "memory_kind": record.memory_kind,
                 "summary": record.summary,
+            },
+        )
+        if self.memory_distiller is None:
+            return
+        try:
+            receipt = await self.memory_distiller.distill(record)
+        except Exception as exc:  # noqa: BLE001
+            await self.store.append_event(
+                task.task_id,
+                "governed_distillation_failed",
+                {
+                    "memory_id": record.memory_id,
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc)[:200],
+                },
+            )
+            return
+        await self.store.append_event(
+            task.task_id,
+            f"governed_distillation_candidate_{receipt.status}",
+            {
+                "memory_id": receipt.memory_id,
+                "note_path": receipt.note_path,
             },
         )

@@ -323,6 +323,12 @@ export type McpServerConfig = {
 
 export type transport = 'stdio' | 'sse' | 'streamable_http';
 
+export type MediaAuthLoginCheckRequest = {
+    session_id?: string;
+    device_code?: string;
+    poll_seconds?: number;
+};
+
 export type MessagePart = {
     type: 'text' | 'plain' | 'image' | 'file' | 'audio' | 'record' | 'video' | 'reply';
     text?: string;
@@ -387,6 +393,8 @@ export type ParameterGroupId = string;
 export type ParameterKbId = string;
 
 export type ParameterKeyId = string;
+
+export type ParameterMediaAuthProvider = 'codex' | 'dreamina';
 
 export type ParameterName = string;
 
@@ -1272,6 +1280,51 @@ export type GetProviderEmbeddingDimensionData = {
 export type GetProviderEmbeddingDimensionResponse = (SuccessEnvelope);
 
 export type GetProviderEmbeddingDimensionError = unknown;
+
+export type GetMediaAuthStatusResponse = (SuccessEnvelope);
+
+export type GetMediaAuthStatusError = unknown;
+
+export type StartMediaAuthLoginData = {
+    path: {
+        provider: 'codex' | 'dreamina';
+    };
+};
+
+export type StartMediaAuthLoginResponse = (SuccessEnvelope);
+
+export type StartMediaAuthLoginError = (ErrorEnvelope);
+
+export type CheckMediaAuthLoginData = {
+    body: MediaAuthLoginCheckRequest;
+    path: {
+        provider: 'codex' | 'dreamina';
+    };
+};
+
+export type CheckMediaAuthLoginResponse = (SuccessEnvelope);
+
+export type CheckMediaAuthLoginError = (ErrorEnvelope);
+
+export type TestMediaAuthData = {
+    path: {
+        provider: 'codex' | 'dreamina';
+    };
+};
+
+export type TestMediaAuthResponse = (SuccessEnvelope);
+
+export type TestMediaAuthError = unknown;
+
+export type LogoutMediaAuthData = {
+    path: {
+        provider: 'codex' | 'dreamina';
+    };
+};
+
+export type LogoutMediaAuthResponse = (SuccessEnvelope);
+
+export type LogoutMediaAuthError = (ErrorEnvelope);
 
 export type SendChatMessageData = {
     body: ChatRequest;

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -287,6 +288,17 @@ async def _finalize_document_intake_card(
         ),
         platform_id=handle.platform_id,
         detail=f"document intake finalized files={len(results)} status={status}",
+        source="document_intake_plugin",
+        task_id=handle.message_id,
+        delivery_files=[
+            {
+                "name": item.original_name,
+                "path": str(item.stored_path),
+                "sha256": item.sha256,
+                "size": item.size_bytes,
+            }
+            for item in results
+        ],
     )
 
 
@@ -399,7 +411,11 @@ class DocumentIntakePlugin(Star):
         super().__init__(context, config)
         cfg = config or {}
         self.enabled = bool(cfg.get("enabled", True))
-        self.inbox_dir = Path(cfg.get("inbox_dir") or DEFAULT_INBOX_DIR).expanduser()
+        self.inbox_dir = Path(
+            os.environ.get("DC_NAS_INBOX_DIR")
+            or cfg.get("inbox_dir")
+            or DEFAULT_INBOX_DIR
+        ).expanduser()
         suffixes = cfg.get("supported_suffixes") or sorted(SUPPORTED_SUFFIXES)
         self.supported_suffixes = {str(suffix).lower() for suffix in suffixes}
         self.max_file_mb = int(cfg.get("max_file_mb", DEFAULT_MAX_FILE_MB))

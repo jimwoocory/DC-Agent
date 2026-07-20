@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 WAITING_PULSE_FRAMES = ("◐", "◓", "◑", "◒")
 WAITING_TRACK_DOTS = 4
@@ -2733,16 +2734,62 @@ def build_media_generation_card(
     aspect_ratio: str = "",
     duration: str = "",
     output_url: str = "",
+    player_origin: str = "",
+    player_app_id: str = "",
+    poster_url: str = "",
     fallback_note: str = "",
     error_hint: str = "",
     elapsed_sec: float = 0,
+    material_completion_url: str = "",
+    preview_image_key: str = "",
+    preview_caption: str = "",
+    preview_only: bool = False,
 ) -> dict[str, Any]:
-    """媒体生成母版：生图 / 文生视频 / 图片转视频的状态与结果卡。"""
+    """Build a media-generation status or result card.
+
+    Args:
+        task_title: Human-readable generation task title.
+        media_type: Image, video, or image-to-video task kind.
+        status: Current localized task status.
+        prompt: Structured media prompt or result detail.
+        engine: Generation engine label.
+        task_id: Optional generation record identifier.
+        aspect_ratio: Requested media aspect ratio.
+        duration: Requested video duration.
+        output_url: Optional remote result URL.
+        player_origin: Optional H5 media-player origin.
+        player_app_id: Optional Feishu app ID for the media player AppLink.
+        poster_url: Optional video poster URL.
+        fallback_note: Optional provider fallback detail.
+        error_hint: Optional failure detail.
+        elapsed_sec: Elapsed generation time in seconds.
+        material_completion_url: Optional H5 revision AppLink for creative tasks.
+        preview_image_key: Optional Feishu image key for a generated-image preview.
+        preview_caption: Optional caption displayed below the preview image.
+        preview_only: Render a compact standalone preview card when true.
+
+    Returns:
+        A Card JSON 2.0 media status or result payload.
+    """
     type_label = {
         "image": "生图",
         "video": "生视频",
         "image_to_video": "图片转视频",
     }.get(media_type, media_type or "媒体生成")
+    if preview_only and preview_image_key:
+        caption = _compact(preview_caption, 180) or "生成图片预览"
+        return _business_card(
+            title="图片预览",
+            template="grey",
+            elements=[
+                {
+                    "tag": "img",
+                    "img_key": preview_image_key,
+                    "alt": {"tag": "plain_text", "content": caption},
+                },
+                _md(_muted(caption), "notation"),
+            ],
+        )
     template = _status_template(status)
     fields: list[tuple[str, str]] = [
         ("类型", type_label),
@@ -2779,9 +2826,78 @@ def build_media_generation_card(
         elements.append(_md(f"**兜底状态**：{_muted(fallback_note)}", "notation"))
     if output_url:
         elements.append({"tag": "hr"})
-        elements.append(_display_panel("输出链接", output_url, "notation"))
+        if re.match(r"^https?://", output_url, re.IGNORECASE):
+            preview_label = (
+                "视频结果已就绪"
+                if media_type
+                in {
+                    "video",
+                    "image_to_video",
+                    "image2video",
+                }
+                else "生成结果已就绪"
+            )
+            elements.append(
+                _md(
+                    f"**结果预览**\n{_muted(preview_label + '，点击下方按钮打开。')}",
+                    "notation",
+                )
+            )
+            result_url = output_url
+            web_result_url = output_url
+            if media_type in {"video", "image_to_video", "image2video"} and re.match(
+                r"^https?://", player_origin, re.IGNORECASE
+            ):
+                player_query = urlencode(
+                    {
+                        "src": output_url,
+                        "title": task_title or "视频预览",
+                        "poster": poster_url,
+                        "engine": engine,
+                        "ratio": aspect_ratio,
+                        "duration": duration,
+                        "task_id": task_id,
+                    }
+                )
+                player_url = (
+                    f"{player_origin.rstrip('/')}/api/v1/assistant-attachments/"
+                    f"media-player?{player_query}"
+                )
+                web_result_url = player_url
+                if player_app_id:
+                    result_url = (
+                        "https://applink.feishu.cn/client/web_app/open"
+                        f"?appId={quote(player_app_id, safe='')}&mode=sidebar-semi"
+                        f"&reload=false&lk_target_url={quote(player_url, safe='')}"
+                    )
+                else:
+                    result_url = player_url
+            elements.append(
+                {
+                    "tag": "button",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": (
+                            "▶ 在右侧播放"
+                            if media_type in {"video", "image_to_video", "image2video"}
+                            else "打开生成结果"
+                        ),
+                    },
+                    "type": "primary",
+                    "width": "fill",
+                    "multi_url": {
+                        "url": web_result_url,
+                        "android_url": result_url,
+                        "ios_url": result_url,
+                        "pc_url": result_url,
+                    },
+                }
+            )
+        else:
+            elements.append(_display_panel("输出位置", output_url, "notation"))
     if error_hint:
         elements.append(_md(f"**失败诊断**：{_muted(error_hint)}", "notation"))
+    _append_material_completion_action(elements, material_completion_url)
     return _business_card(
         title=f"{type_label} · {status}",
         template=template,
@@ -3348,17 +3464,75 @@ def build_skill_confirm_card(
     )
 
 
+def _append_material_completion_action(
+    elements: list[dict[str, Any]], material_completion_url: str
+) -> None:
+    """Append the shared creative-result revision action when available.
+
+    Args:
+        elements: Mutable Card JSON 2.0 body element list.
+        material_completion_url: Feishu AppLink for the prefilled H5 revision view.
+
+    Returns:
+        None. The supplied element list is updated in place.
+    """
+    if not re.match(r"^https?://", material_completion_url, re.IGNORECASE):
+        return
+    material_completion_web_url = material_completion_url
+    parsed_completion_url = urlsplit(material_completion_url)
+    if parsed_completion_url.hostname == "applink.feishu.cn":
+        target_values = parse_qs(parsed_completion_url.query).get("lk_target_url") or []
+        if target_values:
+            target_url = str(target_values[0] or "").strip()
+            parsed_target = urlsplit(target_url)
+            if parsed_target.scheme in {"http", "https"} and parsed_target.netloc:
+                material_completion_web_url = target_url
+    elements.extend(
+        [
+            {"tag": "hr"},
+            _md(
+                "资料不完整或想调整要求时，可先进入 H5 补齐。"
+                "打开页面不会自动生成，确认修改后才会再次执行。",
+                "notation",
+            ),
+            {
+                "tag": "button",
+                "type": "default",
+                "width": "fill",
+                "text": {"tag": "plain_text", "content": "补齐资料"},
+                "behaviors": [
+                    {
+                        "type": "open_url",
+                        "default_url": material_completion_web_url,
+                        "pc_url": material_completion_url,
+                        "android_url": material_completion_url,
+                        "ios_url": material_completion_url,
+                    }
+                ],
+            },
+        ]
+    )
+
+
 def build_daily_response_card(
     *,
     content_md: str,
     title: str | None = None,
     header_color: str = "blue",
     footer_hint: str | None = None,
+    material_completion_url: str = "",
 ) -> dict[str, Any]:
-    """日常对话渲染卡片 —— 给 LLM 输出的 markdown 套一层飞书卡片。
+    """Build the detailed Feishu card used for an LLM markdown response.
 
-    用智能字号分段：# / ## / ### 渲染成 22/18/16px 加粗大字，
-    正文 14px，`> 引用` 使用 normal 正文字号。
+    Args:
+        content_md: Markdown response content.
+        title: Optional card header title.
+        header_color: Feishu header template color.
+        footer_hint: Optional notation shown below the response.
+        material_completion_url: Optional H5 revision AppLink for creative tasks.
+
+    Returns:
+        A Card JSON 2.0 detailed response payload.
     """
     elements: list[dict[str, Any]] = _md_blocks_from_text(content_md)
     if footer_hint:
@@ -3370,6 +3544,7 @@ def build_daily_response_card(
                 "text_size": "notation",
             }
         )
+    _append_material_completion_action(elements, material_completion_url)
 
     card: dict[str, Any] = {
         "schema": "2.0",
@@ -3392,8 +3567,19 @@ def build_casual_response_card(
     content_md: str,
     user_msg: str = "",
     footer_hint: str | None = None,
+    material_completion_url: str = "",
 ) -> dict[str, Any]:
-    """轻量闲聊卡片：不显示任务、模型、进度，只保留对话感。"""
+    """Build the lightweight Feishu card used for a short response.
+
+    Args:
+        content_md: Markdown response content.
+        user_msg: Optional user message quoted above the response.
+        footer_hint: Optional notation shown below the response.
+        material_completion_url: Optional H5 revision AppLink for creative tasks.
+
+    Returns:
+        A Card JSON 2.0 lightweight response payload.
+    """
     content = str(content_md or "").strip()
     has_structure = bool(CASUAL_STRUCTURE_RE.search(content))
     elements: list[dict[str, Any]] = []
@@ -3414,6 +3600,7 @@ def build_casual_response_card(
 
     if footer_hint:
         elements.append(_md(_muted(footer_hint), "notation"))
+    _append_material_completion_action(elements, material_completion_url)
     return {
         "schema": "2.0",
         "config": {"wide_screen_mode": True},

@@ -22,6 +22,8 @@ dashboard/
 data/*
 !data/dist/
 !data/dist/**
+runtime-data/
+runtime-secrets/
 tests/
 docs/
 hermes-agent/
@@ -32,7 +34,6 @@ openclaw-control-center/
 vendor/
 node_modules/
 nas/
-nas_sync/
 ObsidianVault/
 conversions/
 output/

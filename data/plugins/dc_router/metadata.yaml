@@ -2,8 +2,8 @@ name: dc_router
 display_name: DC 路由
 author: dc_agent
 version: 0.2.0
-desc: DC 路由 · 统一意图分类与 provider 分发（业务 + DevOps 唯一入口）
-short_desc: 统一纳管意图识别、模型选择、深度任务分流、CLI 路由、QuotagGate 队列
+desc: DC 中间路由 · 接收主 Agent、菜单与卡片的结构化能力请求并确定性派发
+short_desc: Luna 理解自然语言；Router 只负责鉴权、能力映射、派发与兼容回滚
 support_platforms:
   - lark
 pages: []

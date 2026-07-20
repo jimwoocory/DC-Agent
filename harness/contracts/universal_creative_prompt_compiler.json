@@ -1,0 +1,51 @@
+{
+    "feature": "universal_creative_prompt_compiler",
+    "goal": "Expose the existing NAS prompt-engineering work as one high-quality three-candidate prompt compiler for copy, image, and video tasks before colleagues submit generation jobs.",
+    "scope": {
+        "included": [
+            "one standalone /api/prompt-candidates route for copy, image, and video",
+            "three materially distinct production-ready candidates for every supported creative task",
+            "preservation of the colleague's original request, material boundaries, and selected output settings",
+            "automatic retrieval of relevant company copy, campaign, execution, and reviewed memory evidence from the Obsidian-backed NAS index",
+            "visible source title, Obsidian path, and review status for every company-memory reference",
+            "same-origin Feishu H5 access to the exact standalone compiler backend in-process by default or through an explicitly configured NAS-local service",
+            "click-to-adopt candidate prompts before final task submission"
+        ],
+        "excluded": [
+            "browser-side static suffix templates presented as professional prompt optimization",
+            "silent downgrade to low-detail local strings when the professional service is unavailable",
+            "exposing standalone service credentials to the browser"
+        ]
+    },
+    "acceptance_criteria": [
+        {
+            "id": "universal-creative-prompt-001",
+            "description": "The standalone NAS toolbox accepts copy, image, and video through one /api/prompt-candidates route and returns exactly three materially distinct prompts that preserve the original request and applicable settings.",
+            "verification": "uv run pytest tests/test_universal_creative_prompt_compiler.py -q"
+        },
+        {
+            "id": "universal-creative-prompt-002",
+            "description": "The Feishu creative workspace requests professional candidates from its own server route, renders title, summary, and full prompt, and lets the colleague adopt a candidate before task submission without browser-side static suffix generation.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "universal-creative-prompt-003",
+            "description": "The Feishu server sends only whitelisted creative settings to the exact standalone compiler backend, keeps any configured internal service token server-side, and returns a clear unavailable error instead of silently substituting lower-quality prompts.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "universal-creative-prompt-004",
+            "description": "Before compiling copy, image, or video candidates, the NAS workspace searches data/nas_memory.db for relevant Obsidian-backed company originals and returns bounded evidence with title, source path, excerpt, document type, and review status without invoking a model.",
+            "verification": "uv run pytest tests/test_creative_memory.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "universal-creative-prompt-005",
+            "description": "Every candidate explicitly receives matched company memory; confirmed evidence may support facts and terminology, while need-review evidence is limited to style and inspiration and cannot be presented as verified company fact. The H5 page truthfully shows matched sources, no-match state, or index-unavailable state.",
+            "verification": "uv run pytest tests/test_universal_creative_prompt_compiler.py tests/test_assistant_attachment_upload.py -q"
+        }
+    ],
+    "verification": {
+        "focused": "uv run pytest tests/test_creative_memory.py tests/test_universal_creative_prompt_compiler.py tests/test_assistant_attachment_upload.py -q",
+        "targeted": "scripts/agent-check.sh --profile targeted"
+    }
+}

@@ -8,6 +8,7 @@ metadata are present before handling messages.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -18,10 +19,14 @@ from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from .card_style import apply_card_visual_system
 
 DC_ROOT = Path(__file__).resolve().parents[2]
 CARD_STATE_PATH = DC_ROOT / "data" / "config" / "card_system_state.json"
 CARD_RUNTIME_EVENTS_PATH = DC_ROOT / "data" / "card_runtime" / "events.jsonl"
+CARD_RESULT_ARCHIVE_PATH = DC_ROOT / "data" / "card_runtime" / "results"
 CARD_CONTRACT_PATH = DC_ROOT / "harness" / "contracts" / "feishu_card_system.json"
 CARD_SOP_PATH = (
     DC_ROOT
@@ -84,6 +89,10 @@ CARD_RUNTIME_DYNAMIC_CARD_TYPE_FORWARDERS = {
         "data/plugins/feishu_pet_assistant/main.py",
         "_send_card",
     ): "typed pet-card wrapper; call sites are literal-gated",
+    (
+        "data/plugins/dc_router/preprocessing/assistant_workbench.py",
+        "_send_card",
+    ): "registered assistant-workbench card wrapper",
 }
 
 
@@ -99,6 +108,7 @@ class CardSpec:
     health_required: bool = True
     upgrade_mode: str = "versioned"
     rollback_to: str | None = None
+    archive_events: tuple[str, ...] = ()
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -163,6 +173,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         triggers=("intent=casual", "short fallback non-task"),
         fallback="plain_text",
         rollback_to=None,
+        archive_events=("send",),
         notes="Blue header + white body daily chat card.",
     ),
     "thinking_waiting": CardSpec(
@@ -190,6 +201,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_final_card",
         triggers=("deep task completed", "waiting card final success"),
         fallback="plain_text",
+        archive_events=("finalize",),
     ),
     "task_error": CardSpec(
         card_type="task_error",
@@ -198,6 +210,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_error_card",
         triggers=("deep task failed", "card-rendered error response"),
         fallback="plain_text",
+        archive_events=("finalize",),
     ),
     "daily_response": CardSpec(
         card_type="daily_response",
@@ -206,6 +219,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_daily_response_card",
         triggers=("long structured response", "waiting finalize"),
         fallback="plain_text",
+        archive_events=("send", "finalize"),
     ),
     "media_generation": CardSpec(
         card_type="media_generation",
@@ -214,6 +228,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_media_generation_card",
         triggers=("image generation", "video generation"),
         fallback="plain_text",
+        archive_events=("finalize",),
     ),
     "source_image_edit": CardSpec(
         card_type="source_image_edit",
@@ -222,6 +237,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_source_image_edit_card",
         triggers=("source image background removal", "cutout skill"),
         fallback="plain_text_image",
+        archive_events=("finalize",),
         notes="Deterministic source-image edit card; not a text-to-image task.",
     ),
     "truth_intake_request": CardSpec(
@@ -239,6 +255,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_truth_intake_received_card",
         triggers=("truth material archived",),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "source_trace": CardSpec(
         card_type="source_trace",
@@ -247,6 +264,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_source_trace_card",
         triggers=("source trace requested", "partial truth confirmation"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "devops_status": CardSpec(
         card_type="devops_status",
@@ -255,6 +273,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_devops_status_card",
         triggers=("service status", "card runtime health"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "onboarding_department": CardSpec(
         card_type="onboarding_department",
@@ -327,6 +346,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_quiz_result_card",
         triggers=("quiz completed",),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "kb_archive": CardSpec(
         card_type="kb_archive",
@@ -335,6 +355,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_kb_archive_card",
         triggers=("materials archived", "knowledge base sync completed"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "document_intake": CardSpec(
         card_type="document_intake",
@@ -347,6 +368,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
             "kb import completed",
         ),
         fallback="plain_text",
+        archive_events=("finalize",),
     ),
     "employee_pending": CardSpec(
         card_type="employee_pending",
@@ -363,6 +385,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_multimodal_understanding_card",
         triggers=("image understanding", "video understanding", "audio understanding"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "case_overview": CardSpec(
         card_type="case_overview",
@@ -371,6 +394,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_case_overview_card",
         triggers=("case snapshot requested", "project progress summary"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "task_reminder": CardSpec(
         card_type="task_reminder",
@@ -427,6 +451,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_email_draft_card",
         triggers=("email draft generated", "customer reply draft"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "copy_draft": CardSpec(
         card_type="copy_draft",
@@ -435,6 +460,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_copy_draft_card",
         triggers=("copy draft generated", "announcement draft"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "boss_quicklook": CardSpec(
         card_type="boss_quicklook",
@@ -443,6 +469,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_boss_quicklook_card",
         triggers=("boss summary requested", "executive quicklook"),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "assistant_distillation_review": CardSpec(
         card_type="assistant_distillation_review",
@@ -497,6 +524,7 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_done_card",
         triggers=("pet task completed",),
         fallback="plain_text",
+        archive_events=("send",),
     ),
     "pet_error": CardSpec(
         card_type="pet_error",
@@ -506,6 +534,57 @@ CARD_REGISTRY: dict[str, CardSpec] = {
         builder="build_error_card",
         triggers=("pet card action failed",),
         fallback="plain_text",
+        archive_events=("send",),
+    ),
+    "assistant_task_intake": CardSpec(
+        card_type="assistant_task_intake",
+        version="1.0",
+        owner="dc_router",
+        builder_module="dc_engines.assistant_workbench_cards",
+        builder="build_assistant_task_intake_card",
+        triggers=(
+            "写文案/方案",
+            "生成图片",
+            "生成视频",
+            "查资料/分析",
+            "处理文件",
+            "物料报价",
+            "筹备组物料报价",
+            "报价系统",
+            "Codex 高级工具",
+        ),
+        fallback="plain_text",
+        notes="Task type or Codex capability intake; submission only creates a preview.",
+    ),
+    "assistant_task_confirmation": CardSpec(
+        card_type="assistant_task_confirmation",
+        version="1.0",
+        owner="dc_router",
+        builder_module="dc_engines.assistant_workbench_cards",
+        builder="build_assistant_task_confirmation_card",
+        triggers=("assistant task form preview",),
+        fallback="plain_text",
+        notes="Explicit boundary before model or tool execution.",
+    ),
+    "assistant_task_list": CardSpec(
+        card_type="assistant_task_list",
+        version="1.0",
+        owner="dc_router",
+        builder_module="dc_engines.assistant_workbench_cards",
+        builder="build_assistant_task_list_card",
+        triggers=("继续最近", "进行中", "待补充", "已完成"),
+        fallback="plain_text",
+        notes="Truthful Harness task records with deterministic detail actions.",
+    ),
+    "assistant_session_choice": CardSpec(
+        card_type="assistant_session_choice",
+        version="1.0",
+        owner="dc_router",
+        builder_module="dc_engines.assistant_workbench_cards",
+        builder="build_assistant_session_choice_card",
+        triggers=("completed Feishu assistant workbench task",),
+        fallback="none",
+        notes="Post-result context routing; never an execution approval gate.",
     ),
     "department_memory_prompt": CardSpec(
         card_type="department_memory_prompt",
@@ -583,6 +662,9 @@ REQUIRED_CONTRACT_IDS = frozenset(
         "card-system-007",
         "card-system-008",
         "card-system-009",
+        "card-system-010",
+        "card-system-011",
+        "card-system-012",
     }
 )
 
@@ -597,6 +679,22 @@ def load_card_contract() -> dict[str, Any]:
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _card_runtime_persistence_disabled() -> bool:
+    """Return whether runtime persistence is disabled for the current process.
+
+    Returns:
+        True for explicit test mode and unisolated pytest calls. Tests that
+        redirect every runtime path may opt in with
+        ``CARD_RUNTIME_PERSIST_IN_TESTS=true``.
+    """
+    if os.environ.get("TESTING", "").lower() == "true":
+        return True
+    return (
+        bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        and os.environ.get("CARD_RUNTIME_PERSIST_IN_TESTS", "").lower() != "true"
+    )
 
 
 def _default_version_state() -> dict[str, dict[str, Any]]:
@@ -785,7 +883,7 @@ def record_card_runtime_event(
     detail: str = "",
     fallback: str = "",
 ) -> None:
-    if os.environ.get("TESTING", "").lower() == "true":
+    if _card_runtime_persistence_disabled():
         return
     CARD_RUNTIME_EVENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -802,6 +900,522 @@ def record_card_runtime_event(
     }
     with CARD_RUNTIME_EVENTS_PATH.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+_SENSITIVE_ARCHIVE_KEY_RE = re.compile(
+    r"(^|_)(?:app_secret|secret|token|authorization|password|cookie|api_key|"
+    r"private_key|tenant_key|sign|signature)(?:_|$)",
+    re.IGNORECASE,
+)
+_SENSITIVE_QUERY_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "app_secret",
+        "auth",
+        "authorization",
+        "key",
+        "password",
+        "secret",
+        "sig",
+        "signature",
+        "token",
+        "x-amz-signature",
+        "x-goog-signature",
+    }
+)
+_DELIVERY_REFERENCE_KEYS = frozenset(
+    {
+        "download_url",
+        "file_url",
+        "href",
+        "output_hint",
+        "output_path",
+        "output_url",
+        "path",
+        "url",
+        "uri",
+    }
+)
+
+
+def _redact_card_archive_string(value: str) -> str:
+    """Redact credentials from one archived string.
+
+    Args:
+        value: Card string that may contain a URL or credential assignment.
+
+    Returns:
+        The string with credential values removed and length bounded.
+    """
+    redacted = value[:50000]
+    if redacted.lower().startswith(("http://", "https://")):
+        try:
+            parts = urlsplit(redacted)
+            query = [
+                (key, "[REDACTED]" if key.lower() in _SENSITIVE_QUERY_KEYS else item)
+                for key, item in parse_qsl(parts.query, keep_blank_values=True)
+            ]
+            redacted = urlunsplit(
+                (
+                    parts.scheme,
+                    parts.netloc,
+                    parts.path,
+                    urlencode(query),
+                    parts.fragment,
+                )
+            )
+        except ValueError:
+            pass
+    redacted = re.sub(
+        r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+",
+        "Bearer [REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)(\b(?:app_secret|access_token|refresh_token|api_key|authorization|"
+        r"password|private_key|secret)\s*[:=]\s*)[^\s&]+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)([?&](?:access_token|api_key|app_secret|auth|authorization|key|"
+        r"password|secret|sig|signature|token|x-amz-signature|"
+        r"x-goog-signature)=)[^&#\s)]+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    return redacted
+
+
+def redact_card_json(value: Any) -> Any:
+    """Return a JSON-compatible card payload with secrets redacted.
+
+    Args:
+        value: Card JSON value to sanitize recursively.
+
+    Returns:
+        A detached JSON-compatible structure safe for result archives.
+    """
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            key = str(raw_key)
+            redacted[key] = (
+                "[REDACTED]"
+                if _SENSITIVE_ARCHIVE_KEY_RE.search(key)
+                else redact_card_json(item)
+            )
+        return redacted
+    if isinstance(value, (list, tuple)):
+        return [redact_card_json(item) for item in value]
+    if isinstance(value, str):
+        return _redact_card_archive_string(value)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _redact_card_archive_string(str(value))
+
+
+def _card_result_archive_file(message_id: str) -> Path:
+    """Resolve a safe archive path for a Feishu message id.
+
+    Args:
+        message_id: Feishu message identifier.
+
+    Returns:
+        Hash-keyed JSON path below the result archive directory.
+    """
+    archive_key = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
+    return CARD_RESULT_ARCHIVE_PATH / f"{archive_key}.json"
+
+
+def _write_card_result_archive(payload: dict[str, Any]) -> None:
+    """Atomically write one result archive record.
+
+    Args:
+        payload: Complete result archive record containing ``message_id``.
+
+    Raises:
+        ValueError: If the payload has no message identifier.
+    """
+    message_id = str(payload.get("message_id") or "").strip()
+    if not message_id:
+        raise ValueError("card archive payload requires message_id")
+    path = _card_result_archive_file(message_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(".json.tmp")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def load_card_result_archive(message_id: str) -> dict[str, Any] | None:
+    """Load the formal result archive for one Feishu message.
+
+    Args:
+        message_id: Feishu message identifier.
+
+    Returns:
+        The archive record, or ``None`` when no formal result was retained.
+    """
+    if not message_id:
+        return None
+    path = _card_result_archive_file(message_id)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _delivery_references(
+    card: dict[str, Any],
+    delivery_files: list[str | dict[str, Any]] | tuple[str | dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    """Collect sanitized result file references without retaining chat input.
+
+    Args:
+        card: Final card JSON that may contain result links.
+        delivery_files: Explicit file or artifact references from the caller.
+
+    Returns:
+        Deduplicated file, URL, or artifact references.
+    """
+    references: list[dict[str, Any]] = []
+    allowed_fields = {
+        "artifact_id",
+        "kind",
+        "mime_type",
+        "name",
+        "path",
+        "sha256",
+        "size",
+        "uri",
+        "url",
+    }
+    for item in delivery_files:
+        if isinstance(item, str) and item.strip():
+            key = "url" if item.lower().startswith(("http://", "https://")) else "path"
+            references.append({key: _redact_card_archive_string(item.strip())})
+        elif isinstance(item, dict):
+            safe = {
+                str(key): redact_card_json(value)
+                for key, value in item.items()
+                if str(key) in allowed_fields and value not in (None, "")
+            }
+            if safe:
+                references.append(safe)
+
+    def collect(node: Any, parent_key: str = "") -> None:
+        if isinstance(node, dict):
+            for key, item in node.items():
+                normalized_key = str(key).lower()
+                if normalized_key in _DELIVERY_REFERENCE_KEYS and isinstance(item, str):
+                    text = item.strip()
+                    if text:
+                        ref_key = (
+                            "url"
+                            if text.lower().startswith(("http://", "https://"))
+                            else "path"
+                        )
+                        references.append({ref_key: _redact_card_archive_string(text)})
+                collect(item, normalized_key)
+            return
+        if isinstance(node, list):
+            for item in node:
+                collect(item, parent_key)
+            return
+        if not isinstance(node, str) or parent_key not in {"content", "text"}:
+            return
+        for url in re.findall(r"https?://[^\s)>\]]+", node):
+            references.append({"url": _redact_card_archive_string(url)})
+        for path_value in re.findall(
+            r"(?<!\w)(?:/[A-Za-z0-9._~+@%/ -]+|[A-Za-z]:\\[^\r\n`<>|]+|"
+            r"(?:data|output|outputs|deliveries)/[A-Za-z0-9._~+@%/ -]+)"
+            r"\.[A-Za-z0-9]{1,10}",
+            node,
+        ):
+            references.append({"path": _redact_card_archive_string(path_value.strip())})
+
+    collect(card)
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in references:
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def archive_card_result(
+    *,
+    archive_event: str,
+    card_type: str,
+    message_id: str,
+    conversation_id: str,
+    card: dict[str, Any],
+    platform_id: str = "",
+    source: str = "",
+    task_id: str = "",
+    source_message_id: str = "",
+    delivery_files: list[str | dict[str, Any]] | tuple[str | dict[str, Any], ...] = (),
+    regeneration_of_message_id: str = "",
+) -> dict[str, Any] | None:
+    """Persist one sanitized formal result card and its content version chain.
+
+    Args:
+        archive_event: Lifecycle event that produced the formal result.
+        card_type: Registered card type.
+        message_id: Feishu result message identifier.
+        conversation_id: Opaque Feishu chat or recipient identifier.
+        card: Final Card JSON sent to Feishu.
+        platform_id: AstrBot platform instance identifier.
+        source: Business source or runtime owner.
+        task_id: Associated task or generation record identifier.
+        source_message_id: User/source message that initiated the result.
+        delivery_files: File, URL, or artifact references delivered by the card.
+        regeneration_of_message_id: Parent result when this is a regenerated output.
+
+    Returns:
+        The stored archive record, or ``None`` when required trace identifiers
+        are unavailable or tests have disabled runtime persistence.
+
+    Raises:
+        KeyError: If ``card_type`` is not registered.
+    """
+    if card_type not in CARD_REGISTRY:
+        raise KeyError(f"unknown card_type: {card_type}")
+    if _card_runtime_persistence_disabled():
+        return None
+    if not message_id or not conversation_id or not isinstance(card, dict):
+        return None
+
+    spec = CARD_REGISTRY[card_type]
+    version_state = load_card_version_state().get(card_type, {})
+    card_version = str(version_state.get("active_version") or spec.version)
+    sanitized_card = redact_card_json(card)
+    safe_delivery_files = _delivery_references(card, delivery_files)
+    if not task_id:
+        serialized_card = json.dumps(sanitized_card, ensure_ascii=False)
+        match = re.search(
+            r"(?:编号|任务编号|task[_ -]?id).{0,80}?`?#([A-Za-z0-9._-]{4,128})",
+            serialized_card,
+            re.IGNORECASE,
+        )
+        task_id = match.group(1) if match else ""
+
+    now = _utc_now()
+    content_digest = hashlib.sha256(
+        json.dumps(sanitized_card, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    existing = load_card_result_archive(message_id) or {}
+    versions = list(existing.get("versions") or [])
+    if (
+        not versions
+        or versions[-1].get("content_digest") != content_digest
+        or versions[-1].get("card_version") != card_version
+    ):
+        versions.append(
+            {
+                "sequence": len(versions) + 1,
+                "archived_at": now,
+                "archive_event": archive_event,
+                "card_type": card_type,
+                "card_version": card_version,
+                "registry_version": spec.version,
+                "content_digest": content_digest,
+                "delivery_files": safe_delivery_files,
+                "card_json": sanitized_card,
+            }
+        )
+
+    record = {
+        "schema": 1,
+        "kind": "feishu_formal_result_card",
+        "message_id": message_id[:160],
+        "conversation_id": conversation_id[:160],
+        "platform_id": platform_id[:160],
+        "card_type": card_type,
+        "card_version": card_version,
+        "registry_version": spec.version,
+        "status": str(existing.get("status") or "active"),
+        "created_at": str(existing.get("created_at") or now),
+        "updated_at": now,
+        "source_task": {
+            "source": (source or spec.owner)[:200],
+            "task_id": task_id[:200],
+            "source_message_id": source_message_id[:160],
+        },
+        "delivery_files": safe_delivery_files,
+        "final_card": sanitized_card,
+        "versions": versions,
+        "lifecycle": list(existing.get("lifecycle") or [])
+        + [{"ts": now, "event": archive_event}],
+        "actions": list(existing.get("actions") or []),
+        "regeneration_of_message_id": (
+            regeneration_of_message_id[:160]
+            or str(existing.get("regeneration_of_message_id") or "")
+        ),
+        "regenerated_message_ids": list(existing.get("regenerated_message_ids") or []),
+    }
+    _write_card_result_archive(record)
+
+    if regeneration_of_message_id:
+        parent = load_card_result_archive(regeneration_of_message_id)
+        if parent is not None:
+            children = list(parent.get("regenerated_message_ids") or [])
+            if message_id not in children:
+                children.append(message_id)
+            parent["regenerated_message_ids"] = children
+            parent["updated_at"] = now
+            _write_card_result_archive(parent)
+    return record
+
+
+def attach_card_delivery_files(
+    message_id: str,
+    delivery_files: list[str | dict[str, Any]] | tuple[str | dict[str, Any], ...],
+) -> bool:
+    """Attach late-generated file references to an existing card archive.
+
+    Office artifacts are produced after the result card is finalized, so they
+    need a narrow append operation instead of creating a fake card version.
+
+    Args:
+        message_id: Existing formal-result card message identifier.
+        delivery_files: Local file paths, URLs, or structured artifact metadata.
+
+    Returns:
+        True when the existing card archive was updated.
+    """
+    if _card_runtime_persistence_disabled():
+        return False
+    record = load_card_result_archive(message_id)
+    if record is None:
+        return False
+    references = _delivery_references({}, delivery_files)
+    if not references:
+        return False
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*(record.get("delivery_files") or []), *references]:
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    now = _utc_now()
+    record["delivery_files"] = merged
+    versions = list(record.get("versions") or [])
+    if versions:
+        versions[-1]["delivery_files"] = merged
+        record["versions"] = versions
+    record["updated_at"] = now
+    record["lifecycle"] = list(record.get("lifecycle") or []) + [
+        {"ts": now, "event": "artifact_delivery"}
+    ]
+    _write_card_result_archive(record)
+    return True
+
+
+def mark_card_result_retracted(message_id: str) -> bool:
+    """Mark a retained formal result as retracted without deleting evidence.
+
+    Args:
+        message_id: Feishu message identifier.
+
+    Returns:
+        True when an existing formal result record was updated.
+    """
+    if _card_runtime_persistence_disabled():
+        return False
+    record = load_card_result_archive(message_id)
+    if record is None:
+        return False
+    now = _utc_now()
+    record["status"] = "retracted"
+    record["updated_at"] = now
+    record["lifecycle"] = list(record.get("lifecycle") or []) + [
+        {"ts": now, "event": "retract"}
+    ]
+    _write_card_result_archive(record)
+    return True
+
+
+def record_card_action_event(
+    *,
+    message_id: str,
+    conversation_id: str = "",
+    action: str = "",
+    source: str = "",
+    task_id: str = "",
+    operator_id: str = "",
+    is_regeneration: bool | None = None,
+    platform_id: str = "",
+) -> None:
+    """Record a minimal card callback and link it to retained results.
+
+    Args:
+        message_id: Original Feishu card message identifier.
+        conversation_id: Opaque Feishu chat identifier.
+        action: Button action name only; form data is intentionally excluded.
+        source: Card callback source label.
+        task_id: Associated task identifier when the button carries one.
+        operator_id: Feishu operator identifier, stored only as a digest.
+        is_regeneration: Explicit regeneration marker, or ``None`` to infer it.
+        platform_id: AstrBot platform instance identifier.
+
+    Returns:
+        None.
+    """
+    normalized_action = action.strip().lower()
+    if is_regeneration is None:
+        is_regeneration = bool(
+            re.search(r"regenerat|(^|_)retry($|_)|重新生成|再生成", normalized_action)
+        )
+    record = load_card_result_archive(message_id)
+    card_type = str((record or {}).get("card_type") or "")
+    if not card_type and source in CARD_REGISTRY:
+        card_type = source
+    card_type = card_type or "unknown_card"
+    record_card_runtime_event(
+        event="action_callback",
+        card_type=card_type,
+        ok=True,
+        platform_id=platform_id,
+        chat_id=conversation_id,
+        message_id=message_id,
+        detail=(
+            f"source={source[:120]} action={action[:120]} "
+            f"task_id={task_id[:120]} regeneration={bool(is_regeneration)}"
+        ),
+    )
+    if record is None or _card_runtime_persistence_disabled():
+        return
+    now = _utc_now()
+    operator_digest = (
+        hashlib.sha256(operator_id.encode("utf-8")).hexdigest()[:16]
+        if operator_id
+        else ""
+    )
+    record["actions"] = list(record.get("actions") or []) + [
+        {
+            "ts": now,
+            "action": action[:120],
+            "source": source[:120],
+            "task_id": task_id[:160],
+            "operator_digest": operator_digest,
+            "user_regeneration": bool(is_regeneration),
+        }
+    ]
+    record["updated_at"] = now
+    _write_card_result_archive(record)
 
 
 def _card_failure_dedupe_key(item: dict[str, Any]) -> tuple[str, ...]:
@@ -849,35 +1463,48 @@ def _dedupe_consecutive_failures(events: list[dict[str, Any]]) -> list[dict[str,
     return result
 
 
-def _grey_push_recovery_key(item: dict[str, Any]) -> tuple[str, ...]:
-    if str(item.get("event") or "") != "grey_push":
+def _runtime_validation_recovery_key(item: dict[str, Any]) -> tuple[str, ...]:
+    """Build the identity for one retryable operator validation event.
+
+    Args:
+        item: Card runtime event payload.
+
+    Returns:
+        A stable retry identity, or an empty tuple for user-facing runtime events.
+    """
+    event = str(item.get("event") or "")
+    if event not in {"grey_push", "design_sample"}:
         return ()
     return (
-        "grey_push",
+        event,
         str(item.get("card_type") or ""),
         str(item.get("platform_id") or ""),
         str(item.get("chat_id") or ""),
         str(item.get("receive_id_type") or ""),
-        str(item.get("detail") or ""),
+        str(item.get("detail") or "") if event == "design_sample" else "",
     )
 
 
-def _drop_recovered_grey_push_failures(
+def _drop_recovered_validation_failures(
     events: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Ignore grey-push failures that were retried successfully later.
+    """Ignore operator-validation failures successfully retried later.
 
-    ``card-grey-push.py`` is an operator smoke tool. A sandbox/network failure
-    can write an ``ok=false`` event, then the same validation run can be retried
-    outside the sandbox and succeed seconds later. For handoff health, the
-    latest result of that grey validation batch is what matters. This is
-    intentionally limited to ``grey_push`` so real user-facing card failures
-    still require inspection.
+    ``grey_push`` and ``design_sample`` are operator validation events. A
+    sandbox or network failure can write ``ok=false`` before the same target is
+    retried successfully. Real user-facing ``start`` and ``finalize`` failures
+    remain untouched and still require inspection.
+
+    Args:
+        events: Ordered production card runtime events.
+
+    Returns:
+        Events with only recovered operator-validation failures removed.
     """
     successful_keys: set[tuple[str, ...]] = set()
     kept_reversed: list[dict[str, Any]] = []
     for item in reversed(events):
-        key = _grey_push_recovery_key(item)
+        key = _runtime_validation_recovery_key(item)
         if item.get("ok") and key:
             successful_keys.add(key)
             kept_reversed.append(item)
@@ -903,7 +1530,7 @@ def _deduped_production_card_failures(
     events: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     production_events = _production_card_runtime_events(events)
-    recovered = _drop_recovered_grey_push_failures(production_events)
+    recovered = _drop_recovered_validation_failures(production_events)
     deduped = _dedupe_consecutive_failures(recovered)
     return [item for item in deduped if not item.get("ok")]
 
@@ -921,6 +1548,40 @@ def recent_card_runtime_events(limit: int = 20) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             events.append(item)
     return events
+
+
+def card_runtime_message_context(message_id: str) -> dict[str, str]:
+    """Recover conversation trace metadata for a previously sent card.
+
+    Args:
+        message_id: Feishu message identifier.
+
+    Returns:
+        The latest non-empty conversation, recipient type, and platform fields
+        recorded for the message, or an empty mapping when unavailable.
+    """
+    if not message_id or not CARD_RUNTIME_EVENTS_PATH.exists():
+        return {}
+    try:
+        lines = CARD_RUNTIME_EVENTS_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for line in reversed(lines):
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(item, dict) or item.get("message_id") != message_id:
+            continue
+        conversation_id = str(item.get("chat_id") or "")
+        if not conversation_id:
+            continue
+        return {
+            "conversation_id": conversation_id,
+            "receive_id_type": str(item.get("receive_id_type") or ""),
+            "platform_id": str(item.get("platform_id") or ""),
+        }
+    return {}
 
 
 def card_system_next_step(report: CardHealthReport | None = None) -> str:
@@ -989,7 +1650,9 @@ def build_sample_card(card_type: str) -> dict[str, Any]:
     builder = _builder_for_spec(spec)
     if builder is None:
         raise KeyError(f"missing builder for {card_type}: {spec.builder}")
-    return builder(**_sample_payload(spec.builder, spec.builder_module))
+    return apply_card_visual_system(
+        builder(**_sample_payload(spec.builder, spec.builder_module))
+    )
 
 
 def _sample_payload(
@@ -1047,6 +1710,20 @@ def _sample_payload(
             "operation": "去背景/人物抠出",
             "engine": "rembg 或 PIL conservative",
             "source_summary": "只处理透明通道，保留原图人物像素。",
+        },
+        "build_assistant_task_intake_card": {"task_type": "copy"},
+        "build_assistant_task_confirmation_card": {
+            "task_type": "copy",
+            "task_request": "根据活动资料写一篇公众号推文",
+            "output_requirement": "专业、简洁，800 字以内",
+        },
+        "build_assistant_task_list_card": {
+            "active_tasks": 1,
+            "pending_tasks": 1,
+            "completed_today": 3,
+        },
+        "build_assistant_session_choice_card": {
+            "decision_id": "card-health-session-choice",
         },
         "build_truth_intake_request_card": {
             "task_title": "端午客户问候话术",
@@ -1730,6 +2407,39 @@ def run_card_system_engineering_gate(
         else f"missing metadata for {missing_metadata}",
     )
 
+    invalid_archive_policy = sorted(
+        card["card_type"]
+        for card in manifest["cards"]
+        if any(
+            event not in {"send", "finalize"}
+            for event in card.get("archive_events") or ()
+        )
+    )
+    transient_archive_policy = sorted(
+        card["card_type"]
+        for card in manifest["cards"]
+        if card["card_type"] in {"thinking_waiting", "task_progress"}
+        and card.get("archive_events")
+    )
+    formal_result_types = sorted(
+        card["card_type"] for card in manifest["cards"] if card.get("archive_events")
+    )
+    archive_policy_ok = (
+        not invalid_archive_policy
+        and not transient_archive_policy
+        and bool(formal_result_types)
+    )
+    report.add(
+        "engineering_manifest:archive_policy",
+        archive_policy_ok,
+        (
+            f"{len(formal_result_types)} formal result types retained; "
+            "waiting/progress cards remain event-only"
+            if archive_policy_ok
+            else f"invalid={invalid_archive_policy}; transient={transient_archive_policy}"
+        ),
+    )
+
     missing_samples = sorted(
         card["card_type"]
         for card in manifest["cards"]
@@ -1855,9 +2565,22 @@ def run_card_system_health() -> CardHealthReport:
     except Exception as exc:  # noqa: BLE001
         report.add("runtime_events_writable", False, f"{type(exc).__name__}: {exc}")
 
+    try:
+        CARD_RESULT_ARCHIVE_PATH.mkdir(parents=True, exist_ok=True)
+        archive_writable = CARD_RESULT_ARCHIVE_PATH.is_dir() and os.access(
+            CARD_RESULT_ARCHIVE_PATH, os.W_OK
+        )
+        report.add(
+            "result_archive_writable",
+            archive_writable,
+            str(CARD_RESULT_ARCHIVE_PATH),
+        )
+    except Exception as exc:  # noqa: BLE001
+        report.add("result_archive_writable", False, f"{type(exc).__name__}: {exc}")
+
     events = recent_card_runtime_events(30)
     production_events = _production_card_runtime_events(events)
-    recovered_events = _drop_recovered_grey_push_failures(production_events)
+    recovered_events = _drop_recovered_validation_failures(production_events)
     # Dedupe retries: see ``_dedupe_consecutive_failures`` for the
     # streamer race that produced 2-3 finalizes on the same message_id.
     # We count distinct production failures only.
@@ -1888,13 +2611,13 @@ def run_card_system_health() -> CardHealthReport:
                 f"{len(events)} recent events, {len(production_events)} production, "
                 f"{len(recent_failures)} distinct production failures "
                 f"({retry_failures_folded} dup retries folded, "
-                f"{recovered_failures} recovered grey failures cleared, "
+                f"{recovered_failures} recovered validation failures cleared, "
                 f"{ignored_events} non-production events ignored, tolerates <=3)"
                 if events_ok
                 else f"{len(events)} recent events, {len(production_events)} production, "
                 f"{len(recent_failures)} distinct production failures "
                 f"({retry_failures_folded} dup retries folded, "
-                f"{recovered_failures} recovered grey failures cleared, "
+                f"{recovered_failures} recovered validation failures cleared, "
                 f"{ignored_events} non-production events ignored)"
             )
         ),
@@ -1968,6 +2691,7 @@ def run_card_system_health() -> CardHealthReport:
             "assert_registered_card",
             "send_card_via_runtime",
             "finalize_card_via_runtime",
+            "record_card_action_via_runtime",
         )
         runtime_ok = all(
             callable(getattr(card_runtime, name, None)) for name in runtime_callables

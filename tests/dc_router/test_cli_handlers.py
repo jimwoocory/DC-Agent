@@ -482,6 +482,200 @@ class TestDispatchCliProviderBackend:
     the dispatcher itself, not the full CLI runner / QuotaGate chain.
     """
 
+    def test_codex_adapter_uses_advanced_executor_policy(self) -> None:
+        source = _CLI_HANDLERS_PATH.read_text(encoding="utf-8")
+
+        assert "authorize_codex" in source
+        assert '"deep_reasoning"' in source
+        assert 'authorized_by="user"' in source
+        assert "owns_schedule=False" in source
+
+    @pytest.mark.asyncio
+    async def test_codex_adapter_stops_when_policy_denies(
+        self,
+        cli_handlers,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            cli_handlers,
+            "authorize_codex",
+            MagicMock(
+                return_value=types.SimpleNamespace(
+                    allowed=False,
+                    reason="scheduler_ownership_denied",
+                )
+            ),
+        )
+
+        result = await cli_handlers._start_codex(
+            MagicMock(),
+            _make_event(),
+            decision=_make_decision(provider_id="cli/codex/gpt-5.5-medium"),
+            prompt="test",
+        )
+
+        assert result is False
+        cli_handlers.authorize_codex.assert_called_once_with(
+            "deep_reasoning",
+            authorized_by="user",
+            owns_schedule=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_codex_success_records_redacted_harness_timeline(
+        self,
+        cli_handlers,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = types.SimpleNamespace(
+            create_task=AsyncMock(
+                return_value=types.SimpleNamespace(task_id="task-codex-1")
+            ),
+            mark_in_progress=AsyncMock(),
+            append_trace=AsyncMock(),
+            mark_review_required=AsyncMock(),
+            fail_task=AsyncMock(),
+        )
+        context = types.SimpleNamespace(harness_engine=engine)
+        event = _make_event(text="复核这份系统方案")
+        decision = _make_decision(provider_id="cli/codex/gpt-5.4")
+        decision.source = "user_explicit"
+        runner = types.SimpleNamespace(
+            run_codex=AsyncMock(
+                return_value=types.SimpleNamespace(
+                    ok=True,
+                    text="审查结果",
+                    elapsed_sec=1.25,
+                    model_usage={"input_tokens": 12, "output_tokens": 8},
+                )
+            )
+        )
+        monkeypatch.setattr(
+            cli_handlers,
+            "authorize_codex",
+            MagicMock(
+                return_value=types.SimpleNamespace(
+                    allowed=True,
+                    reason="authorized",
+                )
+            ),
+        )
+        runner_module = types.ModuleType("data.plugins.dc_router.cli_runner")
+        runner_module.CliRunner = MagicMock(return_value=runner)
+        monkeypatch.setitem(
+            sys.modules,
+            "data.plugins.dc_router.cli_runner",
+            runner_module,
+        )
+        monkeypatch.setattr(cli_handlers, "__package__", "data.plugins.dc_router")
+
+        handled = await cli_handlers._start_codex(
+            context,
+            event,
+            decision=decision,
+            prompt="sensitive full prompt",
+        )
+
+        assert handled is True
+        request = engine.create_task.await_args.args[0]
+        assert request.domain == "advanced_executor:deep_reasoning"
+        assert request.payload["owns_schedule"] is False
+        assert request.payload["reasoning_effort"] == "high"
+        assert len(request.payload["prompt_sha256"]) == 64
+        assert "sensitive full prompt" not in str(request.payload)
+        assert "审查结果" not in str(request.payload)
+        engine.mark_in_progress.assert_awaited_once()
+        assert any(
+            call.args[1] == "advanced_executor_started"
+            for call in engine.append_trace.await_args_list
+        )
+        assert any(
+            call.args[1] == "advanced_executor_finished"
+            for call in engine.append_trace.await_args_list
+        )
+        settled = engine.mark_review_required.await_args.kwargs["result"]
+        assert settled["sandbox"] == "read-only"
+        assert settled["reasoning_effort"] == "high"
+        assert settled["output_chars"] == 4
+        assert "审查结果" not in str(settled)
+        engine.fail_task.assert_not_awaited()
+        runner.run_codex.assert_awaited_once_with(
+            "sensitive full prompt",
+            model="gpt-5.4",
+            reasoning_effort="high",
+            task_kind="analysis",
+            authorized_by="user",
+            timeout=300,
+        )
+
+    @pytest.mark.asyncio
+    async def test_codex_failure_records_harness_failure_without_prompt(
+        self,
+        cli_handlers,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = types.SimpleNamespace(
+            create_task=AsyncMock(
+                return_value=types.SimpleNamespace(task_id="task-codex-2")
+            ),
+            mark_in_progress=AsyncMock(),
+            append_trace=AsyncMock(),
+            mark_review_required=AsyncMock(),
+            fail_task=AsyncMock(),
+        )
+        context = types.SimpleNamespace(harness_engine=engine)
+        runner = types.SimpleNamespace(
+            run_codex=AsyncMock(
+                return_value=types.SimpleNamespace(
+                    ok=False,
+                    text="",
+                    error_code="timeout",
+                    error="private failure detail",
+                    elapsed_sec=300,
+                )
+            )
+        )
+        monkeypatch.setattr(
+            cli_handlers,
+            "authorize_codex",
+            MagicMock(
+                return_value=types.SimpleNamespace(
+                    allowed=True,
+                    reason="authorized",
+                )
+            ),
+        )
+        runner_module = types.ModuleType("data.plugins.dc_router.cli_runner")
+        runner_module.CliRunner = MagicMock(return_value=runner)
+        monkeypatch.setitem(
+            sys.modules,
+            "data.plugins.dc_router.cli_runner",
+            runner_module,
+        )
+        monkeypatch.setattr(cli_handlers, "__package__", "data.plugins.dc_router")
+
+        handled = await cli_handlers._start_codex(
+            context,
+            _make_event(text="私密请求"),
+            decision=_make_decision(provider_id="cli/codex/gpt-5.4"),
+            prompt="private prompt body",
+        )
+
+        assert handled is False
+        engine.fail_task.assert_awaited_once_with(
+            "task-codex-2",
+            reason="Codex CLI failed: timeout",
+        )
+        finished = engine.append_trace.await_args_list[-1].args[2]
+        assert finished == {
+            "status": "failed",
+            "error_code": "timeout",
+            "elapsed_sec": 300,
+        }
+        assert "private prompt body" not in str(finished)
+        assert "private failure detail" not in str(finished)
+        engine.mark_review_required.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_legacy_cli_backend_is_disabled_without_starting_cli(
         self, cli_handlers

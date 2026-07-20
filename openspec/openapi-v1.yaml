@@ -27,6 +27,7 @@ tags:
   - name: Bots
   - name: Provider Sources
   - name: Providers
+  - name: Media Authentication
   - name: Chat
   - name: IM
   - name: Files
@@ -1097,6 +1098,76 @@ paths:
       responses:
         "200":
           $ref: "#/components/responses/Ok"
+
+  /api/v1/media-auth/status:
+    get:
+      tags: [Media Authentication]
+      summary: Get NAS media provider OAuth status
+      operationId: getMediaAuthStatus
+      x-astrbot-scope: provider
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+
+  /api/v1/media-auth/{provider}/login/start:
+    post:
+      tags: [Media Authentication]
+      summary: Start a NAS media provider OAuth Device Flow
+      operationId: startMediaAuthLogin
+      x-astrbot-scope: provider
+      parameters:
+        - $ref: "#/components/parameters/MediaAuthProvider"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/media-auth/{provider}/login/check:
+    post:
+      tags: [Media Authentication]
+      summary: Poll a NAS media provider OAuth Device Flow
+      operationId: checkMediaAuthLogin
+      x-astrbot-scope: provider
+      parameters:
+        - $ref: "#/components/parameters/MediaAuthProvider"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MediaAuthLoginCheckRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/Error"
+
+  /api/v1/media-auth/{provider}/test:
+    post:
+      tags: [Media Authentication]
+      summary: Test NAS media provider authentication
+      operationId: testMediaAuth
+      x-astrbot-scope: provider
+      parameters:
+        - $ref: "#/components/parameters/MediaAuthProvider"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+
+  /api/v1/media-auth/{provider}/logout:
+    post:
+      tags: [Media Authentication]
+      summary: Clear NAS media provider authentication
+      operationId: logoutMediaAuth
+      x-astrbot-scope: provider
+      parameters:
+        - $ref: "#/components/parameters/MediaAuthProvider"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "503":
+          $ref: "#/components/responses/Error"
 
   /api/v1/chat:
     post:
@@ -4930,6 +5001,13 @@ components:
       description: URL-encoded command handler full name.
       schema:
         type: string
+    MediaAuthProvider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [codex, dreamina]
     ConfigId:
       name: config_id
       in: path
@@ -5130,6 +5208,24 @@ components:
           description: TOTP code or recovery code when two-factor authentication is required.
         trust_device_flag:
           type: boolean
+      additionalProperties: false
+
+    MediaAuthLoginCheckRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+          maxLength: 128
+          default: ""
+        device_code:
+          type: string
+          maxLength: 512
+          default: ""
+        poll_seconds:
+          type: integer
+          minimum: 0
+          maximum: 30
+          default: 0
       additionalProperties: false
 
     SetupAuthRequest:

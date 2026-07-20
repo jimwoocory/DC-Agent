@@ -441,6 +441,19 @@ def test_import_is_idempotent_for_same_memory_id(tmp_path: Path) -> None:
         now="2026-06-04T00:11:00Z",
         actor="obsidian-sync",
     )
+    note_path.write_text(
+        note_path.read_text(encoding="utf-8").replace(
+            "takes five weeks after finance approval",
+            "takes six weeks after finance approval",
+        ),
+        encoding="utf-8",
+    )
+    third = import_governance_notes(
+        vault_path=vault,
+        store=store,
+        now="2026-06-04T00:12:00Z",
+        actor="obsidian-sync",
+    )
 
     memory_id = export_result.memory_ids[0]
     loaded = store.get_memory(memory_id)
@@ -448,13 +461,47 @@ def test_import_is_idempotent_for_same_memory_id(tmp_path: Path) -> None:
     assert loaded.review_status == "approved"
     assert (
         loaded.canonical_text
-        == "Customer A delivery takes five weeks after finance approval."
+        == "Customer A delivery takes six weeks after finance approval."
     )
     assert len(store.list_memories()) == 1
     assert first.imported_count == 1
-    assert second.imported_count == 1
-    assert len(store.list_decisions(memory_id)) == 1
+    assert first.skipped_count == 0
+    assert second.imported_count == 0
+    assert second.skipped_count == 1
+    assert third.imported_count == 1
+    assert third.skipped_count == 0
+    assert len(store.list_decisions(memory_id)) == 2
     assert len(store.list_audit(memory_id)) == 2
+
+
+def test_import_ignores_employee_insight_governance_schema(tmp_path: Path) -> None:
+    vault = tmp_path / "ObsidianVault"
+    note_dir = vault / "40_MemoryGovernance" / "EmployeeInsight" / "Inbox"
+    note_dir.mkdir(parents=True)
+    (note_dir / "employee-insight.md").write_text(
+        """---
+insight_id: empins_test
+review_status: need_review
+candidate_type: onboarding_candidate
+governance_version: 1
+---
+# Employee insight candidate
+""",
+        encoding="utf-8",
+    )
+    store = MemoryGovernanceStore(tmp_path / "governed_memory.db")
+
+    result = import_governance_notes(
+        vault_path=vault,
+        store=store,
+        now="2026-07-13T00:00:00Z",
+        actor="obsidian-sync",
+    )
+
+    assert result.imported_count == 0
+    assert result.skipped_count == 0
+    assert result.ignored_count == 1
+    assert store.list_memories() == []
 
 
 def test_import_rejected_note_records_decision_but_remains_non_promoted(

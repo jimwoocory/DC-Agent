@@ -1,13 +1,14 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from dc_engines.pet_live.service import PetLiveService
+from dc_engines.pet_live.store import PetLiveStore
 
 from data.plugins.feishu_pet_assistant import cards
 from data.plugins.feishu_pet_assistant.main import FeishuPetAssistantPlugin
 from data.plugins.feishu_pet_assistant.service import PetService
 from data.plugins.feishu_pet_assistant.store import PetStore
-from dc_engines.pet_live.service import PetLiveService
-from dc_engines.pet_live.store import PetLiveStore
 
 
 def _service(tmp_path: Path) -> tuple[PetService, PetStore]:
@@ -181,3 +182,23 @@ def test_plugin_live_event_respects_global_disable(
 
     assert event is None
     assert live_store.get_identity_by_feishu_open_id("ou_user") is None
+
+
+@pytest.mark.asyncio
+async def test_plugin_does_not_stop_other_card_action_sources() -> None:
+    plugin = FeishuPetAssistantPlugin.__new__(FeishuPetAssistantPlugin)
+    plugin._user_id = MagicMock(return_value="ou_user")
+    plugin._parse_card_action = MagicMock(
+        return_value={
+            "value": {
+                "source": "assistant_workbench",
+                "action": "show_task",
+            }
+        }
+    )
+    plugin._record_live_event = MagicMock()
+    event = MagicMock()
+
+    await plugin.handle_card_action(event)
+
+    event.stop_event.assert_not_called()

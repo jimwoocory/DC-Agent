@@ -21,6 +21,7 @@ from .legacy_v1_fallback import (
 )
 from .reasoning_prefix import (
     REASONING_PREFIX_PROVIDERS,
+    extract_codex_tool_request,
     match_reasoning_prefix,
     strip_known_prefix,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "apply_provider_pin",
     "build_envelope",
     "classify_intent_v1",
+    "extract_codex_tool_request",
     "match_reasoning_prefix",
     "parse_classifier_json",
     "reason_with_llm_v1",

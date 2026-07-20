@@ -14,6 +14,17 @@
     "default": true,
     "description": "DC 路由异常时是否回退到 v1.0 兼容路径（保员工体验不挂）"
   },
+  "architecture_mode": {
+    "type": "string",
+    "default": "middle",
+    "options": ["middle", "legacy_front"],
+    "description": "middle=自然语言先进入主 Agent，再由唯一中置 Router 派发；legacy_front=旧前置分类路径，仅用于回滚。"
+  },
+  "main_agent_provider_id": {
+    "type": "string",
+    "default": "codex/gpt-5.6-luna",
+    "description": "中置架构下巅池-Agent小助手使用的主 Agent Provider。不可用时放行到当前默认 Provider。"
+  },
   "feishu_channel_routes": {
     "type": "object",
     "default": {},

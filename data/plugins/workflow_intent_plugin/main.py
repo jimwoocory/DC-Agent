@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from dc_engines.employee_directory import requester_meta_from_event
 from dc_engines.harness import (
     allows_auto_complete_on_response,
     create_workflow_request,
@@ -132,28 +133,7 @@ class WorkflowIntentPlugin(Star):
             logger.debug("[workflow_intent] 防重复查询失败：%s", exc)
             return
 
-        # 查请求人画像（找不到就 fallback 到 raw open_id，不阻断建 task）
-        requester_meta: dict = {}
-        emp_store = getattr(self.context, "employee_store", None)
-        sender_id = ""
-        try:
-            sender_id = str(event.get_sender_id() or "").strip()
-        except Exception:  # noqa: BLE001
-            sender_id = ""
-        if emp_store is not None and sender_id:
-            try:
-                emp = await emp_store.get_employee(sender_id)
-                if emp is not None:
-                    requester_meta = {
-                        "requester_open_id": emp.open_id,
-                        "requester_display_name": emp.display_name or "",
-                        "requester_department": emp.department or "",
-                        "requester_role": emp.role or "",
-                    }
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("[workflow_intent] 查请求人失败：%s", exc)
-        if not requester_meta and sender_id:
-            requester_meta = {"requester_open_id": sender_id}
+        requester_meta = await requester_meta_from_event(self.context, event)
 
         # 创建 task
         try:
@@ -181,8 +161,9 @@ class WorkflowIntentPlugin(Star):
                     task.task_id,
                     source="workflow_intent_plugin",
                 )
+            requester_id = str(requester_meta.get("requester_open_id") or "")
             requester_label = requester_meta.get("requester_display_name") or (
-                sender_id[:12] + "..." if sender_id else "anon"
+                requester_id[:12] + "..." if requester_id else "anon"
             )
             logger.info(
                 "[workflow_intent] 自动建 Harness task umo=%s kind=%s kw=%s requester=%s task=%s",

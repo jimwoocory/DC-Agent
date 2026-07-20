@@ -1,9 +1,9 @@
 """Tencent Silk audio conversion helpers."""
 
 import asyncio
-import audioop
 import os
 import subprocess
+import warnings
 import wave
 from io import BytesIO
 
@@ -70,6 +70,16 @@ async def wav_to_tencent_silk(wav_path: str, output_path: str) -> float:
             "pysilk is not installed. Install the silk-python package from the "
             "dashboard platform logs page.",
         ) from e
+
+    # Python 3.12 only provides the deprecated stdlib module. Python 3.13+
+    # resolves the same import from the declared audioop-lts dependency.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="'audioop' is deprecated and slated for removal in Python 3.13",
+            category=DeprecationWarning,
+        )
+        import audioop
 
     with wave.open(wav_path, "rb") as wav:
         rate = wav.getframerate()

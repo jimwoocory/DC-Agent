@@ -28,7 +28,11 @@ from dc_engines.feishu_card_streamer import (
     ensure_streamers_on_context,
     extract_chat_info_from_event,
 )
-from dc_engines.org_permissions import CONTENT_RULE_REVIEW, DC_ADMIN
+from dc_engines.org_permissions import (
+    CONTENT_RULE_REVIEW,
+    DC_ADMIN,
+    authorize_permission_records,
+)
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
@@ -104,14 +108,15 @@ class ContentSopRuleReviewPlugin(Star):
             permission_rows = event.get_extra("requester_dc_permissions", default=[])
         except Exception:  # noqa: BLE001
             permission_rows = getattr(event, "requester_dc_permissions", [])
-        if not isinstance(permission_rows, list):
-            return False
-        for item in permission_rows:
-            if not isinstance(item, dict):
-                continue
-            if item.get("permission") in {DC_ADMIN, CONTENT_RULE_REVIEW}:
-                return True
-        return False
+        subject_id = self._sender_id(event).strip()
+        return any(
+            authorize_permission_records(
+                subject_id=subject_id,
+                records=permission_rows,
+                permission=permission,
+            ).allowed
+            for permission in (DC_ADMIN, CONTENT_RULE_REVIEW)
+        )
 
     def _is_trusted_card_action(self, event: AstrMessageEvent) -> bool:
         msg = getattr(event, "message_obj", None)

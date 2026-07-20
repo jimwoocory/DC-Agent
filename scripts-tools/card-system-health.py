@@ -22,6 +22,7 @@ from dc_engines.card_system import (  # noqa: E402
     list_card_specs,
     list_card_versions,
     load_card_contract,
+    load_card_result_archive,
     recent_card_runtime_events,
     rollback_card_version,
     run_card_system_engineering_gate,
@@ -58,6 +59,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--events", action="store_true", help="show recent runtime events"
+    )
+    parser.add_argument(
+        "--archive",
+        metavar="MESSAGE_ID",
+        help="show one retained formal result card archive",
     )
     parser.add_argument("--next-step", action="store_true", help="print next action")
     parser.add_argument("--limit", type=int, default=20)
@@ -153,6 +159,14 @@ def main() -> int:
                     f"{item.get('card_type')} message={item.get('message_id') or '-'} "
                     f"fallback={item.get('fallback') or '-'}"
                 )
+        return 0
+
+    if args.archive:
+        payload = load_card_result_archive(args.archive)
+        if payload is None:
+            print(f"No formal result archive for message_id={args.archive}")
+            return 1
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if args.next_step:

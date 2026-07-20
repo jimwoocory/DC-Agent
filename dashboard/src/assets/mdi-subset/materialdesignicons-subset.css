@@ -1,4 +1,4 @@
-/* Auto-generated MDI subset – 301 icons */
+/* Auto-generated MDI subset – 302 icons */
 /* Do not edit manually. Run: pnpm run subset-icons */
 
 @font-face {
@@ -630,6 +630,10 @@
 
 .mdi-identifier::before {
   content: "\F0EFE";
+}
+
+.mdi-image-multiple-outline::before {
+  content: "\F02EF";
 }
 
 .mdi-image-outline::before {

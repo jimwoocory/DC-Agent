@@ -15,6 +15,8 @@ async def test_harness_runtime_bootstrap_owns_harness_context(tmp_path):
 
     assert context.harness_engine is not None
     assert context.harness_store is not None
+    assert context.executor_settlement is not None
+    assert context.harness_memory_distiller is not None
     assert (tmp_path / "harness.db").exists()
     assert (tmp_path / "harness_memory.db").exists()
     assert callable(context.dispatch_task_to_hermes)

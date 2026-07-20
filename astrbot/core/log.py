@@ -327,6 +327,14 @@ class LogManager:
             pass
 
     @classmethod
+    def shutdown(cls) -> None:
+        """Flush and close queued file sinks owned by AstrBot."""
+        cls._remove_sink(cls._trace_sink_id)
+        cls._trace_sink_id = None
+        cls._remove_sink(cls._file_sink_id)
+        cls._file_sink_id = None
+
+    @classmethod
     def _add_file_sink(
         cls,
         *,

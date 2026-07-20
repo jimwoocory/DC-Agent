@@ -48,8 +48,17 @@ sys.modules[_spec.name] = _module
 _spec.loader.exec_module(_module)
 
 REASONING_PREFIX_PROVIDERS = _module.REASONING_PREFIX_PROVIDERS
+extract_codex_tool_request = _module.extract_codex_tool_request
 match_reasoning_prefix = _module.match_reasoning_prefix
 strip_known_prefix = _module.strip_known_prefix
+
+
+def test_codex_tool_marker_is_distinct_from_existing_model_pins() -> None:
+    assert extract_codex_tool_request("#codex工具 复核这个方案") == "复核这个方案"
+    assert extract_codex_tool_request("  #CODEX工具 深度检查") == "深度检查"
+    assert extract_codex_tool_request("#codex工具") == ""
+    assert extract_codex_tool_request("#codex高 模型对照") is None
+    assert match_reasoning_prefix("#codex高 模型对照") == "codex/gpt-5.5-high"
 
 
 # ─────────────────────────────────────────────────────────────────────────

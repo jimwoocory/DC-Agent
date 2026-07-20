@@ -6,9 +6,10 @@
 """
 
 import asyncio
+import signal
 import traceback
 
-from astrbot.core import LogBroker, logger
+from astrbot.core import LogBroker, LogManager, logger
 from astrbot.core.core_lifecycle import AstrBotCoreLifecycle
 from astrbot.core.db import BaseDatabase
 from astrbot.dashboard.server import AstrBotDashboard
@@ -50,8 +51,26 @@ class InitialLoader:
             task = asyncio.gather(core_task, coro)
         else:
             task = core_task
+
+        loop = asyncio.get_running_loop()
+        running_task = asyncio.current_task()
+        signal_handlers = []
+        if running_task is not None and hasattr(signal, "SIGTERM"):
+            try:
+                loop.add_signal_handler(signal.SIGTERM, running_task.cancel)
+                signal_handlers.append(signal.SIGTERM)
+            except (NotImplementedError, RuntimeError):
+                pass
+
         try:
             await task  # 整个AstrBot在这里运行
         except asyncio.CancelledError:
             logger.info("🌈 正在关闭 AstrBot...")
+            # Close queued Loguru sinks before slower provider/plugin teardown so
+            # launchd's termination timeout cannot leave OS semaphores behind.
+            LogManager.shutdown()
             await core_lifecycle.stop()
+        finally:
+            for registered_signal in signal_handlers:
+                loop.remove_signal_handler(registered_signal)
+            LogManager.shutdown()

@@ -22,7 +22,10 @@ DEFAULT_VAULT = DC_ROOT / "ObsidianVault"
 DEFAULT_OVERRIDES = DC_ROOT / "data" / "config" / "nas_memory_overrides.json"
 DEFAULT_REVIEW_CONFIRMATIONS = DC_ROOT / "data" / "obsidian_review_confirmations.jsonl"
 DEFAULT_COMPANY_ORG = DC_ROOT / "data" / "config" / "company_org_structure.json"
-DEFAULT_ENTITY_TAXONOMY = DC_ROOT / "data" / "config" / "company_entity_taxonomy.json"
+DEFAULT_ENTITY_TAXONOMY = DC_ROOT / "scripts-company" / "company_entity_taxonomy.json"
+DEFAULT_KNOWLEDGE_TAXONOMY = (
+    DC_ROOT / "scripts-company" / "company_knowledge_taxonomy.json"
+)
 DEFAULT_PROJECT_NORMALIZATION = (
     DC_ROOT / "data" / "config" / "company_project_normalization.json"
 )
@@ -270,6 +273,7 @@ def render_raw_ref(
     preview: str,
     org_model: dict[str, Any],
     project_aliases: dict[str, str],
+    classification: dict[str, Any],
 ) -> str:
     tags = load_json_array(row["tags_json"])
     people = load_people(row["participants_json"])
@@ -301,17 +305,36 @@ def render_raw_ref(
         f"sha256: {yaml_scalar(row['sha256'])}",
         f"parser: {yaml_scalar(row['parser'])}",
         f"doc_type: {yaml_scalar(row['doc_type'])}",
-        f"project_id: {yaml_scalar(row['project_id'])}",
-        f"project_name: {yaml_scalar(project_name)}",
-        f"raw_project_name: {yaml_scalar(raw_project_name)}",
-        f"owner: {yaml_scalar(row['owner'])}",
-        f"review_status: {yaml_scalar(row['review_status'])}",
-        f"confidence: {float(row['confidence'] or 0):.3f}",
-        f"indexed_at: {yaml_scalar(row['indexed_at'])}",
-        f"file_size_bytes: {file_size}",
-        f"chunk_count: {chunk_count}",
-        "tags:",
+        f"taxonomy_version: {yaml_scalar(classification['taxonomy_version'])}",
+        f"category_level_1_id: {yaml_scalar(classification['level_1_id'])}",
+        f"category_level_1: {yaml_scalar(classification['level_1'])}",
+        f"category_level_2_id: {yaml_scalar(classification['level_2_id'])}",
+        f"category_level_2: {yaml_scalar(classification['level_2'])}",
+        f"category_level_3_id: {yaml_scalar(classification['level_3_id'])}",
+        f"category_level_3: {yaml_scalar(classification['level_3'])}",
+        f"category_path: {yaml_scalar(classification['path'])}",
+        f"category_department: {yaml_scalar(classification['department'])}",
+        f"category_status: {yaml_scalar(classification['status'])}",
+        f"category_confidence: {classification['confidence']:.3f}",
+        "category_evidence:",
     ]
+    lines.extend(
+        f"  - {yaml_scalar(evidence)}" for evidence in classification["evidence"]
+    )
+    lines.extend(
+        [
+            f"project_id: {yaml_scalar(row['project_id'])}",
+            f"project_name: {yaml_scalar(project_name)}",
+            f"raw_project_name: {yaml_scalar(raw_project_name)}",
+            f"owner: {yaml_scalar(row['owner'])}",
+            f"review_status: {yaml_scalar(row['review_status'])}",
+            f"confidence: {float(row['confidence'] or 0):.3f}",
+            f"indexed_at: {yaml_scalar(row['indexed_at'])}",
+            f"file_size_bytes: {file_size}",
+            f"chunk_count: {chunk_count}",
+            "tags:",
+        ]
+    )
     lines.extend(f"  - {yaml_scalar(tag)}" for tag in tags)
     lines.extend(
         [
@@ -331,6 +354,9 @@ def render_raw_ref(
             "## 知识库状态",
             "",
             f"- 文档类型：{row['doc_type'] or '待确认'}",
+            f"- 三级分类：{classification['path']}",
+            f"- 分类状态：{classification['status']}",
+            f"- 分类置信度：{classification['confidence']:.3f}",
             f"- 项目：{project_name or '待确认'}",
             f"- 负责人：{row['owner'] or '待确认'}",
             f"- 复核状态：{row['review_status'] or 'need_review'}",
@@ -350,6 +376,12 @@ def render_raw_ref(
     )
     if raw_project_name and project_name and raw_project_name != project_name:
         lines.append(f"- 原始项目名：{raw_project_name}")
+    lines.append(
+        "- 三级分类："
+        f"[[{taxonomy_page_name(1, classification['level_1'])}]] → "
+        f"[[{taxonomy_page_name(2, classification['level_1'], classification['level_2'])}]] → "
+        f"[[{taxonomy_page_name(3, classification['level_1'], classification['level_2'], classification['level_3'])}]]"
+    )
     if private_technical:
         lines.append("- 公司图谱：技术资料隔离，不生成项目双链")
     elif project_name:
@@ -441,6 +473,7 @@ def render_total_index(docs: list[dict[str, Any]], generated_at: str) -> str:
             "",
             "## 知识入口",
             "",
+            "- [[三级分类]]",
             "- [[产品线]]",
             "- [[项目]]",
             "- [[客户]]",
@@ -475,6 +508,8 @@ def render_clean_knowledge_map(docs: list[dict[str, Any]], generated_at: str) ->
         "",
         "## 主干",
         "",
+        "- [[公司认知入口]]",
+        "- [[三级分类]]",
         "- [[产品客户图谱]]",
         "- [[业务主题图谱]]",
         "- [[人员部门图谱]]",
@@ -853,6 +888,474 @@ def load_entity_taxonomy(path: Path = DEFAULT_ENTITY_TAXONOMY) -> dict[str, Any]
     return parsed if isinstance(parsed, dict) else {"entity_types": {}}
 
 
+def iter_taxonomy_paths(
+    taxonomy: dict[str, Any],
+) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    """Return every canonical level-1, level-2, and level-3 path.
+
+    Args:
+        taxonomy: Parsed knowledge taxonomy configuration.
+
+    Returns:
+        Ordered tuples containing the three nodes in each taxonomy path.
+    """
+    paths: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for level_1 in taxonomy.get("levels") or []:
+        if not isinstance(level_1, dict):
+            continue
+        for level_2 in level_1.get("children") or []:
+            if not isinstance(level_2, dict):
+                continue
+            for level_3 in level_2.get("children") or []:
+                if isinstance(level_3, dict):
+                    paths.append((level_1, level_2, level_3))
+    return paths
+
+
+def validate_knowledge_taxonomy(taxonomy: dict[str, Any]) -> list[str]:
+    """Validate the canonical three-level taxonomy shape and fallback branch.
+
+    Args:
+        taxonomy: Parsed knowledge taxonomy configuration.
+
+    Returns:
+        Human-readable validation errors. An empty list means the taxonomy is valid.
+    """
+    errors: list[str] = []
+    required_labels = {
+        "产品",
+        "项目",
+        "客户",
+        "合同",
+        "交付",
+        "售后",
+        "财务",
+        "行政",
+        "人事",
+        "技术",
+        "市场",
+        "待人工确认",
+    }
+    levels = taxonomy.get("levels")
+    if not isinstance(levels, list) or not levels:
+        return ["taxonomy levels must be a non-empty list"]
+
+    level_1_labels = {
+        str(node.get("label") or "").strip()
+        for node in levels
+        if isinstance(node, dict)
+    }
+    missing_labels = sorted(required_labels - level_1_labels)
+    if missing_labels:
+        errors.append("missing required level-1 labels: " + ", ".join(missing_labels))
+
+    nodes: list[dict[str, Any]] = []
+    for level_1 in levels:
+        if not isinstance(level_1, dict):
+            errors.append("level-1 nodes must be objects")
+            continue
+        nodes.append(level_1)
+        level_2_nodes = level_1.get("children")
+        if not isinstance(level_2_nodes, list) or not level_2_nodes:
+            errors.append(f"level-1 node has no level-2 children: {level_1.get('id')}")
+            continue
+        for level_2 in level_2_nodes:
+            if not isinstance(level_2, dict):
+                errors.append("level-2 nodes must be objects")
+                continue
+            nodes.append(level_2)
+            level_3_nodes = level_2.get("children")
+            if not isinstance(level_3_nodes, list) or not level_3_nodes:
+                errors.append(
+                    f"level-2 node has no level-3 children: {level_2.get('id')}"
+                )
+                continue
+            for level_3 in level_3_nodes:
+                if not isinstance(level_3, dict):
+                    errors.append("level-3 nodes must be objects")
+                    continue
+                nodes.append(level_3)
+                if level_3.get("children"):
+                    errors.append(f"level-3 node has children: {level_3.get('id')}")
+
+    seen_ids: set[str] = set()
+    for node in nodes:
+        node_id = str(node.get("id") or "").strip()
+        label = str(node.get("label") or "").strip()
+        if not node_id or not label:
+            errors.append("every taxonomy node must have non-empty id and label")
+            continue
+        if node_id in seen_ids:
+            errors.append(f"duplicate taxonomy node id: {node_id}")
+        seen_ids.add(node_id)
+
+    fallback = taxonomy.get("fallback") or {}
+    fallback_ids = {
+        str(fallback.get("level_1_id") or ""),
+        str(fallback.get("level_2_id") or ""),
+        str(fallback.get("unmatched_level_3_id") or ""),
+        str(fallback.get("conflict_level_3_id") or ""),
+    }
+    if "" in fallback_ids or not fallback_ids <= seen_ids:
+        errors.append("fallback ids must reference existing taxonomy nodes")
+    return unique_values(errors)
+
+
+def load_knowledge_taxonomy(
+    path: Path = DEFAULT_KNOWLEDGE_TAXONOMY,
+) -> dict[str, Any]:
+    """Load and validate the canonical Obsidian three-level taxonomy.
+
+    Args:
+        path: JSON taxonomy configuration path.
+
+    Returns:
+        Validated taxonomy configuration.
+
+    Raises:
+        FileNotFoundError: If the configured taxonomy file does not exist.
+        ValueError: If the JSON root or taxonomy structure is invalid.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Knowledge taxonomy not found: {path}")
+    parsed = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("Knowledge taxonomy root must be an object")
+    if errors := validate_knowledge_taxonomy(parsed):
+        raise ValueError("Invalid knowledge taxonomy: " + "; ".join(errors))
+    return parsed
+
+
+def classify_document(doc: dict[str, Any], taxonomy: dict[str, Any]) -> dict[str, Any]:
+    """Choose one auditable primary three-level path for a document.
+
+    Entity, project, person, department, and document-type links remain secondary
+    dimensions. Equal top scores and documents without evidence are routed to the
+    configured fallback branch instead of being force-classified.
+
+    Args:
+        doc: Document metadata used for deterministic keyword and type matching.
+        taxonomy: Validated knowledge taxonomy configuration.
+
+    Returns:
+        Classification ids, labels, path, status, confidence, and evidence.
+    """
+    rel_path = clean_text(doc.get("rel_path") or "")
+    rel_name = re.split(r"[\\/]", rel_path)[-1]
+    primary_haystack = " ".join(
+        clean_text(doc.get(key) or "")
+        for key in ("link_title", "title", "project_name")
+    ).lower()
+    primary_haystack = f"{primary_haystack} {rel_name.lower()}"
+    summary_haystack = clean_text(doc.get("summary") or "").lower()
+    path_haystack = rel_path.lower()
+    doc_type = clean_text(doc.get("doc_type") or "").strip()
+    fallback = taxonomy["fallback"]
+    candidates: list[
+        tuple[
+            int,
+            tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
+            list[str],
+        ]
+    ] = []
+    all_paths = iter_taxonomy_paths(taxonomy)
+    for path in all_paths:
+        level_1, _level_2, level_3 = path
+        if level_1.get("id") == fallback["level_1_id"]:
+            continue
+        keywords = [
+            clean_text(keyword).strip().lower()
+            for keyword in level_3.get("keywords") or []
+            if clean_text(keyword).strip()
+        ]
+        primary_hits = [keyword for keyword in keywords if keyword in primary_haystack]
+        summary_hits = (
+            []
+            if level_3.get("primary_only")
+            else [
+                keyword
+                for keyword in keywords
+                if keyword not in primary_hits and keyword in summary_haystack
+            ]
+        )
+        keyword_hits = [*primary_hits, *summary_hits]
+        evidence = [f"keyword:{keyword}" for keyword in keyword_hits]
+        score = sum(20 + min(len(keyword), 10) for keyword in primary_hits)
+        score += sum(8 + min(len(keyword), 10) for keyword in summary_hits)
+        if doc_type and doc_type in (level_3.get("doc_types") or []):
+            score += 5
+            evidence.append(f"doc_type:{doc_type}")
+        if evidence:
+            candidates.append((score, path, evidence))
+
+    if not candidates:
+        for path in all_paths:
+            level_1, _level_2, level_3 = path
+            if level_1.get("id") == fallback["level_1_id"]:
+                continue
+            fallback_keywords = [
+                clean_text(keyword).strip().lower()
+                for keyword in level_3.get("fallback_keywords") or []
+                if clean_text(keyword).strip()
+            ]
+            fallback_path_keywords = [
+                clean_text(keyword).strip().lower()
+                for keyword in level_3.get("fallback_path_keywords") or []
+                if clean_text(keyword).strip()
+            ]
+            keyword_hits = [
+                keyword for keyword in fallback_keywords if keyword in primary_haystack
+            ]
+            path_hits = [
+                keyword
+                for keyword in fallback_path_keywords
+                if keyword in path_haystack
+            ]
+            evidence = [
+                *[f"ownership_keyword:{keyword}" for keyword in keyword_hits],
+                *[f"ownership_path:{keyword}" for keyword in path_hits],
+            ]
+            if not evidence:
+                continue
+            score = sum(20 + min(len(keyword), 10) for keyword in keyword_hits)
+            score += sum(12 + min(len(keyword), 10) for keyword in path_hits)
+            score += int(level_3.get("fallback_priority") or 0)
+            candidates.append((score, path, evidence))
+
+    candidates.sort(
+        key=lambda item: (
+            -item[0],
+            str(item[1][0].get("id")),
+            str(item[1][1].get("id")),
+            str(item[1][2].get("id")),
+        )
+    )
+    fallback_leaf_id = ""
+    fallback_evidence: list[str] = []
+    if not candidates:
+        fallback_leaf_id = fallback["unmatched_level_3_id"]
+        fallback_evidence = ["fallback:no_rule_matched"]
+    elif len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
+        fallback_leaf_id = fallback["conflict_level_3_id"]
+        fallback_evidence = [
+            "fallback:top_score_tie",
+            *[
+                "candidate:"
+                + " / ".join(str(node.get("label") or "") for node in item[1])
+                for item in candidates[:2]
+            ],
+        ]
+
+    if fallback_leaf_id:
+        selected_path = next(
+            path
+            for path in all_paths
+            if path[0].get("id") == fallback["level_1_id"]
+            and path[1].get("id") == fallback["level_2_id"]
+            and path[2].get("id") == fallback_leaf_id
+        )
+        status = "needs_review"
+        confidence = 0.0
+        evidence = fallback_evidence
+    else:
+        _score, selected_path, evidence = candidates[0]
+        status = "rule_classified"
+        keyword_count = sum(item.startswith("keyword:") for item in evidence)
+        type_matched = any(item.startswith("doc_type:") for item in evidence)
+        ownership_matched = any(
+            item.startswith(("ownership_keyword:", "ownership_path:"))
+            for item in evidence
+        )
+        confidence = min(
+            0.95,
+            0.72 + max(0, keyword_count - 1) * 0.04 + (0.03 if type_matched else 0),
+        )
+        if keyword_count == 0:
+            confidence = 0.68 if ownership_matched else 0.62
+
+    level_1, level_2, level_3 = selected_path
+    labels = [str(node["label"]) for node in selected_path]
+    return {
+        "taxonomy_version": str(taxonomy.get("version") or "1"),
+        "level_1_id": str(level_1["id"]),
+        "level_1": labels[0],
+        "level_2_id": str(level_2["id"]),
+        "level_2": labels[1],
+        "level_3_id": str(level_3["id"]),
+        "level_3": labels[2],
+        "path": " / ".join(labels),
+        "department": clean_text(level_2.get("department") or ""),
+        "status": status,
+        "confidence": confidence,
+        "evidence": evidence,
+    }
+
+
+def taxonomy_page_name(level: int, *labels: str) -> str:
+    """Build a unique Obsidian page name for a taxonomy node.
+
+    Args:
+        level: Taxonomy level from 1 through 3.
+        labels: Node labels from the root through the requested level.
+
+    Returns:
+        Stable page name that avoids collisions between repeated child labels.
+    """
+    joined = "-".join(sanitize_filename(label, "待确认") for label in labels)
+    return f"分类-{level}-{joined}"
+
+
+def write_three_level_taxonomy(
+    vault_path: Path,
+    docs: list[dict[str, Any]],
+    taxonomy: dict[str, Any],
+    generated_at: str,
+) -> dict[str, int]:
+    """Write root and level-specific taxonomy pages with RawRef leaf links.
+
+    Args:
+        vault_path: Destination Obsidian vault.
+        docs: Documents containing a ``taxonomy`` classification object.
+        taxonomy: Validated canonical taxonomy configuration.
+        generated_at: ISO timestamp displayed in generated pages.
+
+    Returns:
+        Counts for generated nodes, classified documents, and review fallbacks.
+    """
+    root = vault_path / "20_Bridges" / "Taxonomy"
+    level_dirs = {level: root / f"L{level}" for level in (1, 2, 3)}
+    for directory in level_dirs.values():
+        directory.mkdir(parents=True, exist_ok=True)
+        clear_generated_markdown(directory)
+
+    by_level_1: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_level_2: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_level_3: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for doc in docs:
+        classification = doc["taxonomy"]
+        by_level_1[classification["level_1_id"]].append(doc)
+        by_level_2[classification["level_2_id"]].append(doc)
+        by_level_3[classification["level_3_id"]].append(doc)
+
+    lines = [
+        "# 三级分类",
+        "",
+        f"生成时间：`{generated_at}`",
+        f"分类版本：`{taxonomy.get('version')}`",
+        "",
+        "每份 RawRef 只有一个主分类路径；实体、项目、人员、部门和文档类型作为旁路关系保留。未命中或冲突的资料进入待人工确认。",
+        "",
+        "## 一级分类",
+        "",
+    ]
+    for level_1 in taxonomy["levels"]:
+        level_1_id = str(level_1["id"])
+        level_1_label = str(level_1["label"])
+        lines.append(
+            f"- [[{taxonomy_page_name(1, level_1_label)}]]：{len(by_level_1[level_1_id])}"
+        )
+    lines.extend(
+        [
+            "",
+            "## 覆盖状态",
+            "",
+            f"- 文档总数：{len(docs)}",
+            f"- 规则分类：{sum(1 for doc in docs if doc['taxonomy']['status'] == 'rule_classified')}",
+            f"- 待人工确认：{sum(1 for doc in docs if doc['taxonomy']['status'] == 'needs_review')}",
+            "",
+        ]
+    )
+    (vault_path / "10_Index" / "三级分类.md").write_text(
+        "\n".join(lines), encoding="utf-8"
+    )
+
+    for level_1 in taxonomy["levels"]:
+        level_1_id = str(level_1["id"])
+        level_1_label = str(level_1["label"])
+        level_1_lines = [
+            f"# {level_1_label}",
+            "",
+            "层级：一级分类",
+            "父级：[[三级分类]]",
+            f"生成时间：`{generated_at}`",
+            f"文档数：{len(by_level_1[level_1_id])}",
+            "",
+            "## 二级分类",
+            "",
+        ]
+        for level_2 in level_1.get("children") or []:
+            level_2_id = str(level_2["id"])
+            level_2_label = str(level_2["label"])
+            level_1_lines.append(
+                f"- [[{taxonomy_page_name(2, level_1_label, level_2_label)}]]：{len(by_level_2[level_2_id])}"
+            )
+            level_2_lines = [
+                f"# {level_2_label}",
+                "",
+                "层级：二级分类",
+                f"父级：[[{taxonomy_page_name(1, level_1_label)}]]",
+                f"生成时间：`{generated_at}`",
+                f"文档数：{len(by_level_2[level_2_id])}",
+                "",
+                "## 三级分类",
+                "",
+            ]
+            for level_3 in level_2.get("children") or []:
+                level_3_id = str(level_3["id"])
+                level_3_label = str(level_3["label"])
+                level_2_lines.append(
+                    f"- [[{taxonomy_page_name(3, level_1_label, level_2_label, level_3_label)}]]：{len(by_level_3[level_3_id])}"
+                )
+                level_3_lines = [
+                    f"# {level_3_label}",
+                    "",
+                    "层级：三级分类",
+                    f"父级：[[{taxonomy_page_name(2, level_1_label, level_2_label)}]]",
+                    f"完整路径：{level_1_label} / {level_2_label} / {level_3_label}",
+                    f"生成时间：`{generated_at}`",
+                    f"文档数：{len(by_level_3[level_3_id])}",
+                    "",
+                    "## 关联 RawRefs",
+                    "",
+                ]
+                leaf_docs = by_level_3[level_3_id]
+                if leaf_docs:
+                    level_3_lines.extend(
+                        f"- [[{doc['link_title']}]] - {doc['doc_type'] or '待确认'} - `{doc['rel_path']}`"
+                        for doc in leaf_docs
+                    )
+                else:
+                    level_3_lines.append("- 暂无文档")
+                level_3_lines.append("")
+                (
+                    level_dirs[3]
+                    / f"{taxonomy_page_name(3, level_1_label, level_2_label, level_3_label)}.md"
+                ).write_text("\n".join(level_3_lines), encoding="utf-8")
+            level_2_lines.append("")
+            (
+                level_dirs[2]
+                / f"{taxonomy_page_name(2, level_1_label, level_2_label)}.md"
+            ).write_text("\n".join(level_2_lines), encoding="utf-8")
+        level_1_lines.append("")
+        (level_dirs[1] / f"{taxonomy_page_name(1, level_1_label)}.md").write_text(
+            "\n".join(level_1_lines), encoding="utf-8"
+        )
+
+    return {
+        "level_1_nodes": len(taxonomy["levels"]),
+        "level_2_nodes": len(
+            {str(path[1]["id"]) for path in iter_taxonomy_paths(taxonomy)}
+        ),
+        "level_3_nodes": len(iter_taxonomy_paths(taxonomy)),
+        "classified_docs": sum(
+            1 for doc in docs if doc["taxonomy"]["status"] == "rule_classified"
+        ),
+        "needs_review_docs": sum(
+            1 for doc in docs if doc["taxonomy"]["status"] == "needs_review"
+        ),
+    }
+
+
 def load_project_normalization(
     path: Path = DEFAULT_PROJECT_NORMALIZATION,
 ) -> dict[str, str]:
@@ -939,15 +1442,30 @@ def render_entity_taxonomy_bridge(
 ) -> str:
     by_type = Counter(doc["doc_type"] or "待确认" for doc in docs)
     by_project = Counter(doc["project_name"] or "待确认项目" for doc in docs)
+    parent_entity = {
+        "宝骏": "五菱",
+        "星光": "五菱",
+        "缤果": "五菱",
+        "宏光MINIEV": "五菱",
+        "五菱之光EV": "五菱",
+        "菱骏服务": "五菱",
+        "乘龙": "柳汽",
+        "风行": "柳汽",
+    }.get(entity_name, "")
     lines = [
         f"# {entity_name}",
         "",
         f"类型：{entity_type}",
+        *(
+            [f"归属产品族：[[{entity_link_name(parent_entity)}]]"]
+            if parent_entity
+            else []
+        ),
         f"生成时间：`{generated_at}`",
         "",
         "## 关系确认",
         "",
-        "- 来源：`data/config/company_entity_taxonomy.json` 的确定性关键词匹配。",
+        "- 来源：`scripts-company/company_entity_taxonomy.json` 的确定性关键词匹配。",
         "- 本页是实体桥接页，不改 NAS 原始文件，不改 `nas_memory.db`。",
         "",
         "## 文档类型分布",
@@ -1193,6 +1711,282 @@ def load_org_model(path: Path = DEFAULT_OVERRIDES) -> dict[str, Any]:
             people[lead] = {"department": department, "role": "部门负责人"}
 
     return {"departments": departments, "people": people}
+
+
+def render_canonical_context_page(
+    canonical_type: str,
+    canonical_name: str,
+    title: str,
+    facts: list[str],
+    evidence_links: list[str],
+    review_questions: list[str],
+    source_paths: list[str],
+    generated_at: str,
+) -> str:
+    """Render one review-required company standard-answer candidate.
+
+    Args:
+        canonical_type: Stable page category such as company or management.
+        canonical_name: Stable entity name used by runtime retrieval.
+        title: Human-readable Markdown title.
+        facts: Config-backed facts safe to display before review.
+        evidence_links: Obsidian pages that support deeper source inspection.
+        review_questions: Unknown or time-sensitive fields requiring confirmation.
+        source_paths: Repository-relative configuration evidence paths.
+        generated_at: ISO timestamp for this generated snapshot.
+
+    Returns:
+        Markdown with strict review status and explicit fact boundaries.
+    """
+
+    lines = [
+        "---",
+        f"page_kind: {yaml_scalar('canonical_company_context')}",
+        f"canonical_type: {yaml_scalar(canonical_type)}",
+        f"canonical_name: {yaml_scalar(canonical_name)}",
+        f"review_status: {yaml_scalar('need_review')}",
+        f"generated_at: {yaml_scalar(generated_at)}",
+        f"source_paths: {json.dumps(source_paths, ensure_ascii=False)}",
+        "---",
+        "",
+        f"# {title}",
+        "",
+        "> 本页是公司标准答案候选。已知字段来自配置；观点、偏好、优先级和当前状态在人工确认前不得当作事实。",
+        "",
+        "## 已知结构化事实",
+        "",
+        *(facts or ["- 暂无可安全确认的结构化事实。"]),
+        "",
+        "## 证据入口",
+        "",
+        *(evidence_links or ["- [[复核工作台]]"]),
+        "",
+        "## 待人工确认",
+        "",
+        *[f"- [ ] {question}" for question in review_questions],
+        "",
+        "## 事实边界",
+        "",
+        "- 本页的 `need_review` 状态不会自动晋升为 approved。",
+        "- 不得从关联文件数量推断管理层观点、客户态度或当前项目状态。",
+        "- 发生冲突时保留日期和来源，由负责人确认当前有效口径。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_canonical_company_context(
+    vault_path: Path,
+    org_model: dict[str, Any],
+    entity_taxonomy: dict[str, Any],
+    generated_at: str,
+) -> int:
+    """Write canonical company context candidates and their review index.
+
+    Args:
+        vault_path: Destination Obsidian Vault root.
+        org_model: Configured departments, people, and organization tree.
+        entity_taxonomy: Configured company client and product-line entities.
+        generated_at: ISO timestamp for this generated snapshot.
+
+    Returns:
+        Number of canonical context pages written, excluding the index page.
+    """
+
+    canonical_dir = vault_path / "20_Bridges" / "Canonical"
+    index_dir = vault_path / "10_Index"
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    index_dir.mkdir(parents=True, exist_ok=True)
+    clear_generated_markdown(canonical_dir)
+
+    departments = org_model.get("departments") or {}
+    people = org_model.get("people") or {}
+    product_lines = (
+        (entity_taxonomy.get("entity_types") or {}).get("产品线") or []
+        if isinstance(entity_taxonomy, dict)
+        else []
+    )
+    clients = [
+        entity
+        for entity in product_lines
+        if isinstance(entity, dict) and str(entity.get("name") or "").strip()
+    ]
+    managers = [
+        (name, info)
+        for name, info in sorted(people.items())
+        if isinstance(info, dict)
+        and any(marker in str(info.get("role") or "") for marker in ("总经理", "总监"))
+    ]
+    core_departments = [
+        (name, info)
+        for name, info in sorted(departments.items())
+        if name == "中台部门" or "中台" in (info.get("aliases") or [])
+    ]
+
+    pages: list[tuple[str, str]] = []
+    overview_links = [
+        *[f"- [[管理层-{name}]]" for name, _info in managers],
+        *[f"- [[部门-{name}]]" for name, _info in core_departments],
+        *[f"- [[客户-{str(entity.get('name') or '').strip()}]]" for entity in clients],
+        "- [[人员部门图谱]]",
+        "- [[产品客户图谱]]",
+    ]
+    pages.append(
+        (
+            "公司-总览.md",
+            render_canonical_context_page(
+                "company",
+                "公司总览",
+                "公司总览",
+                [
+                    f"- 已配置人员：{len(people)}",
+                    f"- 已配置部门：{len(departments)}",
+                    f"- 已配置客户/产品线：{len(clients)}",
+                    "- 原始资料保留在 NAS；Obsidian 提供关系索引和人工治理入口。",
+                ],
+                overview_links,
+                [
+                    "公司当前业务边界与核心盈利模式",
+                    "罗总、杨总当前管理优先级与决策标准",
+                    "当前有效客户、合同与重点项目清单",
+                    "最近一次组织架构调整及生效日期",
+                ],
+                [
+                    "data/config/company_org_structure.json",
+                    "scripts-company/company_entity_taxonomy.json",
+                ],
+                generated_at,
+            ),
+        )
+    )
+    for name, info in managers:
+        department = str(info.get("department") or "待确认")
+        role = str(info.get("role") or "待确认")
+        office = str(info.get("office") or "待确认")
+        pages.append(
+            (
+                f"管理层-{sanitize_filename(name, '待确认人员')}.md",
+                render_canonical_context_page(
+                    "management",
+                    name,
+                    f"管理层：{name}",
+                    [
+                        f"- 部门：{department}",
+                        f"- 角色：{role}",
+                        f"- 办公归属：{office}",
+                    ],
+                    [f"- [[{name}]]", f"- [[{department}]]", "- [[人员部门图谱]]"],
+                    [
+                        "当前关注重点",
+                        "项目审批与资源分配的决策标准",
+                        "直接负责、授权和只需知会的事项边界",
+                        "希望 Luna 汇报时优先呈现的指标与风险",
+                    ],
+                    ["data/config/company_org_structure.json"],
+                    generated_at,
+                ),
+            )
+        )
+    for name, info in core_departments:
+        parent = str(info.get("parent") or "待确认")
+        lead = str(info.get("lead") or "待确认")
+        aliases = "、".join(info.get("aliases") or []) or "无"
+        children = "、".join(info.get("children") or []) or "待确认"
+        pages.append(
+            (
+                f"部门-{sanitize_filename(name, '待确认部门')}.md",
+                render_canonical_context_page(
+                    "core_department",
+                    name,
+                    f"核心部门：{name}",
+                    [
+                        f"- 上级：{parent}",
+                        f"- 配置负责人：{lead}",
+                        f"- 别名：{aliases}",
+                        f"- 下级组织：{children}",
+                    ],
+                    [f"- [[{name}]]", "- [[人员部门图谱]]", "- [[复核工作台]]"],
+                    [
+                        "部门正式职责与不承接事项",
+                        "部门当前负责人及授权边界",
+                        "与策划、客户、执行和品宣部门的交接标准",
+                        "当前重点项目、阻塞项与资源缺口",
+                    ],
+                    ["data/config/company_org_structure.json"],
+                    generated_at,
+                ),
+            )
+        )
+    for entity in clients:
+        name = str(entity.get("name") or "").strip()
+        aliases = (
+            "、".join(
+                str(value).strip()
+                for value in entity.get("aliases") or []
+                if str(value).strip()
+            )
+            or "无"
+        )
+        keywords = "、".join(
+            str(value).strip()
+            for value in entity.get("keywords") or []
+            if str(value).strip()
+        )
+        pages.append(
+            (
+                f"客户-{sanitize_filename(name, '待确认客户')}.md",
+                render_canonical_context_page(
+                    "client",
+                    name,
+                    f"客户：{name}",
+                    [
+                        "- 配置类型：产品线/客户主体",
+                        f"- 已配置别名：{aliases}",
+                        f"- 检索关键词：{keywords or '待确认'}",
+                    ],
+                    [
+                        f"- [[{entity_link_name(name)}]]",
+                        "- [[产品客户图谱]]",
+                        "- [[客户]]",
+                    ],
+                    [
+                        "当前关键联系人与决策链",
+                        "客户偏好与禁区",
+                        "当前合同范围、交付标准与验收口径",
+                        "当前重点项目、风险和最近一次确认日期",
+                    ],
+                    ["scripts-company/company_entity_taxonomy.json"],
+                    generated_at,
+                ),
+            )
+        )
+
+    for filename, content in pages:
+        (canonical_dir / filename).write_text(content, encoding="utf-8")
+
+    index_lines = [
+        "# 公司认知入口",
+        "",
+        f"生成时间：`{generated_at}`",
+        "",
+        "这里集中放置 Luna 使用的公司标准答案候选。所有页面默认 `need_review`，人工确认前不得把待确认项当作事实。",
+        "",
+        "## 标准答案候选",
+        "",
+        *[f"- [[{Path(filename).stem}]]" for filename, _content in pages],
+        "",
+        "## 治理入口",
+        "",
+        "- [[复核工作台]]",
+        "- [[员工确认记录]]",
+        "- [[知识地图]]",
+        "",
+    ]
+    (index_dir / "公司认知入口.md").write_text(
+        "\n".join(index_lines),
+        encoding="utf-8",
+    )
+    return len(pages)
 
 
 def render_personnel_department_map(
@@ -1512,7 +2306,7 @@ def company_canvas_place(zone: str, dx: int = 0, dy: int = 0) -> dict[str, Any]:
 COMPANY_CANVAS_ROOT_TEXT = (
     "# 公司知识地图\n\n"
     "人工排版的主地图，用来替代混乱的全局关系图谱。\n\n"
-    "从这里看主干，再下钻到 RawRefs。"
+    "优先从三级分类进入，再通过实体、项目、人员等旁路关系下钻到 RawRefs。"
 )
 
 COMPANY_CANVAS_RAWREFS_TEXT = (
@@ -1539,6 +2333,15 @@ COMPANY_CANVAS_NODE_SPECS: tuple[dict[str, Any], ...] = (
         "width": 460,
         "height": 240,
         "color": "6",
+    },
+    {
+        "kind": "file",
+        "id": "taxonomy",
+        "file": "10_Index/三级分类.md",
+        **company_canvas_place("center", dx=-520, dy=-320),
+        "width": 360,
+        "height": 160,
+        "color": "4",
     },
     {
         "kind": "file",
@@ -1765,6 +2568,13 @@ COMPANY_CANVAS_EDGE_SPECS: tuple[dict[str, str], ...] = (
         "from_side": "left",
         "to_node": "product-customer",
         "to_side": "right",
+    },
+    {
+        "id": "e-root-taxonomy",
+        "from_node": "root",
+        "from_side": "top",
+        "to_node": "taxonomy",
+        "to_side": "bottom",
     },
     {
         "id": "e-root-business",
@@ -2052,7 +2862,11 @@ def write_company_canvas(
     )
 
 
-def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
+def generate(
+    db_path: Path,
+    vault_path: Path,
+    taxonomy_path: Path = DEFAULT_KNOWLEDGE_TAXONOMY,
+) -> dict[str, int]:
     raw_refs = vault_path / "00_RawRefs"
     indexes = vault_path / "10_Index"
     bridges = vault_path / "20_Bridges"
@@ -2061,6 +2875,7 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
     people_bridges = bridges / "People"
     department_bridges = bridges / "Departments"
     entity_bridges = bridges / "Entities"
+    canonical_bridges = bridges / "Canonical"
     review_bridges = bridges / "Review"
     for directory in (
         raw_refs,
@@ -2070,6 +2885,7 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
         people_bridges,
         department_bridges,
         entity_bridges,
+        canonical_bridges,
         review_bridges,
         reports,
     ):
@@ -2082,6 +2898,7 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
     known_people_names = org_people_names(org_model)
     known_departments = set((org_model.get("departments") or {}).keys())
     entity_taxonomy = load_entity_taxonomy()
+    knowledge_taxonomy = load_knowledge_taxonomy(taxonomy_path)
     project_aliases = load_project_normalization()
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -2102,6 +2919,16 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
             link_title = Path(filename).stem
             chunk_count = chunks.get(row["doc_key"], 0)
             preview = first_chunk_preview(conn, row["doc_key"])
+            raw_project_name = str(row["project_name"] or "").strip()
+            project_name = normalize_project_name(raw_project_name, project_aliases)
+            classification = classify_document(
+                {
+                    **dict(row),
+                    "link_title": link_title,
+                    "project_name": project_name,
+                },
+                knowledge_taxonomy,
+            )
             (raw_refs / filename).write_text(
                 render_raw_ref(
                     row,
@@ -2110,11 +2937,10 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
                     preview,
                     org_model,
                     project_aliases,
+                    classification,
                 ),
                 encoding="utf-8",
             )
-            raw_project_name = str(row["project_name"] or "").strip()
-            project_name = normalize_project_name(raw_project_name, project_aliases)
             private_technical = is_private_technical_text(
                 row["title"],
                 row["rel_path"],
@@ -2142,6 +2968,7 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
                     "review_status": row["review_status"],
                     "parser": row["parser"],
                     "private_technical": private_technical,
+                    "taxonomy": classification,
                 }
             )
     finally:
@@ -2149,8 +2976,17 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
 
     stale_raw_refs = archive_stale_raw_refs(raw_refs, expected_raw_ref_files)
     generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    canonical_context_pages = write_canonical_company_context(
+        vault_path,
+        org_model,
+        entity_taxonomy,
+        generated_at,
+    )
     review_records = load_jsonl(DEFAULT_REVIEW_CONFIRMATIONS)
     company_docs = [doc for doc in docs if not doc.get("private_technical")]
+    taxonomy_stats = write_three_level_taxonomy(
+        vault_path, docs, knowledge_taxonomy, generated_at
+    )
     (indexes / "公司知识库总索引.md").write_text(
         render_total_index(company_docs, generated_at),
         encoding="utf-8",
@@ -2198,6 +3034,10 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
             by_person[person].append(doc)
         for department in doc["departments"]:
             by_department[department].append(doc)
+    for doc in docs:
+        inferred_department = doc["taxonomy"]["department"]
+        if inferred_department and inferred_department not in doc["departments"]:
+            by_department[inferred_department].append(doc)
     entity_matches = build_entity_matches(company_docs, entity_taxonomy)
     for entity_type, entities in entity_matches.items():
         for entity_name, entity_docs in entities.items():
@@ -2264,20 +3104,47 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
     (indexes / "产品客户图谱.md").write_text(
         render_focus_map(
             "产品客户图谱",
-            "只保留客户、品牌和产品线主干；实体桥接页再下钻到 RawRef。",
+            "按已确认产品族组织：宝骏、缤果、星光、马卡龙等归入五菱；乘龙、风行归入柳汽。实体桥接页再下钻到 RawRef。",
             [
                 (
-                    "产品线",
+                    "五菱产品族",
                     [
                         entity_link_name(name)
-                        for name in (entity_matches.get("产品线") or {})
+                        for name in (
+                            "五菱",
+                            "宝骏",
+                            "星光",
+                            "缤果",
+                            "宏光MINIEV",
+                            "五菱之光EV",
+                            "菱骏服务",
+                        )
+                        if any(
+                            name in (entity_matches.get(entity_type) or {})
+                            for entity_type in ("产品线", "车型与品牌资产")
+                        )
                     ],
                 ),
                 (
-                    "车型与品牌资产",
+                    "柳汽产品族",
                     [
                         entity_link_name(name)
-                        for name in (entity_matches.get("车型与品牌资产") or {})
+                        for name in ("柳汽", "乘龙", "风行")
+                        if any(
+                            name in (entity_matches.get(entity_type) or {})
+                            for entity_type in ("产品线", "车型与品牌资产")
+                        )
+                    ],
+                ),
+                (
+                    "其他品牌与账号资产",
+                    [
+                        entity_link_name(name)
+                        for name in ("华境", "KOW账号")
+                        if any(
+                            name in (entity_matches.get(entity_type) or {})
+                            for entity_type in ("产品线", "车型与品牌资产")
+                        )
                     ],
                 ),
                 ("入口", ["客户", "市场与品牌", "产品线"]),
@@ -2419,6 +3286,7 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
                 f"- 生成人员桥接页：{len(known_people_names)}",
                 f"- 生成部门桥接页：{len(known_departments)}",
                 f"- 生成实体桥接页：{sum(len(items) for items in entity_matches.values())}",
+                f"- 生成公司标准答案候选页：{canonical_context_pages}",
                 "- 生成待人工确认桥接页：1",
                 f"- 规则确认文档：{sum(1 for doc in company_docs if doc['review_status'] == 'rule_confirmed')}",
                 f"- 员工确认记录：{len(review_records)}",
@@ -2453,8 +3321,10 @@ def generate(db_path: Path, vault_path: Path) -> dict[str, int]:
         "people_bridges": len(known_people_names),
         "department_bridges": len(known_departments),
         "entity_bridges": sum(len(items) for items in entity_matches.values()),
+        "canonical_context_pages": canonical_context_pages,
         "employee_review_records": len(review_records),
         "stale_raw_refs": stale_raw_refs,
+        **taxonomy_stats,
         "reports": 2,
     }
 
@@ -2463,8 +3333,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--vault", type=Path, default=DEFAULT_VAULT)
+    parser.add_argument("--taxonomy", type=Path, default=DEFAULT_KNOWLEDGE_TAXONOMY)
     args = parser.parse_args()
-    stats = generate(args.db, args.vault)
+    stats = generate(args.db, args.vault, args.taxonomy)
     print(json.dumps(stats, ensure_ascii=False, sort_keys=True))
 
 

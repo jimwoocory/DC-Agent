@@ -1,8 +1,10 @@
 import asyncio
 import ipaddress
+import json
 import os
 import socket
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -300,6 +302,42 @@ class AstrBotDashboard:
             if auth_response is not None:
                 return auth_response
             return await call_next(request_)
+
+        @self.asgi_app.middleware("http")
+        async def assistant_h5_audit_middleware(request_, call_next):
+            response = await call_next(request_)
+            if request_.url.path.startswith("/api/v1/assistant-attachments/"):
+                try:
+                    audit_path = (
+                        Path(get_astrbot_data_path())
+                        / "watchdog"
+                        / "h5_connections"
+                        / "history.jsonl"
+                    )
+                    audit_path.parent.mkdir(parents=True, exist_ok=True)
+                    audit_path.touch(mode=0o600, exist_ok=True)
+                    audit_path.chmod(0o600)
+                    record = {
+                        "observed_at": datetime.now(UTC)
+                        .isoformat(timespec="seconds")
+                        .replace("+00:00", "Z"),
+                        "source_ip": self._get_request_client_ip(request_),
+                        "method": request_.method,
+                        "status_code": response.status_code,
+                        "service": "assistant_h5",
+                    }
+                    with audit_path.open("a", encoding="utf-8") as audit_file:
+                        audit_file.write(
+                            json.dumps(
+                                record, ensure_ascii=False, separators=(",", ":")
+                            )
+                            + "\n"
+                        )
+                except OSError as exc:
+                    logger.warning(
+                        "Failed to append assistant H5 access audit: %s", exc
+                    )
+            return response
 
         self.shutdown_event = shutdown_event
 

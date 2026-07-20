@@ -216,6 +216,8 @@ def _search_query_from_args(tool_args: dict | None) -> str:
 
 
 def _enforce_web_search_fidelity(event, llm_response) -> None:
+    if event.get_extra("assistant_workbench_task_type") == "copy":
+        return
     if not _event_extra_true(event, "dc_router_meta_search_required"):
         return
     if llm_response is None or getattr(llm_response, "role", "") != "assistant":

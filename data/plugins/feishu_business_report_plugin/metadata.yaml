@@ -1,0 +1,10 @@
+name: feishu_business_report_plugin
+display_name: 飞书综合/财务看板
+author: dc_agent
+version: 0.1.0
+desc: 飞书综合/财务 MVP：综合行政、财务审批和飞书集成健康。
+short_desc: 综合/财务业务看板
+support_platforms:
+  - lark
+pages:
+  - dashboard

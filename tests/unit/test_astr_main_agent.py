@@ -24,6 +24,7 @@ from astrbot.core.platform.sources.lark.lark_event import LarkMessageEvent
 from astrbot.core.platform.sources.webchat.webchat_adapter import WebChatAdapter
 from astrbot.core.provider import Provider
 from astrbot.core.provider.entities import ProviderRequest
+from astrbot.core.runtime_context.models import RuntimeContextSection
 from astrbot.core.skills.skill_manager import SkillInfo
 from astrbot.core.star.star import StarMetadata
 
@@ -1385,6 +1386,47 @@ class TestEnsurePersonaAndSkills:
                 result.reset_coro.close()
 
     @pytest.mark.asyncio
+    async def test_event_can_disable_all_late_builtin_tools(
+        self, mock_event, mock_context, mock_provider
+    ):
+        module = ama
+        mock_event.get_extra.side_effect = lambda key, default=None: (
+            True if key == "disable_llm_tools" else default
+        )
+        mock_event.platform_meta.support_proactive_message = False
+        config = module.MainAgentBuildConfig(
+            tool_call_timeout=60,
+            computer_use_runtime="none",
+            add_cron_tools=True,
+        )
+        req = ProviderRequest(prompt="write the final copy")
+        req.conversation = MagicMock(persona_id=None, history="[]")
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+        ):
+            mock_runner = MagicMock()
+            mock_runner.reset = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+
+            result = await module.build_main_agent(
+                event=mock_event,
+                plugin_context=mock_context,
+                config=config,
+                provider=mock_provider,
+                req=req,
+                apply_reset=False,
+            )
+
+        assert result is not None
+        try:
+            assert result.provider_request.func_tool is None
+        finally:
+            if result.reset_coro:
+                result.reset_coro.close()
+
+    @pytest.mark.asyncio
     async def test_persona_empty_tools_keeps_local_runtime_builtin_tools(
         self, mock_event, mock_context, mock_provider
     ):
@@ -1749,6 +1791,54 @@ class TestBuildMainAgent:
         assert len(req.extra_user_content_parts) == 1
         memory_part = req.extra_user_content_parts[0]
         assert "Lower-priority DC-Agent long-term memory" in memory_part.text
+        assert "东风柳汽活动方案" in memory_part.text
+        assert getattr(memory_part, "_no_save") is True
+
+    @pytest.mark.asyncio
+    async def test_build_main_agent_consumes_structured_memory_event_extra(
+        self, mock_event, mock_context, mock_provider
+    ):
+        """Structured event context must cross the provider assembly seam."""
+        module = ama
+        mock_event.message_str = "不满意"
+        section = RuntimeContextSection.memory_reference(
+            text="相关文档：东风柳汽活动方案。",
+            source_id="dc_memory_context",
+        )
+        mock_event.get_extra.side_effect = lambda key: (
+            [section] if key == "runtime_context_sections" else None
+        )
+        mock_context.get_provider_by_id.return_value = None
+        mock_context.get_using_provider.return_value = mock_provider
+        mock_context.get_config.return_value = {}
+
+        conversation = _new_mock_conversation()
+        conversation.history = _feishu_short_feedback_history()
+        conv_mgr = mock_context.conversation_manager
+        conv_mgr.get_curr_conversation_id = AsyncMock(return_value="conv-id")
+        conv_mgr.get_conversation = AsyncMock(return_value=conversation)
+
+        with (
+            patch("astrbot.core.astr_main_agent.AgentRunner") as mock_runner_cls,
+            patch("astrbot.core.astr_main_agent.AstrAgentContext"),
+        ):
+            mock_runner = MagicMock()
+            mock_runner.reset = AsyncMock()
+            mock_runner_cls.return_value = mock_runner
+
+            result = await module.build_main_agent(
+                event=mock_event,
+                plugin_context=mock_context,
+                config=module.MainAgentBuildConfig(tool_call_timeout=60),
+            )
+
+        assert result is not None
+        req = result.provider_request
+        assert req.prompt == "不满意"
+        assert "五菱2026中秋" in json.dumps(req.contexts, ensure_ascii=False)
+        assert "recent conversation history first" in req.system_prompt
+        assert len(req.extra_user_content_parts) == 1
+        memory_part = req.extra_user_content_parts[0]
         assert "东风柳汽活动方案" in memory_part.text
         assert getattr(memory_part, "_no_save") is True
 

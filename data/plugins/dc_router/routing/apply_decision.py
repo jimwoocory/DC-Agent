@@ -122,6 +122,14 @@ async def apply_provider_pin(
     umo = getattr(event, "unified_msg_origin", "") or ""
     if not await _set_provider(context, umo, target_provider_id):
         return False
+    try:
+        event.set_extra("selected_provider", target_provider_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[dc_router] 无法为当前请求选择 provider %s",
+            target_provider_id,
+        )
+        return False
     _annotate_event(
         event,
         provider_id=target_provider_id,
@@ -193,6 +201,14 @@ async def apply_decision(
         return False
     umo = getattr(event, "unified_msg_origin", "") or ""
     if not await _set_provider(context, umo, provider_id):
+        return False
+    try:
+        event.set_extra("selected_provider", provider_id)
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[dc_router] 无法为当前请求选择 provider %s",
+            provider_id,
+        )
         return False
     _annotate_event(
         event,

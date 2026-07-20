@@ -20,11 +20,15 @@ backed providers (Codex / Grok Build). It is invoked from
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
 from pathlib import Path
 from typing import Any
+
+from dc_engines.codex_capability import authorize_codex
+from dc_engines.harness import ExecutorSettlement, HarnessDeliveryReceipt
 
 from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
@@ -174,15 +178,27 @@ async def _handle_disabled_legacy_cli_provider(event: Any, *, decision: Any) -> 
 
 
 async def _start_codex(
-    _context: Any,
+    context: Any,
     event: Any,
     *,
     decision: Any,
     prompt: str,
 ) -> bool:
     """Codex CLI 接管 (DIRECT, 不排队)."""
+    authorization = authorize_codex(
+        "deep_reasoning",
+        authorized_by="user",
+        owns_schedule=False,
+    )
+    if not authorization.allowed:
+        logger.warning(
+            "[cli_handlers] Codex authorization denied reason=%s",
+            authorization.reason,
+        )
+        return False
+
     try:
-        from .cli_runner import CliRunner
+        from data.plugins.dc_router.cli_runner import CliRunner
     except Exception as exc:  # noqa: BLE001
         logger.error("[cli_handlers] cli_runner import 失败: %s", exc)
         return False
@@ -190,13 +206,115 @@ async def _start_codex(
     backend, model, _effort = _parse_cli_provider(decision.provider_id)
     if backend != "codex":
         return False
+    reasoning_effort = "high"
+
+    harness_engine = getattr(context, "harness_engine", None)
+    executor_settlement = getattr(context, "executor_settlement", None)
+    if (
+        executor_settlement is None
+        and harness_engine is not None
+        and getattr(harness_engine, "store", None) is not None
+    ):
+        executor_settlement = ExecutorSettlement(harness_engine)
+    harness_task = None
+    harness_execution = None
+    if harness_engine is not None:
+        try:
+            from dc_engines.harness import HarnessTaskCreateRequest
+
+            session_id = str(getattr(event, "unified_msg_origin", "") or "")
+            platform_id = _safe_platform(event)
+            request_text = str(getattr(event, "message_str", "") or "").strip()
+            harness_task = await harness_engine.create_task(
+                HarnessTaskCreateRequest(
+                    title=f"Codex 深度分析：{request_text[:48] or '未命名请求'}",
+                    conversation_id=session_id,
+                    platform_id=platform_id,
+                    session_id=session_id,
+                    domain="advanced_executor:deep_reasoning",
+                    payload={
+                        "capability": "deep_reasoning",
+                        "source": str(getattr(decision, "source", "") or "router"),
+                        "provider_id": str(getattr(decision, "provider_id", "") or ""),
+                        "model": model,
+                        "reasoning_effort": reasoning_effort,
+                        "owns_schedule": False,
+                        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                        "prompt_chars": len(prompt),
+                    },
+                )
+            )
+            await harness_engine.mark_in_progress(
+                harness_task.task_id,
+                note="Codex read-only execution started",
+            )
+            await harness_engine.append_trace(
+                harness_task.task_id,
+                "advanced_executor_started",
+                {
+                    "capability": "deep_reasoning",
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                    "sandbox": "read-only",
+                },
+            )
+            if executor_settlement is not None:
+                harness_execution = await executor_settlement.begin(
+                    task_id=harness_task.task_id,
+                    executor_kind="codex",
+                    capability="deep_reasoning",
+                    idempotency_key=f"codex:{harness_task.task_id}:attempt:1",
+                    request_digest=hashlib.sha256(prompt.encode()).hexdigest(),
+                    metadata={
+                        "model": model,
+                        "reasoning_effort": reasoning_effort,
+                        "sandbox": "read-only",
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[cli_handlers] Codex Harness start failed: %s", exc)
+            harness_task = None
 
     try:
         result = await CliRunner(cwd=_DC_AGENT_ROOT).run_codex(
-            prompt, model=model, timeout=300
+            prompt,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            task_kind="analysis",
+            authorized_by="user",
+            timeout=300,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[cli_handlers] Codex CLI exception: %s", exc)
+        if harness_task is not None:
+            try:
+                await harness_engine.append_trace(
+                    harness_task.task_id,
+                    "advanced_executor_finished",
+                    {"status": "failed", "error_code": "exception"},
+                )
+                if harness_execution is not None:
+                    await executor_settlement.settle(
+                        execution_id=harness_execution.execution_id,
+                        idempotency_key=f"settle:{harness_execution.execution_id}:exception",
+                        outcome="failed",
+                        result={
+                            "summary": "Codex CLI exception",
+                            "error": "exception",
+                        },
+                        delivery=HarnessDeliveryReceipt(
+                            mode="not_required", reference_digest="codex-exception"
+                        ),
+                    )
+                else:
+                    await harness_engine.fail_task(
+                        harness_task.task_id, reason="Codex CLI exception"
+                    )
+            except Exception as audit_exc:  # noqa: BLE001
+                logger.warning(
+                    "[cli_handlers] Codex Harness failure settlement failed: %s",
+                    audit_exc,
+                )
         return False
 
     if not result.ok:
@@ -205,6 +323,41 @@ async def _start_codex(
             result.error_code,
             result.error,
         )
+        if harness_task is not None:
+            try:
+                await harness_engine.append_trace(
+                    harness_task.task_id,
+                    "advanced_executor_finished",
+                    {
+                        "status": "failed",
+                        "error_code": result.error_code or "unknown",
+                        "elapsed_sec": result.elapsed_sec,
+                    },
+                )
+                if harness_execution is not None:
+                    await executor_settlement.settle(
+                        execution_id=harness_execution.execution_id,
+                        idempotency_key=f"settle:{harness_execution.execution_id}:failed",
+                        outcome="failed",
+                        result={
+                            "summary": "Codex CLI failed",
+                            "error": result.error_code or "unknown",
+                        },
+                        delivery=HarnessDeliveryReceipt(
+                            mode="not_required",
+                            reference_digest=str(result.error_code or "unknown"),
+                        ),
+                    )
+                else:
+                    await harness_engine.fail_task(
+                        harness_task.task_id,
+                        reason=f"Codex CLI failed: {result.error_code or 'unknown'}",
+                    )
+            except Exception as audit_exc:  # noqa: BLE001
+                logger.warning(
+                    "[cli_handlers] Codex Harness failure settlement failed: %s",
+                    audit_exc,
+                )
         return False
 
     event.set_extra("dc_router_cli_provider", decision.provider_id)
@@ -215,6 +368,47 @@ async def _start_codex(
         )
     except Exception:  # noqa: BLE001
         pass
+
+    if harness_task is not None:
+        try:
+            audit_result = {
+                "capability": "deep_reasoning",
+                "provider_id": str(getattr(decision, "provider_id", "") or ""),
+                "model": model,
+                "reasoning_effort": reasoning_effort,
+                "elapsed_sec": result.elapsed_sec,
+                "model_usage": result.model_usage,
+                "output_chars": len(result.text),
+                "output_sha256": hashlib.sha256(result.text.encode()).hexdigest(),
+                "sandbox": "read-only",
+            }
+            await harness_engine.append_trace(
+                harness_task.task_id,
+                "advanced_executor_finished",
+                {"status": "review_required", **audit_result},
+            )
+            if harness_execution is not None:
+                await executor_settlement.settle(
+                    execution_id=harness_execution.execution_id,
+                    idempotency_key=f"settle:{harness_execution.execution_id}:success",
+                    outcome="review_required",
+                    result=audit_result,
+                    delivery=HarnessDeliveryReceipt(
+                        mode="runtime_owned",
+                        reference_digest=hashlib.sha256(
+                            str(getattr(event, "unified_msg_origin", "")).encode()
+                        ).hexdigest(),
+                    ),
+                )
+            else:
+                await harness_engine.mark_review_required(
+                    harness_task.task_id,
+                    reviewer_note="Codex result returned to the requesting user",
+                    result=audit_result,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[cli_handlers] Codex Harness settlement failed: %s", exc)
+
     logger.info(
         "[cli_handlers] Codex direct success provider=%s model=%s elapsed=%.2fs",
         decision.provider_id,

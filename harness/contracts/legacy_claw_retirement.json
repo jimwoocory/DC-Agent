@@ -1,0 +1,31 @@
+{
+  "feature": "legacy_claw_retirement",
+  "goal": "Retire OpenClaw, Qclaw, and JWClaw as runtime systems so DC-Agent has no executable dependency on their processes, schedulers, dashboards, probes, or repair actions.",
+  "acceptance_criteria": [
+    {
+      "id": "legacy-claw-retirement-001",
+      "description": "DC-Agent no longer ships the OpenClaw on-demand plugin or exposes an OpenClaw system entry.",
+      "verification": "uv run pytest tests/test_legacy_claw_retirement.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "legacy-claw-retirement-002",
+      "description": "The watchdog and repair controller no longer probe, schedule, or restart OpenClaw.",
+      "verification": "uv run pytest tests/test_legacy_claw_retirement.py tests/test_task_control_plane.py tests/test_watchdog_repair.py -q"
+    },
+    {
+      "id": "legacy-claw-retirement-003",
+      "description": "Operator restart and verification scripts no longer treat OpenClaw as a DC-Agent service.",
+      "verification": "uv run pytest tests/test_legacy_claw_retirement.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "retired_systems": [
+      "OpenClaw",
+      "Qclaw",
+      "JWClaw"
+    ],
+    "migration": "none",
+    "external_state_reuse": false,
+    "native_capability_porting": "future_explicit_work_only"
+  }
+}

@@ -154,14 +154,51 @@ async def test_content_sop_rule_plugin_accepts_explicit_dc_review_permission(
         is_card_action=True,
         requester_dc_permissions=[
             {
+                "subject_id": "ou_ops",
+                "subject_type": "user",
                 "permission": "content_rule_review",
                 "scope": "*",
                 "source": "dc_permission_assignments",
+                "enabled": True,
             }
         ],
     )
 
     assert plugin._is_reviewer(event) is True
+
+
+@pytest.mark.asyncio
+async def test_content_sop_rule_plugin_rejects_permission_bound_to_another_subject(
+    tmp_path: Path,
+):
+    from data.plugins.content_sop_rule_review_plugin.main import (
+        ContentSopRuleReviewPlugin,
+    )
+
+    plugin = ContentSopRuleReviewPlugin(
+        FakeContext(
+            {
+                "admin_reviewers": [],
+                "db_path": str(tmp_path / "proposals.db"),
+                "rule_overrides_path": str(tmp_path / "overrides.json"),
+            }
+        )
+    )
+    event = FakeEvent(
+        sender_id="ou_user",
+        requester_dc_permissions=[
+            {
+                "subject_id": "ou_ops",
+                "subject_type": "user",
+                "permission": "content_rule_review",
+                "scope": "*",
+                "source": "manual",
+                "enabled": True,
+            }
+        ],
+    )
+
+    assert plugin._is_reviewer(event) is False
 
 
 @pytest.mark.asyncio

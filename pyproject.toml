@@ -69,6 +69,8 @@ dependencies = [
   "python-ripgrep==0.0.8",
   "rembg[cpu]>=2.0.76",
   "pyotp>=2.9.0",
+  "python-docx>=1.2.0",
+  "reportlab>=4.4.0",
 ]
 
 [dependency-groups]
@@ -89,6 +91,19 @@ astrbot = "astrbot.cli.__main__:cli"
 
 [project.urls]
 Repository = "https://github.com/AstrBotDevs/AstrBot"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+  "error::DeprecationWarning",
+  "error::PendingDeprecationWarning",
+  "error::pytest.PytestUnhandledThreadExceptionWarning",
+  "error::coverage.exceptions.CoverageWarning",
+  "ignore:^datetime\\.datetime\\.utcfromtimestamp\\(\\) is deprecated.*:DeprecationWarning:lark_oapi\\.ws\\.pb\\.google\\.protobuf\\.internal\\.well_known_types",
+  "ignore:^There is no current event loop$:DeprecationWarning:lark_oapi\\.ws\\.client",
+]
+
+[tool.coverage.run]
+omit = ["data/plugins/test_mock_plugin/*"]
 
 [tool.ruff]
 exclude = ["astrbot/core/utils/t2i/local_strategy.py", "astrbot/api/all.py", "tests"]

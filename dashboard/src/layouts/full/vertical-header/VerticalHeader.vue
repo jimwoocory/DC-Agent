@@ -480,6 +480,8 @@ function getVersion() {
           localStorage.removeItem("password_upgrade_required");
         }
       } else {
+        dialog.value = false;
+        accountWarning.value = false;
         accountWarningMd5.value = false;
         accountWarningUpgrade.value = false;
         localStorage.removeItem("change_pwd_hint");

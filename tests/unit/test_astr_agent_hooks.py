@@ -117,6 +117,31 @@ async def test_search_required_answer_without_evidence_is_blocked() -> None:
 
 
 @pytest.mark.asyncio
+async def test_confirmed_workbench_copy_bypasses_web_search_guardrail() -> None:
+    """Confirmed creative copy is allowed without retrieval evidence."""
+    event = MagicMock()
+    event.get_extra.side_effect = lambda key, default=None: {
+        "assistant_workbench_task_type": "copy",
+        "dc_router_meta_search_required": "true",
+        "dc_web_search_used": False,
+    }.get(key, default)
+    response = LLMResponse(role="assistant", completion_text="安心检测，从专业开始。")
+    run_context = SimpleNamespace(context=SimpleNamespace(event=event))
+
+    with patch(
+        "astrbot.core.astr_agent_hooks.call_event_hook",
+        new=AsyncMock(),
+    ):
+        await MainAgentHooks().on_agent_done(run_context, response)
+
+    assert response.completion_text == "安心检测，从专业开始。"
+    assert not any(
+        call.args and call.args[0] == "dc_web_search_guardrail"
+        for call in event.set_extra.call_args_list
+    )
+
+
+@pytest.mark.asyncio
 async def test_search_required_answer_with_locked_evidence_and_valid_refs_passes() -> (
     None
 ):

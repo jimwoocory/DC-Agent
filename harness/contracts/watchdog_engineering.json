@@ -16,6 +16,11 @@
       "id": "wd-engine-003",
       "description": "watchdogctl reports probe enabled/disabled state from the same engine registry as dc-watchdog.sh.",
       "verification": "uv run pytest tests/test_watchdog_engineering.py tests/test_watchdog_disabled_probe_state.py -q"
+    },
+    {
+      "id": "wd-engine-004",
+      "description": "When NAS owns the assistant runtime, the Mac watchdog probes the NAS health endpoint with restart grace for transient failures, disables local AstrBot probes, and the safe restart command cannot silently launch a duplicate local AstrBot instance.",
+      "verification": "uv run pytest tests/test_watchdog_engineering.py tests/test_watchdog_diagnose.py -q"
     }
   ],
   "runtime_policy": {

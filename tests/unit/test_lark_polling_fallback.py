@@ -2,7 +2,25 @@ import asyncio
 import json
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import lark_oapi as lark
+from lark_oapi.event.callback.model.p2_card_action_trigger import (
+    P2CardActionTriggerResponse,
+)
+from lark_oapi.ws import client as lark_ws_client
+from lark_oapi.ws.const import (
+    HEADER_MESSAGE_ID,
+    HEADER_SEQ,
+    HEADER_SUM,
+    HEADER_TRACE_ID,
+    HEADER_TYPE,
+)
+from lark_oapi.ws.enum import FrameType
+from lark_oapi.ws.enum import MessageType as LarkWSMessageType
+from lark_oapi.ws.pb.pbbp2_pb2 import Frame
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
 
 import astrbot.api.message_components as Comp
 from astrbot.core.platform.astrbot_message import (
@@ -10,7 +28,189 @@ from astrbot.core.platform.astrbot_message import (
     MessageMember,
     MessageType,
 )
-from astrbot.core.platform.sources.lark.lark_adapter import LarkPlatformAdapter
+from astrbot.core.platform.sources.lark.lark_adapter import (
+    LarkPlatformAdapter,
+    _LarkCardCallbackClient,
+)
+
+
+def test_lark_card_action_callback_acknowledges_before_async_processing() -> None:
+    async def run() -> None:
+        adapter = LarkPlatformAdapter(
+            {
+                "id": "lark-card-action-test",
+                "app_id": "cli_test",
+                "app_secret": "secret",
+                "lark_connection_mode": "socket",
+            },
+            {},
+            asyncio.Queue(),
+        )
+        adapter.convert_card_action = AsyncMock()
+        callback = adapter.event_handler._callback_processor_map[
+            "p2.card.action.trigger"
+        ]
+        event = SimpleNamespace(event=None)
+
+        response = callback.do(event)
+        await asyncio.sleep(0)
+
+        assert isinstance(response, P2CardActionTriggerResponse)
+        adapter.convert_card_action.assert_awaited_once_with(event)
+
+    asyncio.run(run())
+
+
+def test_lark_socket_dispatches_and_acknowledges_card_frames() -> None:
+    async def run() -> None:
+        adapter = LarkPlatformAdapter(
+            {
+                "id": "lark-card-frame-test",
+                "app_id": "cli_test",
+                "app_secret": "secret",
+                "lark_connection_mode": "socket",
+            },
+            {},
+            asyncio.Queue(),
+        )
+        adapter.convert_card_action = AsyncMock()
+        adapter.client._write_message = AsyncMock()
+
+        frame = Frame()
+        frame.method = FrameType.DATA.value
+        frame.SeqID = 1
+        frame.LogID = 1
+        frame.service = 1
+        for key, value in (
+            (HEADER_MESSAGE_ID, "message-card-1"),
+            (HEADER_TRACE_ID, "trace-card-1"),
+            (HEADER_SUM, "1"),
+            (HEADER_SEQ, "0"),
+            (HEADER_TYPE, LarkWSMessageType.CARD.value),
+        ):
+            header = frame.headers.add()
+            header.key = key
+            header.value = value
+        frame.payload = json.dumps(
+            {
+                "schema": "2.0",
+                "event_type": "card.action.trigger",
+                "operator": {"open_id": "ou_user"},
+                "action": {"tag": "button", "value": {"action": "show_task"}},
+                "context": {
+                    "open_message_id": "om_card",
+                    "open_chat_id": "oc_chat",
+                },
+            }
+        ).encode()
+
+        await adapter.client._handle_data_frame(frame)
+        await asyncio.sleep(0)
+
+        adapter.client._write_message.assert_awaited_once()
+        adapter.convert_card_action.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_lark_card_action_records_minimal_trace_metadata() -> None:
+    async def run() -> None:
+        adapter = LarkPlatformAdapter.__new__(LarkPlatformAdapter)
+        adapter.bot_name = "小助手"
+        adapter.handle_msg = AsyncMock()
+        data = SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_private_operator", user_id=None),
+            action=SimpleNamespace(
+                value={
+                    "source": "daily_response",
+                    "action": "regenerate",
+                    "task_id": "task-001",
+                    "prompt": "must not enter audit metadata",
+                },
+                form_value={"full_chat": "must not enter audit metadata"},
+                input_value="must not enter audit metadata",
+                tag="button",
+                name="regenerate",
+            ),
+            context=SimpleNamespace(
+                open_chat_id="oc_trace",
+                open_message_id="om_trace",
+            ),
+            token="callback-secret",
+        )
+
+        with patch(
+            "dc_engines.card_runtime.record_card_action_via_runtime"
+        ) as record_action:
+            await adapter.convert_card_action(SimpleNamespace(event=data))
+
+        record_action.assert_called_once_with(
+            message_id="om_trace",
+            conversation_id="oc_trace",
+            action="regenerate",
+            source="daily_response",
+            task_id="task-001",
+            operator_id="ou_private_operator",
+        )
+        adapter.handle_msg.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_lark_socket_connect_uses_the_running_application_loop() -> None:
+    async def run() -> None:
+        stale_loop = asyncio.new_event_loop()
+        previous_loop = lark_ws_client.loop
+        lark_ws_client.loop = stale_loop
+        try:
+            adapter = LarkPlatformAdapter(
+                {
+                    "id": "lark-loop-test",
+                    "app_id": "cli_test",
+                    "app_secret": "secret",
+                    "lark_connection_mode": "socket",
+                },
+                {},
+                asyncio.Queue(),
+            )
+            with patch.object(lark.ws.Client, "_connect", new=AsyncMock()) as connect:
+                await adapter.client._connect()
+
+            connect.assert_awaited_once()
+            assert lark_ws_client.loop is asyncio.get_running_loop()
+        finally:
+            lark_ws_client.loop = previous_loop
+            stale_loop.close()
+
+    asyncio.run(run())
+
+
+def test_lark_socket_clean_close_is_not_reported_as_an_error() -> None:
+    async def run() -> None:
+        client = _LarkCardCallbackClient.__new__(_LarkCardCallbackClient)
+        client._conn = SimpleNamespace(
+            recv=AsyncMock(
+                side_effect=ConnectionClosedOK(
+                    Close(1000, "bye"),
+                    Close(1000, "bye"),
+                    True,
+                )
+            )
+        )
+        client._auto_reconnect = False
+        client._disconnect = AsyncMock()
+        client._reconnect = AsyncMock()
+
+        with patch(
+            "astrbot.core.platform.sources.lark.lark_adapter.logger.error"
+        ) as log_error:
+            await client._receive_message_loop()
+
+        client._disconnect.assert_awaited_once()
+        client._reconnect.assert_not_awaited()
+        log_error.assert_not_called()
+
+    asyncio.run(run())
 
 
 def test_lark_polling_builds_private_message_from_list_item() -> None:
@@ -110,6 +310,32 @@ def test_lark_plain_text_and_commands_are_queued_immediately() -> None:
         second = adapter._event_queue.get_nowait()
         assert first.message_obj.message_id == "om_plain"
         assert second.message_obj.message_id == "om_stop"
+        assert adapter._pending_multimodal_messages == {}
+
+    asyncio.run(run())
+
+
+def test_lark_media_menu_labels_are_queued_immediately() -> None:
+    async def run() -> None:
+        adapter = _make_adapter_for_buffering()
+        image_menu = _make_abm(
+            message_id="om_image_menu",
+            message=[Comp.Plain("生成图片")],
+            message_str="生成图片",
+        )
+        file_menu = _make_abm(
+            message_id="om_file_menu",
+            message=[Comp.Plain("处理文件")],
+            message_str="处理文件",
+        )
+
+        await adapter.handle_msg(image_menu)
+        await adapter.handle_msg(file_menu)
+
+        first = adapter._event_queue.get_nowait()
+        second = adapter._event_queue.get_nowait()
+        assert first.message_obj.message_id == "om_image_menu"
+        assert second.message_obj.message_id == "om_file_menu"
         assert adapter._pending_multimodal_messages == {}
 
     asyncio.run(run())
@@ -510,5 +736,24 @@ def test_lark_terminate_cancels_sdk_cache_cron() -> None:
 
         assert cache_cron.done()
         assert cache_cron.cancelled()
+
+    asyncio.run(run())
+
+
+def test_lark_terminate_disables_socket_reconnect_before_disconnect() -> None:
+    async def run() -> None:
+        adapter = LarkPlatformAdapter.__new__(LarkPlatformAdapter)
+        adapter._polling_fallback_task = None
+        adapter.connection_mode = "socket"
+        adapter.client = SimpleNamespace(
+            _auto_reconnect=True,
+            _disconnect=AsyncMock(),
+            _cache=None,
+        )
+
+        await adapter.terminate()
+
+        assert adapter.client._auto_reconnect is False
+        adapter.client._disconnect.assert_awaited_once()
 
     asyncio.run(run())

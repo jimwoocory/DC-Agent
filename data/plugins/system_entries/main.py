@@ -1,7 +1,7 @@
-"""系统入口 plugin —— 把 Hermes Agent 官方 WebUI / OpenClaw / 其他系统服务的
+"""系统入口 plugin —— 把 Hermes Agent 官方 WebUI / 其他系统服务的
 快捷入口集中在 AstrBot dashboard 左侧 plugin 菜单里，**跟 dashboard 升级解耦**。
 
-背景：以前在 dashboard 右上角加 "Hermes Agent 官方 WebUI" / "OpenClaw" 按钮是改 dashboard
+背景：以前在 dashboard 右上角加系统按钮是改 dashboard
 JS bundle 实现，AstrBot 自带 dashboard 升级会被覆盖（5/15 v4.24.5 升级时发生过）。
 这个 plugin 把入口做成"plugin page"——dashboard 是 v4.24.5 自带版本也好，
 未来再升级也好，plugin page 始终在。
@@ -19,8 +19,11 @@ import json
 import socket
 import subprocess
 import time
+from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+from dc_engines.codex_capability import list_codex_capabilities
 
 from astrbot.api import logger
 from astrbot.api.star import Context, Star, register
@@ -47,18 +50,6 @@ DEFAULT_ENTRIES: list[dict] = [
         "icon": "💬",
         "category": "agent",
         "priority": 70,
-    },
-    {
-        "name": "OpenClaw",
-        "url": "http://localhost:4312/",
-        "probe_host": "127.0.0.1",
-        "probe_port": 4312,
-        "health_path": "/",
-        "hint": "按需启动 / 看门狗 :9120/kick",
-        "icon": "🖥️",
-        "on_demand_kick": "http://localhost:9120/kick",
-        "category": "agent",
-        "priority": 40,
     },
     {
         "name": "Hermes Gateway",
@@ -144,7 +135,7 @@ PINNED_DASHBOARD_ENTRIES: list[dict] = [
 @register(
     "system_entries",
     "dc_agent",
-    "系统入口 — Hermes Agent 官方 WebUI / OpenClaw / 看门狗 等运维服务的快捷入口（跟 dashboard 升级解耦）",
+    "系统入口 — Hermes Agent WebUI / 看门狗等运维服务的快捷入口（跟 dashboard 升级解耦）",
     "1.0.0",
 )
 class SystemEntriesPlugin(Star):
@@ -182,8 +173,8 @@ class SystemEntriesPlugin(Star):
             self.context.register_web_api(
                 "/system_entries/watchdog",
                 self._api_watchdog,
-                ["GET"],
-                "watchdog 控制台状态与人工 pause/resume",
+                ["GET", "POST"],
+                "任务控制面状态与人工 pause/resume",
             )
             logger.info(
                 "[system_entries] API 已注册：/api/plug/system_entries/{status,health,watchdog}"
@@ -257,18 +248,30 @@ class SystemEntriesPlugin(Star):
         return self._cache
 
     async def _api_watchdog(self, *args, **kwargs):
-        """Return or mutate watchdogctl state.
+        """Return or mutate Task Control Plane state through watchdogctl.
 
-        GET query:
-          action=status|pause|resume
+        Query parameters:
+          action=status|plan-pause|plan-pause-one|pause|plan-resume|resume|plan-review|review
           group=nas|night|sync|watchdog|dianchi-tech|onboarding|all
           target_type=launchd|cron|codex
           target_key=<task key>
+          review_action=acknowledge|resolve
+          plan_id=<Control Plan confirmation for protected mutations>
+
+        Args:
+            *args: Optional request object carrying query parameters.
+            **kwargs: Direct query parameter overrides used by tests and routes.
+
+        Returns:
+            JSON-safe Task Control Plane state or a validation error payload.
         """
         action = str(kwargs.get("action") or "")
         group = str(kwargs.get("group") or "")
         target_type = str(kwargs.get("target_type") or "")
         target_key = str(kwargs.get("target_key") or "")
+        plan_id = str(kwargs.get("plan_id") or "")
+        review_action = str(kwargs.get("review_action") or "")
+        request_method = str(getattr(args[0], "method", "")).upper() if args else ""
 
         if (not action or not group) and args:
             query = _extract_query(args[0])
@@ -276,11 +279,22 @@ class SystemEntriesPlugin(Star):
             group = group or query.get("group", [""])[0]
             target_type = target_type or query.get("target_type", [""])[0]
             target_key = target_key or query.get("target_key", [""])[0]
+            plan_id = plan_id or query.get("plan_id", [""])[0]
+            review_action = review_action or query.get("review_action", [""])[0]
 
         action = action or "status"
         group = group or "nas"
-        allowed_actions = {"status", "pause", "resume"}
-        allowed_target_types = {"", "launchd", "cron", "codex"}
+        allowed_actions = {
+            "status",
+            "plan-pause",
+            "plan-pause-one",
+            "pause",
+            "plan-resume",
+            "resume",
+            "plan-review",
+            "review",
+        }
+        allowed_target_types = {"", "launchd", "cron", "codex", "repair_review"}
         allowed_groups = {
             "all",
             "night",
@@ -298,6 +312,45 @@ class SystemEntriesPlugin(Star):
             return {"status": "error", "message": "invalid target type", "data": None}
         if target_type and not target_key:
             return {"status": "error", "message": "missing target key", "data": None}
+        if action in {"plan-review", "review"} and (
+            target_type != "repair_review"
+            or not target_key
+            or review_action not in {"acknowledge", "resolve"}
+        ):
+            return {
+                "status": "error",
+                "message": "invalid repair review target",
+                "data": None,
+            }
+        if action not in {"plan-review", "review"} and target_type == "repair_review":
+            return {
+                "status": "error",
+                "message": "invalid repair review action",
+                "data": None,
+            }
+        if action == "plan-pause-one" and not target_type:
+            return {"status": "error", "message": "missing target key", "data": None}
+        if (
+            action in {"pause", "resume", "review"}
+            and request_method
+            and request_method != "POST"
+        ):
+            return {
+                "status": "error",
+                "message": "mutation requires POST",
+                "data": None,
+            }
+        if action in {"pause", "resume"} and not target_type and not plan_id:
+            return {"status": "error", "message": "missing plan_id", "data": None}
+        if action == "review" and not plan_id:
+            return {"status": "error", "message": "missing plan_id", "data": None}
+        if (
+            action == "pause"
+            and target_type == "cron"
+            and target_key == "dc-watchdog"
+            and not plan_id
+        ):
+            return {"status": "error", "message": "missing plan_id", "data": None}
         if not self.watchdogctl_path.exists():
             return {
                 "status": "error",
@@ -306,7 +359,83 @@ class SystemEntriesPlugin(Star):
             }
 
         def _run_watchdogctl() -> dict:
-            if action in {"pause", "resume"}:
+            plan = None
+            if action == "plan-review":
+                first_args = [
+                    str(self.watchdogctl_path),
+                    action,
+                    target_key,
+                    review_action,
+                    "--json",
+                ]
+                first = subprocess.run(
+                    first_args,
+                    text=True,
+                    capture_output=True,
+                    timeout=20,
+                )
+                if first.returncode != 0:
+                    return {
+                        "ok": False,
+                        "stdout": first.stdout,
+                        "stderr": first.stderr,
+                        "returncode": first.returncode,
+                    }
+                plan = json.loads(first.stdout)
+            elif action == "review":
+                first_args = [
+                    str(self.watchdogctl_path),
+                    action,
+                    target_key,
+                    review_action,
+                    "--confirm-plan",
+                    plan_id,
+                    "--json",
+                ]
+                first = subprocess.run(
+                    first_args,
+                    text=True,
+                    capture_output=True,
+                    timeout=20,
+                )
+                if first.returncode != 0:
+                    return {
+                        "ok": False,
+                        "stdout": first.stdout,
+                        "stderr": first.stderr,
+                        "returncode": first.returncode,
+                    }
+            elif action in {"plan-pause", "plan-pause-one", "plan-resume"}:
+                if action == "plan-pause-one":
+                    first_args = [
+                        str(self.watchdogctl_path),
+                        action,
+                        target_type,
+                        target_key,
+                        "--json",
+                    ]
+                else:
+                    first_args = [
+                        str(self.watchdogctl_path),
+                        action,
+                        group,
+                        "--json",
+                    ]
+                first = subprocess.run(
+                    first_args,
+                    text=True,
+                    capture_output=True,
+                    timeout=20,
+                )
+                if first.returncode != 0:
+                    return {
+                        "ok": False,
+                        "stdout": first.stdout,
+                        "stderr": first.stderr,
+                        "returncode": first.returncode,
+                    }
+                plan = json.loads(first.stdout)
+            elif action in {"pause", "resume"}:
                 if target_type:
                     command = "pause-one" if action == "pause" else "resume-one"
                     first_args = [
@@ -315,8 +444,11 @@ class SystemEntriesPlugin(Star):
                         target_type,
                         target_key,
                     ]
+                    if plan_id:
+                        first_args.extend(["--confirm-plan", plan_id])
                 else:
                     first_args = [str(self.watchdogctl_path), action, group]
+                    first_args.extend(["--confirm-plan", plan_id])
                 first = subprocess.run(
                     first_args,
                     text=True,
@@ -343,9 +475,12 @@ class SystemEntriesPlugin(Star):
                     "stderr": second.stderr,
                     "returncode": second.returncode,
                 }
+            state = json.loads(second.stdout)
+            state["codex_tools"] = [asdict(item) for item in list_codex_capabilities()]
             return {
                 "ok": True,
-                "state": json.loads(second.stdout),
+                "state": state,
+                "plan": plan,
                 "stdout": second.stdout,
                 "stderr": second.stderr,
                 "returncode": second.returncode,
@@ -372,6 +507,7 @@ class SystemEntriesPlugin(Star):
                 "action": action,
                 "group": group,
                 "state": result["state"],
+                "plan": result.get("plan"),
             },
         }
 

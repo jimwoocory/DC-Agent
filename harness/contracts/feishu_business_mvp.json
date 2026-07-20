@@ -1,0 +1,85 @@
+{
+  "feature": "feishu_business_mvp",
+  "goal": "Deliver an offline-testable MVP backbone for unified Feishu admin, HR, and finance workflows while routing every Feishu API call through dc_engines.feishu_hub.",
+  "scope": {
+    "included": [
+      "admin asset inventory, movements, low-stock alerts",
+      "finance approval records, attachment completeness checks, exception lists",
+      "HR onboarding tasks and interview/onboarding coordination records",
+      "business notification logs and Feishu integration health snapshots",
+      "Bitable read/create/update/search adapter methods",
+      "approval instance sync adapter by approval_code and time window"
+    ],
+    "excluded": [
+      "long-term group message harvesting",
+      "private cloud drive scanning",
+      "full finance system replacement",
+      "security audit and offboarding drive backup"
+    ]
+  },
+  "runtime_wiring": {
+    "engine_package": "dc_engines/dc_engines/feishu_business_mvp",
+    "workflow_runner": "dc_engines/dc_engines/feishu_business_mvp/workflows.py",
+    "automation_script": "scripts-tools/feishu_business_mvp.py",
+    "business_config_template": "data/config/feishu_business_mvp.example.json",
+    "plugins": [
+      "data/plugins/admin_asset_plugin/main.py",
+      "data/plugins/finance_workflow_plugin/main.py",
+      "data/plugins/hr_admin_workflow_plugin/main.py",
+      "data/plugins/feishu_business_report_plugin/main.py"
+    ],
+    "database_tables": [
+      "asset_items",
+      "asset_movements",
+      "finance_approval_records",
+      "hr_onboarding_tasks",
+      "business_notification_logs"
+    ],
+    "feishu_hub_entrypoints": [
+      "dc_engines.feishu_hub.get_client",
+      "dc_engines.feishu_hub.is_enabled",
+      "dc_engines.feishu_hub.call"
+    ],
+    "dashboard_entries": [
+      "综合行政",
+      "财务审批",
+      "飞书集成健康"
+    ],
+    "run_endpoint": "/api/plug/feishu_business_report_plugin/feishu_business/run",
+    "workflow_actions": [
+      "preflight",
+      "sync-assets",
+      "sync-onboarding",
+      "sync-finance",
+      "notify-exceptions",
+      "weekly-report"
+    ],
+    "sensitive_config_rule": "Business config may store app_token, table_id, approval_code, open_id, and chat_id, but must not store app_secret."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "feishu-business-mvp-001",
+      "description": "The business MVP store creates all five required tables and supports asset stock deduction, return replenishment, low-stock detection, finance attachment exception lists, onboarding tasks, notification logs, and summary snapshots.",
+      "verification": "uv run pytest dc_engines/tests/test_feishu_business_mvp.py -q"
+    },
+    {
+      "id": "feishu-business-mvp-002",
+      "description": "Bitable, approval, and notification adapters degrade cleanly when Feishu credentials are disabled and all enabled Feishu API calls are routed through feishu_hub.call with explicit method names.",
+      "verification": "uv run pytest dc_engines/tests/test_feishu_business_feishu_adapters.py -q"
+    },
+    {
+      "id": "feishu-business-mvp-003",
+      "description": "Admin, finance, HR, and report plugins register the expected Web API endpoints without requiring live Feishu credentials and expose disabled/health states instead of throwing.",
+      "verification": "uv run pytest tests/test_feishu_business_plugins.py -q"
+    },
+    {
+      "id": "feishu-business-mvp-004",
+      "description": "The contract stays valid and documents scope, wiring, table names, dashboard entries, and verification commands.",
+      "verification": "uv run pytest tests/harness/test_feishu_business_mvp_contract.py -q"
+    }
+  ],
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

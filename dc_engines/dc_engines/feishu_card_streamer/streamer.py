@@ -25,10 +25,13 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
+    CreateImageRequest,
+    CreateImageRequestBody,
     CreateMessageReactionRequest,
     CreateMessageReactionRequestBody,
     CreateMessageRequest,
@@ -38,6 +41,8 @@ from lark_oapi.api.im.v1 import (
     PatchMessageRequest,
     PatchMessageRequestBody,
 )
+
+from dc_engines.card_style import apply_card_visual_system
 
 logger = logging.getLogger("feishu_card_streamer")
 
@@ -60,6 +65,16 @@ class CardStream:
     """后台定时 update 的 task"""
     finalized: bool = False
     """是否已 finalize（避免重复终态）"""
+    card_type: str = ""
+    """Registered runtime card type assigned by the shared gateway."""
+    platform_id: str = ""
+    """AstrBot platform instance assigned by the shared gateway."""
+    runtime_event_recorder: Callable[..., None] | None = None
+    """Optional host callback for update/retract runtime events."""
+    runtime_result_archiver: Callable[[dict[str, Any]], None] | None = None
+    """Optional host callback for formal-result content updates."""
+    runtime_retract_recorder: Callable[[str], Any] | None = None
+    """Optional host callback that retains a formal-result retraction."""
 
     @property
     def elapsed_sec(self) -> float:
@@ -91,6 +106,86 @@ class FeishuCardStreamer:
             self._finalized_message_ids.pop(oldest, None)
         self._finalized_message_ids[message_id] = None
 
+    async def upload_image(self, image_path: str | Path) -> str:
+        """Upload one local image for use in an interactive card.
+
+        Args:
+            image_path: Local generated-image path.
+
+        Returns:
+            The Feishu image key, or an empty string when upload fails.
+        """
+        path = Path(image_path)
+        try:
+            with path.open("rb") as image_file:
+                request = (
+                    CreateImageRequest.builder()
+                    .request_body(
+                        CreateImageRequestBody.builder()
+                        .image_type("message")
+                        .image(image_file)
+                        .build()
+                    )
+                    .build()
+                )
+                response = await self._client.im.v1.image.acreate(request)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[streamer] Image upload failed path=%s: %s", path, exc)
+            return ""
+        if not response.success() or response.data is None:
+            logger.warning(
+                "[streamer] Image upload rejected path=%s code=%s msg=%s",
+                path,
+                getattr(response, "code", ""),
+                getattr(response, "msg", ""),
+            )
+            return ""
+        image_key = str(getattr(response.data, "image_key", "") or "").strip()
+        if not image_key:
+            logger.warning(
+                "[streamer] Image upload returned no image key path=%s", path
+            )
+        return image_key
+
+    @staticmethod
+    def _record_stream_event(
+        stream: CardStream | None,
+        *,
+        event: str,
+        ok: bool,
+        message_id: str,
+        detail: str,
+    ) -> None:
+        """Emit an optional host-owned lifecycle event for one stream.
+
+        Args:
+            stream: Active stream carrying gateway trace metadata.
+            event: Lifecycle event name.
+            ok: Whether the Feishu operation succeeded.
+            message_id: Feishu message identifier.
+            detail: Short operation detail.
+
+        Returns:
+            None.
+        """
+        recorder = getattr(stream, "runtime_event_recorder", None)
+        if not callable(recorder):
+            return
+        try:
+            recorder(
+                event=event,
+                card_type=str(getattr(stream, "card_type", "") or "unknown_card"),
+                ok=ok,
+                platform_id=str(getattr(stream, "platform_id", "") or ""),
+                chat_id=str(getattr(stream, "chat_id", "") or ""),
+                receive_id_type=str(getattr(stream, "receive_id_type", "") or ""),
+                message_id=message_id,
+                detail=detail,
+                fallback="" if ok else "plain_text",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[streamer] runtime event callback failed: %s", exc)
+
     # ─────────────── 启动卡片 ───────────────
 
     async def start(
@@ -101,6 +196,7 @@ class FeishuCardStreamer:
         card: dict[str, Any],
     ) -> CardStream | None:
         """发首张卡片，返回 CardStream（含 message_id）。失败返 None。"""
+        card = apply_card_visual_system(card)
         try:
             body = (
                 CreateMessageRequestBody.builder()
@@ -157,6 +253,34 @@ class FeishuCardStreamer:
             return False
         if stream.finalized:
             return False
+        ok = await self.patch(message_id, card)
+        self._record_stream_event(
+            stream,
+            event="update",
+            ok=ok,
+            message_id=message_id,
+            detail="card updated" if ok else "card update failed",
+        )
+        return ok
+
+    async def patch(
+        self,
+        message_id: str,
+        card: dict[str, Any],
+    ) -> bool:
+        """Patch an existing Feishu card without requiring local stream state.
+
+        Args:
+            message_id: Feishu message identifier for the bot-owned card.
+            card: Full Card JSON payload that replaces the current content.
+
+        Returns:
+            True when Feishu accepts the patch, otherwise False.
+        """
+        card = apply_card_visual_system(card)
+        stream = self._streams.get(message_id)
+        if stream is not None and stream.finalized:
+            return False
         try:
             body = (
                 PatchMessageRequestBody.builder()
@@ -172,15 +296,22 @@ class FeishuCardStreamer:
             resp = await self._client.im.v1.message.apatch(req)
             if not resp.success():
                 logger.warning(
-                    "[streamer] update 失败 code=%s msg=%s",
+                    "[streamer] patch 失败 code=%s msg=%s",
                     resp.code,
                     resp.msg,
                 )
                 return False
-            stream.last_card = card
+            if stream is not None:
+                stream.last_card = card
+                result_archiver = getattr(stream, "runtime_result_archiver", None)
+                if callable(result_archiver):
+                    try:
+                        result_archiver(card)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("[streamer] result update archive failed: %s", exc)
             return True
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[streamer] update 异常：%s", exc)
+            logger.warning("[streamer] patch 异常：%s", exc)
             return False
 
     # ─────────────── 终态 ───────────────
@@ -197,6 +328,7 @@ class FeishuCardStreamer:
         can re-enter decoration hooks with the same message id after the first
         finalize has popped the stream.
         """
+        card = apply_card_visual_system(card)
         if message_id in self._finalized_message_ids:
             logger.debug(
                 "[streamer] finalize idempotent skip message_id=%s", message_id
@@ -284,21 +416,58 @@ class FeishuCardStreamer:
                     resp.code,
                     resp.msg,
                 )
+                self._record_stream_event(
+                    stream,
+                    event="retract",
+                    ok=False,
+                    message_id=message_id,
+                    detail=f"Feishu retract failed code={resp.code}",
+                )
                 return False
             self._streams.pop(message_id, None)
             self._remember_finalized(message_id)
             logger.info("[streamer] 卡片已收回 message_id=%s", message_id)
+            self._record_stream_event(
+                stream,
+                event="retract",
+                ok=True,
+                message_id=message_id,
+                detail="card retracted",
+            )
+            retract_recorder = getattr(stream, "runtime_retract_recorder", None)
+            if callable(retract_recorder):
+                try:
+                    retract_recorder(message_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[streamer] result retract archive failed: %s", exc)
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning("[streamer] retract 异常 message_id=%s: %s", message_id, exc)
+            self._record_stream_event(
+                stream,
+                event="retract",
+                ok=False,
+                message_id=message_id,
+                detail=f"{type(exc).__name__}: {exc}",
+            )
             return False
 
     def schedule_retract(
         self,
         message_id: str,
         delay_sec: float = 8.0,
+        on_result: Callable[[bool], None] | None = None,
     ) -> asyncio.Task | None:
-        """Schedule best-effort card deletion after a short grace period."""
+        """Schedule best-effort card deletion after a short grace period.
+
+        Args:
+            message_id: Feishu message identifier to delete.
+            delay_sec: Grace period before deletion.
+            on_result: Optional host callback receiving the deletion result.
+
+        Returns:
+            The scheduled task, or ``None`` when ``message_id`` is empty.
+        """
         if not message_id:
             return None
         delay = max(0.0, float(delay_sec))
@@ -307,7 +476,16 @@ class FeishuCardStreamer:
             try:
                 if delay:
                     await asyncio.sleep(delay)
-                await self.retract(message_id)
+                ok = await self.retract(message_id)
+                if on_result is not None:
+                    try:
+                        on_result(ok)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(
+                            "[streamer] retract result callback failed message_id=%s: %s",
+                            message_id,
+                            exc,
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001

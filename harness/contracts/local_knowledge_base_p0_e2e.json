@@ -4,8 +4,8 @@
   "scope": "AstrBot llm_router dc_memory_context injection path",
   "qa_contract": "/Users/dianchi/DC-Agent/harness/contracts/local_knowledge_base_p0_qa.json",
   "summary": {
-    "total": 8,
-    "pass": 8,
+    "total": 7,
+    "pass": 7,
     "warn": 0,
     "fail": 0,
     "guard_fail": 0
@@ -330,68 +330,6 @@
           "owner": "",
           "rel_path": "projects/_待确认/《重生之我在五菱打工》栏目规划-8.19/资料文档/0027_《重生之我在五菱打工》栏目规划-8.19.pptx",
           "score": 108.0
-        }
-      ]
-    },
-    {
-      "id": "openclaw_permissions",
-      "question": "openclaw 目前已有权限能支持哪些机器人能力？",
-      "status": "pass",
-      "hit_rank": 1,
-      "hit": {
-        "title": "openclaw应用API权限申请方案",
-        "owner": "",
-        "departments": [],
-        "rel_path": "processed/openclaw应用API权限申请方案.docx",
-        "source_path": "/Users/dianchi/nas_kb/processed/openclaw应用API权限申请方案.docx",
-        "review_status": "need_review",
-        "score": 167.0
-      },
-      "checks": [
-        "memory context 已注入",
-        "消息中包含 memory marker",
-        "message_obj 已同步",
-        "预期来源进入 Top 3",
-        "注入提示中包含来源路径",
-        "注入提示包含防编造约束"
-      ],
-      "warnings": [],
-      "failures": [],
-      "top_documents": [
-        {
-          "rank": 1,
-          "title": "openclaw应用API权限申请方案",
-          "owner": "",
-          "rel_path": "processed/openclaw应用API权限申请方案.docx",
-          "score": 167.0
-        },
-        {
-          "rank": 2,
-          "title": "脚本升级和机器人模型可行性评估",
-          "owner": "",
-          "rel_path": "processed/脚本升级和机器人模型可行性评估.md",
-          "score": 84.0
-        },
-        {
-          "rank": 3,
-          "title": "飞书AI机器人对接技术方案",
-          "owner": "",
-          "rel_path": "processed/飞书AI机器人对接技术方案.docx",
-          "score": 84.0
-        },
-        {
-          "rank": 4,
-          "title": "飞书AI机器人功能规划方案",
-          "owner": "",
-          "rel_path": "processed/飞书AI机器人功能规划方案.docx",
-          "score": 81.0
-        },
-        {
-          "rank": 5,
-          "title": "Method_C_5分钟指南",
-          "owner": "",
-          "rel_path": "processed/Method_C_5分钟指南.docx",
-          "score": 23.0
         }
       ]
     },

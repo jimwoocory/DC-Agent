@@ -41,7 +41,6 @@ ACTIVE_PROBES: tuple[ProbeSpec, ...] = (
     ProbeSpec("astrbot_response", "tcp", "8645", ("watchdog", "astrbot")),
     ProbeSpec("hermes_webui_thirdparty", "tcp", "8787", ("watchdog", "hermes")),
     ProbeSpec("hermes_webui", "tcp", "9119", ("watchdog", "hermes")),
-    ProbeSpec("openclaw_watchdog", "tcp", "9120", ("watchdog", "openclaw")),
     ProbeSpec(
         "astrbot_api",
         "http",
@@ -53,12 +52,6 @@ ACTIVE_PROBES: tuple[ProbeSpec, ...] = (
         "http_strict",
         "http://127.0.0.1:6185/api/chat/health",
         ("watchdog", "astrbot", "assistant"),
-    ),
-    ProbeSpec(
-        "openclaw_watchdog_status",
-        "http",
-        "http://127.0.0.1:9120/status",
-        ("watchdog", "openclaw"),
     ),
     ProbeSpec(
         "system_entries_plugin",
@@ -78,6 +71,16 @@ ACTIVE_PROBES: tuple[ProbeSpec, ...] = (
 )
 
 
+NAS_PRIMARY_PROBES: tuple[ProbeSpec, ...] = (
+    ProbeSpec(
+        "nas_assistant_chat_health",
+        "http_strict",
+        "http://192.168.1.35:6185/api/chat/health",
+        ("watchdog", "astrbot", "assistant", "nas"),
+    ),
+)
+
+
 DISABLED_PROBES: tuple[DisabledProbe, ...] = (
     DisabledProbe(
         "nas_watchdog_heartbeat",
@@ -92,33 +95,112 @@ DISABLED_PROBES: tuple[DisabledProbe, ...] = (
 )
 
 
+NAS_DISABLED_PROBES: tuple[DisabledProbe, ...] = (
+    DisabledProbe(
+        "astrbot_dashboard",
+        "Local AstrBot disabled because NAS is the primary assistant runtime",
+        ("watchdog", "astrbot", "nas"),
+    ),
+    DisabledProbe(
+        "astrbot_response",
+        "Local AstrBot disabled because NAS is the primary assistant runtime",
+        ("watchdog", "astrbot", "nas"),
+    ),
+    DisabledProbe(
+        "astrbot_api",
+        "Local AstrBot disabled because NAS is the primary assistant runtime",
+        ("watchdog", "astrbot", "nas"),
+    ),
+    DisabledProbe(
+        "assistant_chat_health",
+        "Local AstrBot disabled because NAS is the primary assistant runtime",
+        ("watchdog", "astrbot", "assistant", "nas"),
+    ),
+    DisabledProbe(
+        "system_entries_plugin",
+        "Local AstrBot disabled because NAS is the primary assistant runtime",
+        ("watchdog", "astrbot", "nas"),
+    ),
+    DisabledProbe(
+        "dashboard_quick_entries",
+        "Local dashboard assets disabled because NAS is the primary assistant runtime",
+        ("watchdog", "dashboard", "nas"),
+    ),
+)
+
+
 MAINTENANCE_SUPPRESSED_SERVICES: frozenset[str] = frozenset(
     {
         "astrbot_dashboard",
         "astrbot_response",
         "astrbot_api",
         "assistant_chat_health",
+        "nas_assistant_chat_health",
         "system_entries_plugin",
         "dashboard_quick_entries",
         "hermes_gateway",
         "hermes_webui",
         "hermes_webui_thirdparty",
-        "openclaw_watchdog",
-        "openclaw_watchdog_status",
     }
 )
 
 
-def active_probe_names() -> set[str]:
-    return {probe.name for probe in ACTIVE_PROBES}
+def active_probes_for_runtime(runtime: str = "local") -> tuple[ProbeSpec, ...]:
+    """Return the probe registry for one runtime ownership mode.
+
+    Args:
+        runtime: Primary assistant runtime, either ``local`` or ``nas``.
+
+    Returns:
+        Active probes that must be evaluated for the selected runtime.
+
+    Raises:
+        ValueError: If the runtime value is unsupported.
+    """
+    if runtime == "local":
+        return ACTIVE_PROBES
+    if runtime == "nas":
+        local_only_groups = {"astrbot", "dashboard"}
+        return (
+            tuple(
+                probe
+                for probe in ACTIVE_PROBES
+                if not local_only_groups.intersection(probe.groups)
+            )
+            + NAS_PRIMARY_PROBES
+        )
+    raise ValueError(f"unsupported primary runtime: {runtime}")
 
 
-def disabled_probe_names() -> set[str]:
-    return {probe.name for probe in DISABLED_PROBES}
+def disabled_probes_for_runtime(runtime: str = "local") -> tuple[DisabledProbe, ...]:
+    """Return disabled probes for one runtime ownership mode.
+
+    Args:
+        runtime: Primary assistant runtime, either ``local`` or ``nas``.
+
+    Returns:
+        Disabled probes and the reason each one is inactive.
+
+    Raises:
+        ValueError: If the runtime value is unsupported.
+    """
+    if runtime == "local":
+        return DISABLED_PROBES
+    if runtime == "nas":
+        return DISABLED_PROBES + NAS_DISABLED_PROBES
+    raise ValueError(f"unsupported primary runtime: {runtime}")
 
 
-def probe_enabled(name: str) -> bool:
-    return name in active_probe_names()
+def active_probe_names(runtime: str = "local") -> set[str]:
+    return {probe.name for probe in active_probes_for_runtime(runtime)}
+
+
+def disabled_probe_names(runtime: str = "local") -> set[str]:
+    return {probe.name for probe in disabled_probes_for_runtime(runtime)}
+
+
+def probe_enabled(name: str, runtime: str = "local") -> bool:
+    return name in active_probe_names(runtime)
 
 
 def dashboard_static_assets_ready(dist_path: Path | str) -> bool:
@@ -205,18 +287,20 @@ def _print_entries(entries: Iterable[ProbeSpec | DisabledProbe]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="DC-Agent watchdog rule engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("list-active")
-    subparsers.add_parser("list-disabled")
+    active = subparsers.add_parser("list-active")
+    active.add_argument("--runtime", choices=("local", "nas"), default="local")
+    disabled = subparsers.add_parser("list-disabled")
+    disabled.add_argument("--runtime", choices=("local", "nas"), default="local")
     maintenance = subparsers.add_parser("maintenance-reason")
     maintenance.add_argument("--grace-sec", type=int, required=True)
     maintenance.add_argument("--dc-root", default=str(DC_ROOT))
     args = parser.parse_args(argv)
 
     if args.command == "list-active":
-        _print_entries(ACTIVE_PROBES)
+        _print_entries(active_probes_for_runtime(args.runtime))
         return 0
     if args.command == "list-disabled":
-        _print_entries(DISABLED_PROBES)
+        _print_entries(disabled_probes_for_runtime(args.runtime))
         return 0
     if args.command == "maintenance-reason":
         reason = current_agent_maintenance_reason(

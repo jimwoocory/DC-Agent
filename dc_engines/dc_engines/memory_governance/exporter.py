@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from dc_engines.harness.memory_store import HarnessMemoryRecord
+
 from .models import GovernedMemory
 from .obsidian_codec import apply_note_path, render_governance_note
 from .store import MemoryGovernanceStore
@@ -23,6 +25,21 @@ class ExportResult:
     skipped_count: int = 0
     memory_ids: list[str] = field(default_factory=list)
     note_paths: list[Path] = field(default_factory=list)
+
+
+@dataclass(slots=True, frozen=True)
+class TaskOutcomeCandidateExport:
+    """Result of exporting one task outcome to governed memory.
+
+    Attributes:
+        memory_id: Stable governed-memory candidate identifier.
+        status: Candidate publication result.
+        note_path: Obsidian review note path.
+    """
+
+    memory_id: str
+    status: str
+    note_path: Path
 
 
 def export_memory_candidates(
@@ -121,29 +138,96 @@ def export_task_outcome_candidates(
     幂等：同一 task_id 只导出一次；已审核（非 need_review）的不再覆盖。
     """
 
+    result = ExportResult()
+    for row in _fetch_task_outcome_rows(harness_memory_db_path, limit):
+        exported = export_task_outcome_candidate(
+            record=_task_outcome_record_from_row(row),
+            vault_path=vault_path,
+            store=store,
+            now=now,
+            actor="knowledge-cycle-reconciliation",
+        )
+        if exported.status == "unchanged":
+            result.skipped_count += 1
+            continue
+        result.exported_count += 1
+        result.memory_ids.append(exported.memory_id)
+        result.note_paths.append(exported.note_path)
+
+    return result
+
+
+def export_task_outcome_candidate(
+    *,
+    record: HarnessMemoryRecord,
+    vault_path: Path | str,
+    store: MemoryGovernanceStore,
+    now: str,
+    actor: str,
+) -> TaskOutcomeCandidateExport:
+    """Publish or reconcile one Harness task outcome review candidate.
+
+    Args:
+        record: Bounded Harness task-outcome memory record.
+        vault_path: Obsidian vault used only as the review adapter.
+        store: Authoritative governed-memory state store.
+        now: ISO timestamp for state-changing writes.
+        actor: Audit actor for candidate creation or recovery.
+
+    Returns:
+        Candidate publication status and stable identifiers.
+    """
+
     store.initialize()
-    harness_memory_db_path = Path(harness_memory_db_path)
     vault_path = Path(vault_path)
     inbox_dir = vault_path / INBOX_DIR
     inbox_dir.mkdir(parents=True, exist_ok=True)
+    desired = _memory_from_task_outcome_record(record, now=now)
+    existing = store.get_memory(desired.memory_id)
+    if existing is not None:
+        existing_note_path = str(existing.obsidian_note_path or "").strip()
+        note_path = (
+            Path(existing_note_path)
+            if existing_note_path
+            else inbox_dir / f"{existing.memory_id}.md"
+        )
+        if existing.review_status != "need_review" or note_path.exists():
+            return TaskOutcomeCandidateExport(
+                memory_id=existing.memory_id,
+                status="unchanged",
+                note_path=note_path,
+            )
+        desired = apply_note_path(existing, str(note_path))
+        status = "recovered"
+        action = "distillation_candidate_recovered"
+    else:
+        note_path = inbox_dir / f"{desired.memory_id}.md"
+        desired = apply_note_path(desired, str(note_path))
+        status = "created"
+        action = "distillation_candidate_created"
 
-    result = ExportResult()
-    for row in _fetch_task_outcome_rows(harness_memory_db_path, limit):
-        memory = _memory_from_task_outcome_row(row, now=now)
-        existing = store.get_memory(memory.memory_id)
-        if existing:
-            result.skipped_count += 1
-            continue
-
-        note_path = inbox_dir / f"{memory.memory_id}.md"
-        memory = apply_note_path(memory, str(note_path))
-        note_path.write_text(render_governance_note(memory), encoding="utf-8")
-        store.upsert_memory(memory)
-        result.exported_count += 1
-        result.memory_ids.append(memory.memory_id)
-        result.note_paths.append(note_path)
-
-    return result
+    temporary_path = note_path.with_suffix(f"{note_path.suffix}.tmp")
+    temporary_path.write_text(render_governance_note(desired), encoding="utf-8")
+    temporary_path.replace(note_path)
+    store.upsert_memory(desired)
+    store.append_audit(
+        desired.memory_id,
+        action,
+        actor,
+        {
+            "source_system": desired.source_system,
+            "source_id": desired.source_id,
+            "source_hash": desired.source_hash,
+            "review_status": desired.review_status,
+            "note_path": str(note_path),
+        },
+        created_at=now,
+    )
+    return TaskOutcomeCandidateExport(
+        memory_id=desired.memory_id,
+        status=status,
+        note_path=note_path,
+    )
 
 
 def stable_task_outcome_memory_id(task_id: str) -> str:
@@ -172,13 +256,37 @@ def _fetch_task_outcome_rows(db_path: Path, limit: int) -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def _memory_from_task_outcome_row(row: sqlite3.Row, *, now: str) -> GovernedMemory:
-    task_id = str(row["task_id"])
-    summary = str(row["summary"] or "").strip()
-    title = str(row["title"] or f"任务结论 {task_id[:8]}").strip()
-    domain = str(row["domain"] or "").strip()
+def _task_outcome_record_from_row(row: sqlite3.Row) -> HarnessMemoryRecord:
+    return HarnessMemoryRecord(
+        memory_id=str(row["memory_id"]),
+        session_id=str(row["session_id"]),
+        conversation_id=str(row["conversation_id"]),
+        task_id=str(row["task_id"]),
+        domain=str(row["domain"] or ""),
+        memory_kind=str(row["memory_kind"]),
+        title=str(row["title"] or ""),
+        summary=str(row["summary"] or ""),
+        payload={},
+        created_at=str(row["created_at"]),
+    )
+
+
+def _memory_from_task_outcome_record(
+    record: HarnessMemoryRecord,
+    *,
+    now: str,
+) -> GovernedMemory:
+    task_id = record.task_id
+    summary = record.summary.strip()
+    title = (record.title or f"任务结论 {task_id[:8]}").strip()
+    domain = record.domain.strip()
     raw = json.dumps(
-        {"task_id": task_id, "summary": summary, "payload": row["payload_json"]},
+        {
+            "task_id": task_id,
+            "title": title,
+            "summary": summary,
+            "domain": domain,
+        },
         ensure_ascii=False,
         sort_keys=True,
     )
@@ -208,7 +316,7 @@ def _memory_from_task_outcome_row(row: sqlite3.Row, *, now: str) -> GovernedMemo
         links=[],
         obsidian_note_path="",
         governance_version=1,
-        created_at=now,
+        created_at=record.created_at or now,
         updated_at=now,
         approved_at="",
         approved_by="",

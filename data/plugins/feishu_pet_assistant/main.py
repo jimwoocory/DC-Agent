@@ -236,9 +236,8 @@ class FeishuPetAssistantPlugin(Star):
         # ── 隔离膜：不处理其他插件渲染的卡片来源 ──────────────────────────
         if source == "department_memory_prompt":
             logger.info(
-                "[FeishuPet] 透传 department_memory_prompt card_action，停止本插件传播让 dc_router 接管。"
+                "[FeishuPet] 放行 department_memory_prompt card_action，让 dc_router 接管。"
             )
-            event.stop_event()
             return
         if source is not None and source not in {
             "pet_system",  # pet 自己的卡片（如有）
@@ -247,11 +246,10 @@ class FeishuPetAssistantPlugin(Star):
             "casual_reply",
         }:
             logger.info(
-                "[FeishuPet] 透传未知 source=%s action=%s，停止本插件传播。",
+                "[FeishuPet] 放行非 pet source=%s action=%s。",
                 source,
                 action,
             )
-            event.stop_event()
             return
         # ── 以下是 pet 自己的按钮处理 ──────────────────────────────────────
         if action == "pet_view_tasks":

@@ -1,5 +1,6 @@
 """Tests for astrbot.core.star.base module."""
 
+import warnings
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -246,3 +247,58 @@ class TestNoCircularImports:
         from astrbot.core.pipeline.context import PipelineContext
 
         assert PipelineContext is not None
+
+
+class TestStarRegistrationApi:
+    """Tests for supported and legacy explicit metadata registration."""
+
+    def test_supported_register_api_sets_metadata_without_warning(self):
+        from astrbot.api.star import register
+        from astrbot.core.star.star import star_map
+
+        module_path = "tests.fixtures.supported_register_plugin"
+
+        class ExamplePlugin:
+            pass
+
+        ExamplePlugin.__module__ = module_path
+        star_map.pop(module_path, None)
+        try:
+            with warnings.catch_warnings(record=True) as captured:
+                warnings.simplefilter("always")
+                decorated = register(
+                    "example",
+                    "dc_agent",
+                    "Supported registration",
+                    "1.0.0",
+                )(ExamplePlugin)
+            assert captured == []
+            assert decorated is ExamplePlugin
+            assert star_map[module_path].plugin_id == "dc_agent/example"
+        finally:
+            star_map.pop(module_path, None)
+
+    def test_legacy_register_star_keeps_deprecation_signal(self, monkeypatch):
+        from astrbot.core.star.register import star as register_module
+        from astrbot.core.star.star import star_map
+
+        module_path = "tests.fixtures.legacy_register_plugin"
+
+        class LegacyPlugin:
+            pass
+
+        LegacyPlugin.__module__ = module_path
+        star_map.pop(module_path, None)
+        monkeypatch.setattr(register_module, "_warned_register_star", False)
+        try:
+            with pytest.warns(DeprecationWarning, match="register_star"):
+                decorated = register_module.register_star(
+                    "legacy",
+                    "dc_agent",
+                    "Legacy registration",
+                    "1.0.0",
+                )(LegacyPlugin)
+            assert decorated is LegacyPlugin
+            assert star_map[module_path].plugin_id == "dc_agent/legacy"
+        finally:
+            star_map.pop(module_path, None)

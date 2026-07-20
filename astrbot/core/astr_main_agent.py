@@ -751,7 +751,9 @@ async def _ensure_persona_and_skills(
         req.func_tool.merge(persona_toolset)
 
     # sub agents integration
-    orch_cfg = plugin_context.get_config().get("subagent_orchestrator", {})
+    orch_cfg = plugin_context.get_config(umo=event.unified_msg_origin).get(
+        "subagent_orchestrator", {}
+    )
     so = plugin_context.subagent_orchestrator
     if orch_cfg.get("main_enable", False) and so:
         remove_dup = bool(orch_cfg.get("remove_main_duplicate_tools", False))
@@ -804,11 +806,7 @@ async def _ensure_persona_and_skills(
                     continue
                 req.func_tool.remove_tool(tool_name)
 
-        router_prompt = (
-            plugin_context.get_config()
-            .get("subagent_orchestrator", {})
-            .get("router_system_prompt", "")
-        ).strip()
+        router_prompt = str(orch_cfg.get("router_system_prompt", "")).strip()
         if router_prompt:
             req.system_prompt += f"\n{router_prompt}\n"
     try:
@@ -1706,7 +1704,7 @@ async def build_main_agent(
             )
             if req.conversation:
                 req.contexts = json.loads(req.conversation.history)
-            RuntimeContextAssembler().normalize(req)
+            RuntimeContextAssembler().normalize(req, event=event)
         else:
             req = ProviderRequest()
             req.prompt = ""
@@ -1841,10 +1839,10 @@ async def build_main_agent(
             req.conversation = conversation
             req.contexts = json.loads(conversation.history)
             await _backfill_webchat_contexts_from_display_history(event, req)
-            RuntimeContextAssembler().normalize(req)
+            RuntimeContextAssembler().normalize(req, event=event)
             event.set_extra("provider_request", req)
 
-    RuntimeContextAssembler().normalize(req)
+    RuntimeContextAssembler().normalize(req, event=event)
 
     if isinstance(req.contexts, str):
         req.contexts = json.loads(req.contexts)
@@ -1912,6 +1910,9 @@ async def build_main_agent(
                 SendMessageToUserTool
             )
         )
+
+    if event.get_extra("disable_llm_tools"):
+        req.func_tool = None
 
     fallback_providers = _get_fallback_chat_providers(
         provider, plugin_context, config.provider_settings

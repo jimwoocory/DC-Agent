@@ -24,6 +24,8 @@
         </div>
       </v-row>
 
+      <MediaAuthPanel @message="showMessage($event.message, $event.color)" />
+
       <div>
         <v-tabs v-model="selectedProviderType" bg-color="transparent" class="mb-4">
           <v-tab
@@ -346,6 +348,7 @@ import { useModuleI18n } from '@/i18n/composables'
 import AstrBotConfig from '@/components/shared/AstrBotConfig.vue'
 import ItemCard from '@/components/shared/ItemCard.vue'
 import AddNewProvider from '@/components/provider/AddNewProvider.vue'
+import MediaAuthPanel from '@/components/provider/MediaAuthPanel.vue'
 import ProviderModelsPanel from '@/components/provider/ProviderModelsPanel.vue'
 import ProviderSourcesPanel from '@/components/provider/ProviderSourcesPanel.vue'
 import { useProviderModelConfigDialog } from '@/composables/useProviderModelConfigDialog'

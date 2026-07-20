@@ -1,3 +1,17 @@
 """DC router core package."""
 
-__all__: list[str] = []
+from .middle_router import (
+    AgentDecision,
+    CapabilityDefinition,
+    CapabilityRoute,
+    MiddleRouter,
+    list_middle_router_capabilities,
+)
+
+__all__ = [
+    "AgentDecision",
+    "CapabilityDefinition",
+    "CapabilityRoute",
+    "MiddleRouter",
+    "list_middle_router_capabilities",
+]

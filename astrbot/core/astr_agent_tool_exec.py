@@ -138,6 +138,44 @@ class FunctionToolExecutor(BaseFunctionToolExecutor[AstrAgentContext]):
 
         """
         if isinstance(tool, HandoffTool):
+            event = run_context.context.event
+            enforce_middle_router = False
+            approved_handoff = ""
+            try:
+                enforce_middle_router = bool(
+                    event.get_extra(
+                        "dc_middle_router_enforce_handoffs",
+                        default=False,
+                    )
+                )
+                approved_handoff = str(
+                    event.get_extra(
+                        "dc_middle_router_approved_handoff",
+                        default="",
+                    )
+                    or ""
+                ).strip()
+            except Exception:  # noqa: BLE001
+                pass
+            if enforce_middle_router and approved_handoff != tool.name:
+                yield mcp.types.CallToolResult(
+                    content=[
+                        mcp.types.TextContent(
+                            type="text",
+                            text=(
+                                "Subagent handoff denied: call "
+                                "route_agent_decision and obtain Router approval first."
+                            ),
+                        )
+                    ],
+                    isError=True,
+                )
+                return
+            if enforce_middle_router:
+                try:
+                    event.set_extra("dc_middle_router_approved_handoff", "")
+                except Exception:  # noqa: BLE001
+                    pass
             is_bg = tool_args.pop("background_task", False)
             if is_bg:
                 async for r in cls._execute_handoff_background(

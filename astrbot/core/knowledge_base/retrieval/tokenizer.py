@@ -1,10 +1,17 @@
 """Tokenization helpers shared by sparse retrieval indexes."""
 
 import re
+import warnings
 from pathlib import Path
 from re import Pattern
 
-import jieba
+with warnings.catch_warnings():
+    warnings.filterwarnings(
+        "ignore",
+        message=r"invalid escape sequence .*",
+        category=SyntaxWarning,
+    )
+    import jieba
 
 _TERM_PATTERN: Pattern[str] = re.compile(r"\w", re.UNICODE)
 

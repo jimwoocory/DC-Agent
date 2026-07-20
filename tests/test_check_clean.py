@@ -18,16 +18,12 @@ def test_workspace_uv_cache_is_allowed_for_sandboxed_checks() -> None:
 def test_runtime_event_and_state_files_are_forbidden() -> None:
     assert violation_for("data/qwen_health_events.jsonl") == "runtime event/state file"
     assert violation_for("data/grok_worker_state.json") == "runtime event/state file"
-    assert (
-        violation_for("nas_sync/sync_latest.failstate") == "runtime event/state file"
-    )
+    assert violation_for("nas_sync/sync_latest.failstate") == "runtime event/state file"
     assert violation_for("nas_sync/watchdog.log") == "runtime event/state file"
     assert violation_for("nas_sync/state.json") == "runtime event/state file"
     assert violation_for("nas_sync/.cache/index") == "runtime event/state file"
     assert violation_for("nas_sync/sync_mtime_cache") == "runtime event/state file"
-    assert (
-        violation_for("h_send_daily_cron_state.json") == "runtime event/state file"
-    )
+    assert violation_for("h_send_daily_cron_state.json") == "runtime event/state file"
 
 
 def test_sensitive_config_changes_are_only_status_or_staged_violations() -> None:
@@ -51,15 +47,13 @@ def test_config_templates_are_allowed_in_status() -> None:
         is None
     )
     assert (
-        violation_for("data/config/example_config.example.yml", source="staged")
-        is None
+        violation_for("data/config/example_config.example.yml", source="staged") is None
     )
 
 
 def test_reviewed_live_configs_are_allowed_when_staged() -> None:
     assert (
-        violation_for("data/config/system_entries_config.json", source="staged")
-        is None
+        violation_for("data/config/system_entries_config.json", source="staged") is None
     )
     assert violation_for("data/config/knowledge_cycle.env", source="staged") is None
     assert (
@@ -78,17 +72,14 @@ def test_sensitive_config_guard_requires_template_suffix() -> None:
         "data/config/private.key",
     ]
     for path in sensitive_paths:
-        assert (
-            violation_for(path, source="staged")
-            == "sensitive local config change"
-        )
+        assert violation_for(path, source="staged") == "sensitive local config change"
     assert violation_for("data/config/template_secret.yaml", source="status") is None
     assert (
         violation_for("data/config/example_config.template.json", source="staged")
         == "sensitive local config change"
     )
     assert (
-        violation_for("data/config/openclaw_on_demand_config.json", source="staged")
+        violation_for("data/config/retired_plugin_config.json", source="staged")
         == "sensitive local config change"
     )
 

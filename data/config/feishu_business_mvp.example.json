@@ -1,0 +1,44 @@
+{
+  "enabled": true,
+  "db_path": "data/feishu_business_mvp.db",
+  "sync_window_hours": 168,
+  "asset_table": {
+    "app_token": "",
+    "table_id": "",
+    "view_id": "",
+    "primary_key": "物品ID"
+  },
+  "finance_table": {
+    "app_token": "",
+    "table_id": "",
+    "view_id": "",
+    "primary_key": "审批单号"
+  },
+  "onboarding_table": {
+    "app_token": "",
+    "table_id": "",
+    "view_id": "",
+    "primary_key": "员工ID"
+  },
+  "approval_codes": {
+    "reimbursement": "",
+    "payment": "",
+    "purchase": "",
+    "contract": ""
+  },
+  "required_finance_attachments": {
+    "reimbursement": ["发票"],
+    "payment": ["合同", "付款截图"],
+    "purchase": ["报价单", "合同"],
+    "contract": ["合同正文"]
+  },
+  "default_onboarding_tasks": ["账号开通", "办公用品准备", "工位确认", "入职资料收集"],
+  "notification_targets": {
+    "admin_chat_id": "",
+    "finance_chat_id": "",
+    "management_chat_id": ""
+  },
+  "_preflight": {
+    "allowed_secret_locations": "不要在本文件保存 app_secret、tenant_access_token、user_access_token、verification_token。飞书应用凭证仍由 data/feishu_whitelist.yaml 管。"
+  }
+}

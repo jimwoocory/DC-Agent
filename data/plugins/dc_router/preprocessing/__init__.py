@@ -16,6 +16,7 @@
 """
 
 from .assistant_tone import try_inject_assistant_tone
+from .assistant_workbench import try_handle_assistant_workbench
 from .card_action import try_handle_card_action
 from .chitchat import try_handle_chitchat
 from .context_alignment import try_handle_context_alignment
@@ -36,6 +37,7 @@ __all__ = [
     "is_source_image_edit_request",
     "try_apply_feishu_channel_route",
     "try_capture_sop_signal",
+    "try_handle_assistant_workbench",
     "try_handle_card_action",
     "try_handle_chitchat",
     "try_handle_context_alignment",

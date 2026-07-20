@@ -1,4 +1,4 @@
-"""OpenClaw-style Feishu/Lark channel governance for DC-Agent.
+"""DC-Agent-native Feishu/Lark channel governance.
 
 The plugin integrates at AstrBot's event layer. It does not replace the Lark
 adapter and does not call Feishu APIs directly; API calls stay centralized in
@@ -144,7 +144,7 @@ class FeishuChannelControlPlugin(Star):
 
     @filter.event_message_type(
         EventMessageType.GROUP_MESSAGE | EventMessageType.PRIVATE_MESSAGE,
-        priority=20,
+        priority=200,
     )
     async def on_message(self, event: AstrMessageEvent) -> None:
         if not self._is_lark_event(event):

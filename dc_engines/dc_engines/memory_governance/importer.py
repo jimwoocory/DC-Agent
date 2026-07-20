@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,8 @@ GOVERNANCE_ROOT = Path("40_MemoryGovernance")
 @dataclass(slots=True)
 class ImportResult:
     imported_count: int = 0
+    skipped_count: int = 0
+    ignored_count: int = 0
     decision_count: int = 0
     audit_count: int = 0
     rule_proposal_count: int = 0
@@ -36,7 +38,19 @@ def import_governance_notes(
     rule_proposal_store: Any | None = None,
     rule_proposal_min_support: int = 3,
 ) -> ImportResult:
-    """Import all governance notes from an Obsidian vault."""
+    """Import changed governance notes from an Obsidian vault.
+
+    Args:
+        vault_path: Obsidian vault containing governance notes.
+        store: Governed memory persistence store.
+        now: ISO timestamp used for state-changing imports.
+        actor: Audit actor recorded for imports and decisions.
+        rule_proposal_store: Optional content SOP proposal store.
+        rule_proposal_min_support: Minimum supporting memories for a proposal.
+
+    Returns:
+        Counts and identifiers for changed and unchanged notes.
+    """
 
     store.initialize()
     vault_path = Path(vault_path)
@@ -47,12 +61,24 @@ def import_governance_notes(
 
     for note_path in sorted(root.rglob("*.md")):
         markdown = note_path.read_text(encoding="utf-8")
+        frontmatter = _read_frontmatter(markdown)
+        if not str(frontmatter.get("memory_id") or "").strip():
+            result.ignored_count += 1
+            continue
         memory = apply_note_path(
             parse_governance_note(markdown, now=now),
             str(note_path),
         )
-        frontmatter = _read_frontmatter(markdown)
         existing = store.get_memory(memory.memory_id)
+        if existing is not None:
+            existing_state = asdict(existing)
+            imported_state = asdict(memory)
+            for timestamp_field in ("created_at", "updated_at", "approved_at"):
+                existing_state.pop(timestamp_field)
+                imported_state.pop(timestamp_field)
+            if existing_state == imported_state:
+                result.skipped_count += 1
+                continue
         before = _decision_state(existing)
         after = _decision_state(memory)
 

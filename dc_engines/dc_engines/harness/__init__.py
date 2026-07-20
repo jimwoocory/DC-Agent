@@ -1,14 +1,29 @@
 from .cognition import HarnessCognitionProvider, HarnessCognitiveSnapshot
 from .contracts import (
     HARNESS_TERMINAL_STATUSES,
+    HarnessArtifact,
+    HarnessArtifactSpec,
+    HarnessDeliveryReceipt,
+    HarnessExecution,
+    HarnessExecutionSettlement,
+    HarnessExecutionStatus,
+    HarnessMessageReference,
     HarnessReviewDecision,
+    HarnessSessionCardPatchState,
+    HarnessSessionDecision,
+    HarnessSessionDecisionSource,
+    HarnessSessionDecisionState,
     HarnessTask,
     HarnessTaskCreateRequest,
     HarnessTaskEvent,
+    HarnessTaskLink,
+    HarnessTaskRelation,
     HarnessTaskReview,
     HarnessTaskStatus,
+    HarnessWorkContext,
 )
 from .engine import HarnessEngine
+from .executor_settlement import ExecutorSettlement
 from .guardrails import (
     HARNESS_GUARDRAIL_VERSION,
     HARNESS_TRUTH_GUARD,
@@ -24,7 +39,12 @@ from .loop_runtime import (
     LoopSettlement,
     LoopStep,
 )
-from .memory_promotion import HarnessMemoryPromoter
+from .memory_promotion import (
+    HarnessMemoryDistillationReceipt,
+    HarnessMemoryDistillationStatus,
+    HarnessMemoryDistiller,
+    HarnessMemoryPromoter,
+)
 from .memory_store import HarnessMemoryRecord, HarnessMemoryStore
 from .task_store import HarnessTaskStore
 from .workflows import (
@@ -46,6 +66,7 @@ __all__ = [
     "HarnessCognitionProvider",
     "HarnessCognitiveSnapshot",
     "HarnessEngine",
+    "ExecutorSettlement",
     "HarnessGuardrailAssessment",
     "LoopEventRecorder",
     "LoopOrchestrator",
@@ -53,15 +74,32 @@ __all__ = [
     "LoopSettlement",
     "LoopStep",
     "HarnessMemoryPromoter",
+    "HarnessMemoryDistillationReceipt",
+    "HarnessMemoryDistillationStatus",
+    "HarnessMemoryDistiller",
     "HarnessMemoryRecord",
     "HarnessMemoryStore",
+    "HarnessArtifact",
+    "HarnessArtifactSpec",
+    "HarnessDeliveryReceipt",
+    "HarnessExecution",
+    "HarnessExecutionSettlement",
+    "HarnessExecutionStatus",
+    "HarnessMessageReference",
     "HarnessReviewDecision",
+    "HarnessSessionCardPatchState",
+    "HarnessSessionDecision",
+    "HarnessSessionDecisionSource",
+    "HarnessSessionDecisionState",
     "HarnessTask",
     "HarnessTaskCreateRequest",
     "HarnessTaskEvent",
+    "HarnessTaskLink",
+    "HarnessTaskRelation",
     "HarnessTaskReview",
     "HarnessTaskStatus",
     "HarnessTaskStore",
+    "HarnessWorkContext",
     "HarnessWorkflowKind",
     "HarnessWorkflowPlan",
     "allows_auto_complete_on_response",

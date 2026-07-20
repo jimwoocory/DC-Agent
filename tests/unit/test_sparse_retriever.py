@@ -1,9 +1,34 @@
 import json
+import os
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from astrbot.core.knowledge_base.retrieval.sparse_retriever import SparseRetriever
+
+
+def test_tokenizer_import_is_clean_with_strict_syntax_warnings(tmp_path):
+    env = os.environ.copy()
+    env["PYTHONPYCACHEPREFIX"] = str(tmp_path / "pycache")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error::SyntaxWarning",
+            "-c",
+            "from astrbot.core.knowledge_base.retrieval import tokenizer",
+        ],
+        capture_output=True,
+        check=False,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "invalid escape sequence" not in result.stderr
 
 
 def make_doc(chunk_id: str, text: str, chunk_index: int = 0) -> dict:

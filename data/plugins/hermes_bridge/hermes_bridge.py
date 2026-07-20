@@ -52,7 +52,7 @@ from dc_engines.feishu_card_streamer import (
 
 # W0 + 重装后调整：业务引擎从 astrbot/core 迁到独立的 dc_engines 包
 # 目的：升级 AstrBot 时不会再静默吃掉我们的代码
-from dc_engines.harness import create_workflow_request
+from dc_engines.harness import HarnessDeliveryReceipt, create_workflow_request
 from dc_engines.harness.content_sop_runtime import settle_content_sop_result
 from dc_engines.harness.contracts import HARNESS_TERMINAL_STATUSES
 from dc_engines.harness.workflows import parse_workflow_result
@@ -1044,20 +1044,61 @@ class HermesBridgePlugin(Star):
                 result = parse_workflow_result(response_text)
                 if provenance_fields:
                     result.update(provenance_fields)
-                await settle_content_sop_result(
+                settled_task = await settle_content_sop_result(
                     engine,
                     task,
                     result,
                     **self._content_sop_memory_governance_kwargs(),
                 )
+                executor_settlement = getattr(self.context, "executor_settlement", None)
+                execution = (
+                    await store.get_latest_execution_for_task(task_id)
+                    if store is not None
+                    else None
+                )
+                if executor_settlement is not None and execution is not None:
+                    await executor_settlement.settle(
+                        execution_id=execution.execution_id,
+                        idempotency_key=f"settle:{execution.execution_id}:success",
+                        outcome=settled_task.status,
+                        result={
+                            "summary": str(result.get("summary") or "Hermes result"),
+                            "source": "hermes",
+                            **(provenance_fields or {}),
+                        },
+                        delivery=HarnessDeliveryReceipt(
+                            mode="confirmed",
+                            reference_digest=hashlib.sha256(
+                                response_text.encode("utf-8")
+                            ).hexdigest(),
+                        ),
+                    )
                 logger.info(
                     "[HermesBridge] Content SOP 任务 %s 已进入验收结算", task_id
                 )
                 return True
-            await engine.complete_task(
-                task_id,
-                result=_harness_result(response_text, provenance_fields),
+            harness_result = _harness_result(response_text, provenance_fields)
+            executor_settlement = getattr(self.context, "executor_settlement", None)
+            execution = (
+                await store.get_latest_execution_for_task(task_id)
+                if store is not None
+                else None
             )
+            if executor_settlement is not None and execution is not None:
+                await executor_settlement.settle(
+                    execution_id=execution.execution_id,
+                    idempotency_key=f"settle:{execution.execution_id}:success",
+                    outcome="completed",
+                    result=harness_result,
+                    delivery=HarnessDeliveryReceipt(
+                        mode="confirmed",
+                        reference_digest=hashlib.sha256(
+                            response_text.encode("utf-8")
+                        ).hexdigest(),
+                    ),
+                )
+            else:
+                await engine.complete_task(task_id, result=harness_result)
             logger.info(
                 "[HermesBridge] Harness 任务 %s 已通过 Hermes 结果完成", task_id
             )
@@ -1143,7 +1184,28 @@ class HermesBridgePlugin(Star):
         if engine is None:
             return False
         try:
-            await engine.fail_task(task_id, reason=reason)
+            store = getattr(engine, "store", None)
+            executor_settlement = getattr(self.context, "executor_settlement", None)
+            execution = (
+                await store.get_latest_execution_for_task(task_id)
+                if store is not None
+                else None
+            )
+            if executor_settlement is not None and execution is not None:
+                await executor_settlement.settle(
+                    execution_id=execution.execution_id,
+                    idempotency_key=f"settle:{execution.execution_id}:failed",
+                    outcome="failed",
+                    result={"summary": reason[:500], "error": reason[:1000]},
+                    delivery=HarnessDeliveryReceipt(
+                        mode="runtime_owned",
+                        reference_digest=hashlib.sha256(
+                            reason.encode("utf-8")
+                        ).hexdigest(),
+                    ),
+                )
+            else:
+                await engine.fail_task(task_id, reason=reason)
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning(

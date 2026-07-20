@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import io
+import json
 import os
 import re
 import shutil
@@ -288,6 +289,51 @@ def test_dashboard_uses_user_dist_only_when_index_exists(tmp_path, monkeypatch):
     )
 
     assert _resolve_dashboard_static_path(None, bundled_dist) == user_dist.resolve()
+
+
+@pytest.mark.asyncio
+async def test_assistant_h5_audit_records_source_ip_without_capability_data(
+    core_lifecycle_td: AstrBotCoreLifecycle,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(
+        "astrbot.dashboard.server.get_astrbot_data_path",
+        lambda: str(data_dir),
+    )
+    dashboard_config = core_lifecycle_td.astrbot_config["dashboard"]
+    trust_proxy_headers = dashboard_config.get("trust_proxy_headers", False)
+    dashboard_config["trust_proxy_headers"] = True
+
+    try:
+        shutdown_event = asyncio.Event()
+        server = AstrBotDashboard(
+            core_lifecycle_td,
+            core_lifecycle_td.db,
+            shutdown_event,
+        )
+        client = server.app.test_client()
+        response = await client.get(
+            "/api/v1/assistant-attachments/not-a-live-token?secret=do-not-log",
+            headers={"X-Forwarded-For": "192.168.1.88"},
+        )
+
+        audit_path = data_dir / "watchdog" / "h5_connections" / "history.jsonl"
+        raw_record = audit_path.read_text(encoding="utf-8").strip()
+        record = json.loads(raw_record)
+        assert record == {
+            "observed_at": record["observed_at"],
+            "source_ip": "192.168.1.88",
+            "method": "GET",
+            "status_code": response.status_code,
+            "service": "assistant_h5",
+        }
+        assert "not-a-live-token" not in raw_record
+        assert "do-not-log" not in raw_record
+        assert audit_path.stat().st_mode & 0o777 == 0o600
+    finally:
+        dashboard_config["trust_proxy_headers"] = trust_proxy_headers
 
 
 def _resolve_dashboard_password(core_lifecycle_td: AstrBotCoreLifecycle) -> str:
@@ -3635,7 +3681,7 @@ async def test_batch_upload_skills_partial_success(
     response = await test_client.post(
         "/api/skills/batch-upload",
         headers=headers,
-        data=body,
+        content=body,
     )
 
     assert response.status_code == 200

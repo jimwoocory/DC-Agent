@@ -31,7 +31,7 @@ FAIL_COUNT=0
 echo ""
 echo "═══ 1. 基础服务存活检查 ═══"
 
-for entry in "AstrBot:6185" "Hermes Gateway:8644" "AstrBot Response:8645" "Hermes WebUI:9119" "OpenClaw Watchdog:9120"; do
+for entry in "AstrBot:6185" "Hermes Gateway:8644" "AstrBot Response:8645" "Hermes WebUI:9119"; do
     name="${entry%:*}"
     port="${entry##*:}"
     if /usr/bin/nc -z -G 2 127.0.0.1 "$port" 2>/dev/null; then

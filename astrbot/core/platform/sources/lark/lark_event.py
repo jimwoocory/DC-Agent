@@ -296,9 +296,10 @@ class LarkMessageEvent(AstrMessageEvent):
 
                 image_key = response.data.image_key
                 logger.debug(image_key)
-                ret.append(_stage)
+                if _stage:
+                    ret.append(_stage)
                 ret.append([{"tag": "img", "image_key": image_key}])
-                _stage.clear()
+                _stage = []
             elif isinstance(comp, File):
                 # 文件将通过 _send_file_message 方法单独发送，这里跳过
                 logger.debug("[Lark] 检测到文件组件，将单独发送")
@@ -475,7 +476,7 @@ class LarkMessageEvent(AstrMessageEvent):
         reply_message_id: str | None = None,
         receive_id: str | None = None,
         receive_id_type: str | None = None,
-    ) -> None:
+    ) -> bool:
         """通用的消息链发送方法
 
         Args:
@@ -484,10 +485,15 @@ class LarkMessageEvent(AstrMessageEvent):
             reply_message_id: 回复的消息ID（用于回复消息）
             receive_id: 接收者ID（用于主动发送）
             receive_id_type: 接收者ID类型，如 'open_id', 'chat_id'（用于主动发送）
+
+        Returns:
+            图片转换和飞书消息发送均成功时返回 True，否则返回 False。
         """
         if lark_client.im is None:
             logger.error("[Lark] API Client im 模块未初始化")
-            return
+            return False
+
+        delivery_ok = True
 
         # 分离文件、音频、视频组件和其他组件
         file_components: list[File] = []
@@ -525,14 +531,14 @@ class LarkMessageEvent(AstrMessageEvent):
                 receive_id=receive_id,
                 receive_id_type=receive_id_type,
             ):
-                return
+                return True
 
         # 先发送非文件内容（如果有）
         if other_components:
             buffered_components: list = []
 
             async def _flush_buffer() -> None:
-                nonlocal buffered_components
+                nonlocal buffered_components, delivery_ok
                 if not buffered_components:
                     return
 
@@ -544,6 +550,19 @@ class LarkMessageEvent(AstrMessageEvent):
                     pending_chain,
                     lark_client,
                 )
+                expected_images = sum(
+                    isinstance(comp, AstrBotImage) for comp in pending_chain.chain
+                )
+                converted_images = sum(
+                    element.get("tag") == "img"
+                    for row in res
+                    for element in row
+                    if isinstance(element, dict)
+                )
+                if converted_images != expected_images:
+                    delivery_ok = False
+                    if expected_images:
+                        return
                 if res:  # 只在有内容时发送
                     wrapped = {
                         "zh_cn": {
@@ -551,7 +570,7 @@ class LarkMessageEvent(AstrMessageEvent):
                             "content": res,
                         },
                     }
-                    await LarkMessageEvent._send_im_message(
+                    sent = await LarkMessageEvent._send_im_message(
                         lark_client,
                         content=json.dumps(wrapped),
                         msg_type="post",
@@ -559,6 +578,9 @@ class LarkMessageEvent(AstrMessageEvent):
                         receive_id=receive_id,
                         receive_id_type=receive_id_type,
                     )
+                    delivery_ok = delivery_ok and sent
+                elif pending_chain.chain:
+                    delivery_ok = False
 
             # 维持组件顺序：遇到折叠面板标记先 flush 当前普通内容并发送卡片
             for comp in other_components:
@@ -604,6 +626,8 @@ class LarkMessageEvent(AstrMessageEvent):
             await LarkMessageEvent._send_media_message(
                 media_comp, lark_client, reply_message_id, receive_id, receive_id_type
             )
+
+        return delivery_ok
 
     def _reply_or_direct_args(self) -> tuple[str | None, str | None, str | None]:
         message_id = str(getattr(self.message_obj, "message_id", "") or "")

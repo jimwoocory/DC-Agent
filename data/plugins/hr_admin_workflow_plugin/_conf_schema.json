@@ -1,0 +1,33 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用综合人事入职插件。",
+    "default": true
+  },
+  "db_path": {
+    "type": "string",
+    "description": "本地 SQLite 台账路径。留空默认 data/feishu_business_mvp.db。",
+    "default": ""
+  },
+  "default_tasks": {
+    "type": "list",
+    "description": "新增新人记录时默认生成的入职待办。",
+    "default": ["账号开通", "办公用品准备", "工位确认", "入职资料收集"]
+  },
+  "onboarding_table": {
+    "type": "object",
+    "description": "入职任务多维表格位置，只存业务 app_token/table_id，不存 app_secret。",
+    "items": {
+      "app_token": {
+        "type": "string",
+        "description": "飞书多维表格 app_token。",
+        "default": ""
+      },
+      "table_id": {
+        "type": "string",
+        "description": "入职任务表 table_id。",
+        "default": ""
+      }
+    }
+  }
+}

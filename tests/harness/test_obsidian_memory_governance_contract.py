@@ -38,6 +38,11 @@ def test_obsidian_memory_governance_contract_points_to_required_verifiers() -> N
         "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_recall_filters_to_approved_by_default -q",
         "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_preserves_existing_memory_assets -q",
         "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_records_first_version_non_goals -q",
+        "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_promoter_noop_reconciliation_does_not_duplicate_audit -q",
+        "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_import_ignores_employee_insight_governance_schema -q",
+        "uv run pytest tests/dc_router/test_memory_injection.py::test_company_fact_retrieval_combines_governed_and_nas_evidence -q",
+        "uv run pytest tests/dc_router/test_memory_injection.py::test_obsidian_bridge_context_resolves_entity_department_and_executive_alias -q",
+        "uv run pytest tests/test_generate_obsidian_refs.py::test_write_canonical_company_context_builds_reviewable_standard_pages -q",
     ]
 
 
@@ -117,3 +122,33 @@ def test_contract_requires_approved_only_runtime_recall() -> None:
     assert "sensitive_blocked" in description
     assert "secret" in description
     assert "explicit admin path" in description
+
+
+def test_contract_requires_governed_and_source_evidence_combination() -> None:
+    criteria = _criteria_by_id()
+
+    description = criteria["omg-010"]["description"]
+
+    assert "approved governed memories" in description
+    assert "NAS project and document evidence" in description
+    assert "supporting or conflicting source material" in description
+
+
+def test_contract_requires_bounded_obsidian_relationship_context() -> None:
+    criteria = _criteria_by_id()
+
+    description = criteria["omg-011"]["description"]
+
+    assert "entity, department, and person bridge pages" in description
+    assert "bounded deduplicated relationship context" in description
+    assert "indexes rather than approved facts" in description
+
+
+def test_contract_requires_reviewable_canonical_company_pages() -> None:
+    criteria = _criteria_by_id()
+
+    description = criteria["omg-012"]["description"]
+
+    assert "canonical company, management, core-department, and client" in description
+    assert "configured facts" in description
+    assert "explicit human confirmation" in description

@@ -114,6 +114,23 @@ export interface ProviderEmbeddingDimensionData {
   [key: string]: unknown;
 }
 
+export interface MediaAuthProviderState {
+  provider: 'codex' | 'dreamina';
+  label: string;
+  executable_available: boolean;
+  credential_present: boolean;
+  authenticated: boolean;
+  detail: string;
+  expires_at?: string;
+  credits?: string;
+  proxy?: { configured?: boolean; route?: string };
+  state?: 'pending' | 'authenticated' | 'failed';
+  session_id?: string;
+  verification_url?: string;
+  user_code?: string;
+  device_code?: string;
+}
+
 export interface VersionData {
   version?: string;
   dashboard_version?: string;
@@ -611,6 +628,48 @@ export const providerApi = {
           ...(providerConfig ? { provider_config: providerConfig } : {}),
         },
       }),
+    );
+  },
+};
+
+export const mediaAuthApi = {
+  status() {
+    return typed<{ runtime: string; providers: MediaAuthProviderState[] }>(
+      httpClient.get<ApiEnvelope<{ runtime: string; providers: MediaAuthProviderState[] }>>(
+        '/api/v1/media-auth/status',
+      ),
+    );
+  },
+  startLogin(provider: 'codex' | 'dreamina') {
+    return typed<MediaAuthProviderState>(
+      httpClient.post<ApiEnvelope<MediaAuthProviderState>>(
+        `/api/v1/media-auth/${provider}/login/start`,
+      ),
+    );
+  },
+  checkLogin(
+    provider: 'codex' | 'dreamina',
+    payload: { session_id?: string; device_code?: string; poll_seconds?: number },
+  ) {
+    return typed<MediaAuthProviderState>(
+      httpClient.post<ApiEnvelope<MediaAuthProviderState>>(
+        `/api/v1/media-auth/${provider}/login/check`,
+        payload,
+      ),
+    );
+  },
+  test(provider: 'codex' | 'dreamina') {
+    return typed<MediaAuthProviderState>(
+      httpClient.post<ApiEnvelope<MediaAuthProviderState>>(
+        `/api/v1/media-auth/${provider}/test`,
+      ),
+    );
+  },
+  logout(provider: 'codex' | 'dreamina') {
+    return typed<MediaAuthProviderState>(
+      httpClient.post<ApiEnvelope<MediaAuthProviderState>>(
+        `/api/v1/media-auth/${provider}/logout`,
+      ),
     );
   },
 };

@@ -26,9 +26,10 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core.provider.entities import ProviderRequest
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 # 配置（跟 feishu_resource_plugin 共用一份）
-FEISHU_CONFIG_PATH = Path("/Users/dianchi/DC-Agent/data/feishu_whitelist.yaml")
+FEISHU_CONFIG_PATH = Path(get_astrbot_data_path()) / "feishu_whitelist.yaml"
 
 # 内容截断（避免单次 fetch 撑爆 LLM context）
 MAX_CHARS = 8000

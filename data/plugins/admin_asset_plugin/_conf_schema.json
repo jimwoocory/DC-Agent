@@ -1,0 +1,28 @@
+{
+  "enabled": {
+    "type": "bool",
+    "description": "是否启用综合行政办公用品插件。",
+    "default": true
+  },
+  "db_path": {
+    "type": "string",
+    "description": "本地 SQLite 台账路径。留空默认 data/feishu_business_mvp.db。",
+    "default": ""
+  },
+  "asset_table": {
+    "type": "object",
+    "description": "办公用品多维表格位置，只存业务 app_token/table_id，不存 app_secret。",
+    "items": {
+      "app_token": {
+        "type": "string",
+        "description": "飞书多维表格 app_token。",
+        "default": ""
+      },
+      "table_id": {
+        "type": "string",
+        "description": "办公用品表 table_id。",
+        "default": ""
+      }
+    }
+  }
+}

@@ -21,6 +21,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
+from urllib.parse import urlparse
 
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import (
@@ -86,14 +87,91 @@ def _push_macos(title: str, body: str, subtitle: str = "") -> None:
     )
 
 
+def _build_lark_card(
+    *,
+    title: str,
+    body: str,
+    level: AlertLevel,
+    action_url: str = "",
+    action_label: str = "",
+) -> dict:
+    """Build a bounded alert card with an optional safe navigation link.
+
+    Args:
+        title: Alert title.
+        body: Markdown alert body.
+        level: Normalized alert severity.
+        action_url: Optional HTTP(S) destination opened by the button.
+        action_label: Optional bounded button label.
+
+    Returns:
+        Feishu interactive card payload. Invalid URL schemes are omitted.
+    """
+    emoji = _EMOJI.get(level, "🔔")
+    color = {"info": "blue", "warning": "yellow", "critical": "red"}.get(
+        level.value, "blue"
+    )
+    elements = [{"tag": "div", "text": {"tag": "lark_md", "content": body[:3000]}}]
+    bounded_url = action_url.strip()[:500]
+    parsed_url = urlparse(bounded_url)
+    if parsed_url.scheme in {"http", "https"} and parsed_url.netloc:
+        elements.append(
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": (action_label.strip() or "打开详情")[:40],
+                        },
+                        "url": bounded_url,
+                        "type": "primary",
+                    }
+                ],
+            }
+        )
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": f"等级 {level.value} · 来自 DC-Agent alert_channel",
+                }
+            ],
+        }
+    )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": color,
+            "title": {"tag": "plain_text", "content": f"{emoji} {title}"},
+        },
+        "elements": elements,
+    }
+
+
 async def _push_lark(
     cfg: AlertChannelConfig,
     recipient: Recipient,
     title: str,
     body: str,
     level: AlertLevel,
+    action_url: str = "",
+    action_label: str = "",
 ) -> None:
-    """通过指定的 lark app（默认巅池-技术）私聊推送给一个接收人。"""
+    """通过指定的 lark app（默认巅池-技术）私聊推送给一个接收人。
+
+    Args:
+        cfg: Loaded alert channel configuration.
+        recipient: Target Feishu recipient.
+        title: Alert title.
+        body: Markdown alert body.
+        level: Normalized alert severity.
+        action_url: Optional safe HTTP(S) navigation target.
+        action_label: Optional action button label.
+    """
     client = (
         lark.Client.builder()
         .app_id(cfg.lark_app_id)
@@ -102,30 +180,13 @@ async def _push_lark(
         .build()
     )
 
-    # 飞书 interactive 卡片
-    emoji = _EMOJI.get(level, "🔔")
-    color = {"info": "blue", "warning": "yellow", "critical": "red"}.get(
-        level.value, "blue"
+    card = _build_lark_card(
+        title=title,
+        body=body,
+        level=level,
+        action_url=action_url,
+        action_label=action_label,
     )
-    card = {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "template": color,
-            "title": {"tag": "plain_text", "content": f"{emoji} {title}"},
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": body[:3000]}},
-            {
-                "tag": "note",
-                "elements": [
-                    {
-                        "tag": "plain_text",
-                        "content": f"等级 {level.value} · 来自 DC-Agent alert_channel",
-                    }
-                ],
-            },
-        ],
-    }
 
     body_obj = (
         CreateMessageRequestBody.builder()
@@ -163,8 +224,22 @@ async def send_alert_async(
     body: str,
     level: str | AlertLevel = AlertLevel.WARNING,
     config: AlertChannelConfig | None = None,
+    action_url: str = "",
+    action_label: str = "",
 ) -> AlertResult:
-    """异步发送告警到所有配置的渠道。"""
+    """异步发送告警到所有配置的渠道。
+
+    Args:
+        title: Alert title.
+        body: Markdown alert body.
+        level: Alert severity.
+        config: Optional loaded channel configuration.
+        action_url: Optional safe HTTP(S) navigation target.
+        action_label: Optional navigation button label.
+
+    Returns:
+        Multi-channel delivery result.
+    """
     if isinstance(level, str):
         try:
             level = AlertLevel(level)
@@ -199,7 +274,15 @@ async def send_alert_async(
                 sent_any = False
                 for r in targets:
                     try:
-                        await _push_lark(cfg, r, title, body, level)
+                        await _push_lark(
+                            cfg,
+                            r,
+                            title,
+                            body,
+                            level,
+                            action_url,
+                            action_label,
+                        )
                         sent_any = True
                         logger.info(
                             "[alert_channel] lark 推送成功 to %s (%s)",
@@ -237,10 +320,31 @@ def send_alert(
     body: str,
     level: str | AlertLevel = AlertLevel.WARNING,
     config: AlertChannelConfig | None = None,
+    action_url: str = "",
+    action_label: str = "",
 ) -> AlertResult:
-    """同步发送告警。内部跑 asyncio.run（bash 调用最方便）。"""
+    """同步发送告警。内部跑 asyncio.run（bash 调用最方便）。
+
+    Args:
+        title: Alert title.
+        body: Markdown alert body.
+        level: Alert severity.
+        config: Optional loaded channel configuration.
+        action_url: Optional safe HTTP(S) navigation target.
+        action_label: Optional navigation button label.
+
+    Returns:
+        Multi-channel delivery result.
+    """
     return asyncio.run(
-        send_alert_async(title=title, body=body, level=level, config=config)
+        send_alert_async(
+            title=title,
+            body=body,
+            level=level,
+            config=config,
+            action_url=action_url,
+            action_label=action_label,
+        )
     )
 
 
@@ -259,6 +363,8 @@ def _cli() -> int:
         choices=["info", "warning", "critical"],
     )
     parser.add_argument("--config", default=None, help="可选：指定配置文件路径")
+    parser.add_argument("--action-url", default="")
+    parser.add_argument("--action-label", default="")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -266,7 +372,14 @@ def _cli() -> int:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     cfg = load_config(args.config) if args.config else load_config()
-    result = send_alert(title=args.title, body=args.body, level=args.level, config=cfg)
+    result = send_alert(
+        title=args.title,
+        body=args.body,
+        level=args.level,
+        config=cfg,
+        action_url=args.action_url,
+        action_label=args.action_label,
+    )
 
     if not args.quiet:
         print(result)

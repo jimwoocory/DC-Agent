@@ -10,9 +10,31 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import aiosqlite
-from dc_engines.employee_directory.requester import requester_meta_from_employee
+from dc_engines.employee_directory.requester import (
+    requester_meta_from_employee,
+    requester_meta_from_event,
+)
 from dc_engines.employee_directory.store import EmployeeStore
+from dc_engines.org_permissions import CONTENT_RULE_REVIEW, PermissionAssignment
+
+
+class _RequesterEvent:
+    def __init__(self, sender_id: str) -> None:
+        self.sender_id = sender_id
+
+    def get_sender_id(self) -> str:
+        return self.sender_id
+
+
+class _PermissionStore:
+    def __init__(self, assignments: list[PermissionAssignment]) -> None:
+        self.assignments = assignments
+
+    async def list_assignments(self, subject_id: str) -> list[PermissionAssignment]:
+        return [item for item in self.assignments if item.subject_id == subject_id]
 
 
 async def test_get_or_create_first_time(employee_store: EmployeeStore) -> None:
@@ -143,6 +165,66 @@ async def test_requester_meta_exposes_scoped_org_permissions(
     assert ("office_ops", "*") in permissions
     assert ("feishu_admin_observed", "feishu") in permissions
     assert ("dc_admin", "*") not in permissions
+
+
+async def test_requester_meta_from_event_resolves_admin_without_employee_profile() -> (
+    None
+):
+    context = SimpleNamespace(
+        employee_store=None,
+        dc_permission_store=None,
+        get_config=lambda: {"admins_id": ["ou_admin"]},
+    )
+
+    admin = await requester_meta_from_event(context, _RequesterEvent("ou_admin"))
+    unknown = await requester_meta_from_event(context, _RequesterEvent("ou_unknown"))
+
+    assert admin["requester_identity_source"] == "event_sender"
+    assert admin["requester_principal_type"] == "user"
+    assert {
+        (item["permission"], item["scope"], item["source"])
+        for item in admin["requester_dc_permissions"]
+    } == {
+        ("dc_admin", "*", "admins_id"),
+        ("employee_self_service", "self", "default"),
+    }
+    assert all(
+        item["subject_id"] == "ou_admin"
+        and item["subject_type"] == "user"
+        and item["enabled"] is True
+        and "updated_at" in item
+        for item in admin["requester_dc_permissions"]
+    )
+    assert {item["permission"] for item in unknown["requester_dc_permissions"]} == {
+        "employee_self_service"
+    }
+
+
+async def test_requester_meta_from_event_resolves_persisted_permission_without_employee_profile() -> (
+    None
+):
+    assignment = PermissionAssignment(
+        subject_id="ou_ops",
+        subject_type="user",
+        permission=CONTENT_RULE_REVIEW,
+        scope="*",
+        source="manual",
+        enabled=True,
+        updated_at="2026-07-13T00:00:00+00:00",
+    )
+    context = SimpleNamespace(
+        employee_store=None,
+        dc_permission_store=_PermissionStore([assignment]),
+        get_config=lambda: {"admins_id": []},
+    )
+
+    meta = await requester_meta_from_event(context, _RequesterEvent("ou_ops"))
+
+    assert meta["requester_identity_source"] == "event_sender"
+    assert any(
+        item["subject_id"] == "ou_ops" and item["permission"] == CONTENT_RULE_REVIEW
+        for item in meta["requester_dc_permissions"]
+    )
 
 
 async def test_update_profile_identity_fields(employee_store: EmployeeStore) -> None:

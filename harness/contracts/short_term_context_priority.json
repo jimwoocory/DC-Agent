@@ -36,6 +36,16 @@
       "id": "stcp-007",
       "description": "The dc_router memory retrieval call must pass a query built from recent conversation history plus the current short feedback, instead of querying long-term memory with only the short feedback text.",
       "verification": "uv run pytest tests/unit/test_runtime_context_memory_query.py::test_build_memory_retrieval_query_combines_history_and_short_feedback -q"
+    },
+    {
+      "id": "stcp-008",
+      "description": "Memory injection must publish a typed RuntimeContextSection through the runtime_context_sections event extra, and RuntimeContextAssembler must consume it without mutating the user's prompt or saving the reference into conversation history.",
+      "verification": "uv run pytest tests/unit/test_astr_main_agent.py::TestBuildMainAgent::test_build_main_agent_consumes_structured_memory_event_extra -q"
+    },
+    {
+      "id": "stcp-009",
+      "description": "RuntimeContextAssembler must deterministically order, deduplicate, and bound structured event context before adding transient provider content.",
+      "verification": "uv run pytest tests/unit/test_runtime_context_assembler.py::test_assembler_orders_deduplicates_and_bounds_event_sections -q"
     }
   ],
   "runtime_context_pipeline": {
@@ -63,7 +73,9 @@
       "long_term_memory_reference": "no_save",
       "knowledge_base_reference": "no_save",
       "background_system_context": "no_save"
-    }
+    },
+    "event_extra_interface": "runtime_context_sections",
+    "structured_section_owner": "astrbot.core.runtime_context.assembler.RuntimeContextAssembler"
   },
   "runtime_boundaries": {
     "authoritative_recent_context": [
@@ -71,7 +83,8 @@
       "current user prompt"
     ],
     "lower_priority_reference": [
-      "data/plugins/dc_router/memory_injection.py injected dc_agent_memory_context"
+      "data/plugins/dc_router/memory_injection.py injected dc_agent_memory_context",
+      "runtime_context_sections event extra"
     ],
     "retrieval_query_context": [
       "data/plugins/dc_router/dispatch.py recent conversation history",

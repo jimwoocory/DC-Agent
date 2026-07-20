@@ -1,0 +1,206 @@
+{
+    "feature": "feishu_assistant_workbench",
+    "goal": "Provide intent-based Feishu menus and dedicated task workspaces that run immediately after one explicit save action, deliver results without a second human-approval gate, and keep a truthful task center.",
+    "scope": {
+        "included": [
+            "published menus: 创作, 办公, 任务",
+            "one shared H5 workspace for Feishu web, native clients, and company desktop entry across copy, image, video, research, file, preparation-team material quotation, AI-to-CDR batch conversion, and Codex intake",
+            "task-aware prompt, material, and server-whitelisted model/settings tabs",
+            "Codex Advanced Executor capability card and dedicated deep-reasoning intake",
+            "Card JSON 2.0 task intake, submitted-status, optional retained confirmation, and task-center cards",
+            "trusted card callback routing",
+            "zero-LLM navigation and form editing",
+            "Harness audit timeline for automatically submitted Codex Advanced Executor calls",
+            "normal agent routing immediately after the user saves a valid task workspace"
+        ],
+        "excluded": ["fabricated task counts or task records"]
+    },
+    "published_menu": {
+        "创作": ["写文案/方案", "生成图片", "生成视频"],
+        "办公": ["查资料/分析", "处理文件", "物料报价", "AI转CDR"],
+        "任务": ["继续最近", "进行中", "待补充", "已完成"]
+    },
+    "network_access": {
+        "shared_origin": "http://192.168.1.35:6185 during LAN phase; HTTPS origin configured by DC_ASSISTANT_H5_ORIGIN after domain cutover",
+        "origin_environment": "DC_ASSISTANT_H5_ORIGIN",
+        "runtime_host": "NAS",
+        "ingress": "NAS LAN forward during phase 1; Tencent Cloud domestic reverse tunnel after domain cutover",
+        "employee_entry": "http://192.168.1.35:6185",
+        "container_binding": "127.0.0.1:6285 -> dc-agent:6185",
+        "future_origin": "https://workbench.gx-dianchi.cn",
+        "public_nas_port_required": false,
+        "entrypoints": [
+            "Feishu web",
+            "Feishu desktop client",
+            "company desktop client"
+        ],
+        "covered_h5_tasks": [
+            "copy",
+            "image",
+            "video",
+            "research",
+            "file",
+            "quotation",
+            "ai_cdr",
+            "codex"
+        ],
+        "must_not_depend_on": [
+            "employee Mac IP",
+            "employee Mac process",
+            "manual local download",
+            "direct inbound NAS port"
+        ]
+    },
+    "menu_aliases": {
+        "legacy_workbench": ["工作台", "开始工作", "当前状态", "打开工作台"],
+        "assistant_task_intake": ["发起任务", "媒体生成", "图片/视频"],
+        "assistant_copy": ["文案资料", "写文案/方案"],
+        "assistant_image": ["生成图片"],
+        "assistant_video": ["生成视频"],
+        "assistant_research": ["查资料/分析"],
+        "assistant_file": ["处理文件"],
+        "assistant_material_quotation": ["物料报价", "筹备组物料报价", "报价系统"],
+        "assistant_ai_cdr": ["AI转CDR", "AI 转 CDR", "AI转CDR工具"],
+        "assistant_task_list": ["我的任务", "进行中", "待补充", "已完成"],
+        "assistant_resume": ["继续最近", "继续上次任务"],
+        "codex_tools": ["Codex 高级工具", "Codex 工具", "高级工具", "打开 Codex"]
+    },
+    "card_types": [
+        "assistant_task_intake",
+        "assistant_task_confirmation",
+        "assistant_task_list",
+        "assistant_session_choice"
+    ],
+    "acceptance_criteria": [
+        {
+            "id": "feishu-assistant-workbench-001",
+            "description": "All published and legacy menu labels are handled before chitchat and provider routing.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-002",
+            "description": "Menu navigation, dedicated task forms, and task-center views do not invoke an LLM; saving a valid workspace is the single explicit execution boundary.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-003",
+            "description": "A valid workspace save enqueues one trusted internal start_task event and patches a non-blocking submitted-status card without presenting a second human confirmation step.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-004",
+            "description": "All registered builders produce Card JSON 2.0 payloads and image/video cards have distinct fields.",
+            "verification": "uv run pytest tests/test_feishu_card_templates.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-005",
+            "description": "Codex toolbox navigation is deterministic, and only an explicitly confirmed user request resumes through the dedicated #codex工具 Advanced Executor marker.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/dc_router/test_cli_apply_decision.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-006",
+            "description": "The copy intake distinguishes Xiaohongshu notes, Douyin short-video scripts, and Xigua long-video scripts instead of collapsing every platform into generic social copy.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-007",
+            "description": "The attachment prototype exposes exactly one Card JSON 2.0 action that opens one compact H5 page with one shared intake panel, exactly two source actions for mixed-format local files and Feishu cloud documents, and one explicit confirmation action; cloud documents use standard Feishu OAuth and Drive OpenAPI when docsPicker is unavailable, and confirmation updates the original card with truthful metadata before closing the fixed right sidebar.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-008",
+            "description": "Copy, image, video, research, file, quotation, AI-to-CDR, and Codex task entry uses the direct capability URL only in Feishu web browsers, while native desktop and mobile clients use a sidebar-semi AppLink for the same H5; the H5 adapts from a compact sidebar wizard to a full-width browser desk, and a successful standalone save closes the workspace to reveal the originating assistant chat without opening another messenger page; every capability-token card keeps a deterministic refresh callback that replaces an expired URL in the originating card, API keys stay server-side, model selection defaults to Intelligent Choice, and saving a valid workspace automatically starts generation.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-009",
+            "description": "All Feishu sidebar H5 surfaces, including the task workspace, material quotation desk, attachment intake, media player chrome, and AI-to-CDR workspace, share the material-quotation visual system: white canvas, olive primary controls, signal-orange active states, Songti headings, compact rounded cards, and no gradients or tinted page decorations, while retaining existing task, upload, cloud-document, calculation, conversion, and playback behavior.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_sidebar_h5_pages_share_the_material_quotation_visual_system -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-010",
+            "description": "The two Office entries expose visibly distinct research and file-processing flows in both the entry card and right sidebar; file processing cannot be confirmed without an uploaded file, linked cloud document, or explicit file URL.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-011",
+            "description": "The Office menu includes a preparation-team material quotation entry backed by the dedicated feishu_material_quotation contract.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/harness/test_feishu_material_quotation_contract.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-012",
+            "description": "Every standard Feishu sidebar task workspace opens with Material first, then Task Prompt, then Output Settings; file-processing tasks validate an uploaded file, linked cloud document, or explicit file URL before validating the processing request.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_task_workspace_starts_with_material_before_task_prompt -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-013",
+            "description": "Research content structures are separate from delivery channels, and every advertised Office delivery choice is backed by a real result card, Word, Excel, PDF, text file, or native Feishu cloud document instead of acting as prompt-only decoration.",
+            "verification": "uv run pytest tests/test_office_document_delivery.py tests/dc_router/test_assistant_workbench.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-014",
+            "description": "The Office right-sidebar UI is one sequential three-step wizard—provide material, describe the goal, then choose delivery—with no competing workflow navigation; forward movement validates the current step, primary Office choices use touch-friendly cards, and the final step shows a live task overview before direct execution.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_office_workspace_uses_one_sequential_sidebar_wizard -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-015",
+            "description": "On the NAS runtime, uploaded file-processing materials persist directly under the mounted NAS inbox selected by DC_NAS_INBOX_DIR and never fall back to a Mac home path.",
+            "verification": "uv run pytest tests/document_intake_plugin_test.py::test_nas_inbox_environment_overrides_desktop_config -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-016",
+            "description": "After a successful private-chat workbench result is delivered, one Card JSON 2.0 prompt closes the loop between opening a new AstrBot conversation and continuing the current conversation without becoming a second task approval gate.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py dc_engines/tests/test_assistant_session_decisions.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-017",
+            "description": "The Office menu opens a NAS-hosted AI-to-CDR H5 workspace that accepts up to 20 AI files, keeps per-file CMYK mappings and a reserved ICC upload area, submits the batch atomically to the mounted NAS queue, and displays truthful per-file and aggregate percentages, elapsed time, estimated remaining time, errors, and completed CDR downloads while mini4 processes one desktop job at a time.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-018",
+            "description": "File processing exposes Translation only after material selection, requires a target language, keeps bidirectional translation optional, supports faithful or professional terminology-aware translation, offers target-only or bilingual output, and limits delivery choices to files the selected source type can really generate on a plain white three-step surface.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py tests/test_office_translation.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-019",
+            "description": "Translation bypasses the generic prompt-only file route and runs through the AstrBot AIHubMix provider with qwen-mt-turbo or qwen-mt-plus, preserves Word structure and Excel sheets, formulas, numbers, and basic styles, creates a real delivery artifact and trace manifest, and reports recoverable errors for unsupported, encrypted, scanned, oversized, partial, and language-direction failures.",
+            "verification": "uv run pytest tests/test_office_translation.py tests/dc_router/test_assistant_workbench.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-020",
+            "description": "Each assistant task chain owns one active interactive card: forward, back, refresh, task-detail, workspace-selection, and expired-capability recovery callbacks patch the originating Feishu message instead of appending another navigation card; workspace and submitted-result cards always retain that recovery callback, while a fresh menu entry may start a new card chain.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py::test_callback_navigation_patches_origin_card_without_sending tests/dc_router/test_assistant_workbench.py::test_form_preview_is_deterministic_and_stops_llm tests/dc_router/test_assistant_workbench.py::test_task_type_selection_reuses_origin_card -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-021",
+            "description": "AIHubMix uses the domestic InferEra endpoint as its primary route and retries exactly once through the configured AWS proxy route only for connection failures, timeouts, or HTTP 408/502/503/504; authentication, permission, rate-limit, validation, and generic HTTP 500 errors remain visible and never trigger route fallback.",
+            "verification": "uv run pytest tests/test_openai_source.py -k aihubmix_query -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-022",
+            "description": "Every Feishu H5 change is released as one integrated chain covering the published menu label, its Card JSON 2.0 entry and recovery actions, the task-aware H5 route, and the NAS container origin for copy, image, video, research, file, quotation, AI-to-CDR, and Codex workspaces.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py::test_every_published_h5_workspace_keeps_its_card_recovery_action tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-023",
+            "description": "When a Feishu menu event is handled outside the NAS process, the capability and message binding are created on the configured NAS H5 origin before the card is usable; the sender never publishes a NAS URL backed only by an employee Mac draft store.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py::test_remote_workspace_is_created_and_bound_on_the_nas_origin tests/test_assistant_attachment_upload.py::test_remote_draft_administration_requires_the_shared_token -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-024",
+            "description": "Creative submitted cards never regenerate from the card click itself: copy, image, and video reopen a freshly reloaded H5 revision view with the previous data filled, and only the explicit final H5 save starts another generation. Research, file-processing, and Codex submitted cards expose no regeneration action, while AI-to-CDR only reopens conversion progress.",
+            "verification": "uv run pytest tests/dc_router/test_assistant_workbench.py -k 'creative_submitted_card or office_and_executor_submitted_card or ai_cdr_submitted_card' -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-025",
+            "description": "Every final creative generation card for copy, image, and video keeps a bottom material-completion entry that opens a freshly reloaded H5 revision view with the previous data filled; opening the entry never starts generation, and Office result cards do not receive the action.",
+            "verification": "uv run pytest tests/test_daily_card_renderer.py tests/test_feishu_card_templates.py tests/dc_router/test_media_route_policy.py tests/test_assistant_attachment_upload.py -q"
+        },
+        {
+            "id": "feishu-assistant-workbench-026",
+            "description": "A trusted internal H5 save reaches the middle Router before generic card-action plugins can stop the synthetic event, while ordinary messages and external card callbacks retain the existing channel-governed order.",
+            "verification": "uv run pytest tests/dc_router/test_main_agent_media_execution.py tests/dc_router/test_middle_router_dispatch.py -q"
+        }
+    ]
+}

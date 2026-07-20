@@ -1,0 +1,34 @@
+{
+  "feature": "dingtalk_finance_bot",
+  "goal": "Provide a standalone DingTalk reimbursement review bot that reads approval nodes and attachments, performs local invoice OCR and historical/new invoice deduplication, and always leaves uncertain cases for human finance review.",
+  "acceptance_criteria": [
+    {
+      "id": "dfb-001",
+      "description": "The first interface test authenticates the DingTalk app, lists instances for the configured reimbursement process, and reads at most one sample approval detail without executing or changing any approval task.",
+      "verification": "uv run pytest tests/scripts_tools/test_dingtalk_finance_stream.py::test_capability_probe_is_read_only -q"
+    },
+    {
+      "id": "dfb-002",
+      "description": "The capability report never returns an app secret or access token and reports missing attachment, OCR, reviewer, and duplicate-ledger prerequisites explicitly.",
+      "verification": "uv run pytest tests/scripts_tools/test_dingtalk_finance_stream.py::test_capability_probe_redacts_credentials_and_reports_failure -q"
+    },
+    {
+      "id": "dfb-003",
+      "description": "Approval Stream events are deduplicated and only matching process instance events trigger an initial review.",
+      "verification": "uv run pytest tests/scripts_tools/test_dingtalk_finance_stream.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "project_boundary": "scripts-tools/dingtalk_finance_bot",
+    "excluded_project": "scripts-tools/dingtalk_finance_exporter",
+    "first_probe_mode": "read_only",
+    "ocr_data_policy": "Invoice bytes are sent only to the configured local or intranet OCR endpoint.",
+    "approval_policy": "The capability probe and initial review do not agree or reject a real DingTalk approval.",
+    "human_review_policy": "Missing attachments, OCR failures, amount mismatches, duplicates, and uncertain results remain pending for a finance reviewer."
+  },
+  "verification": {
+    "focused_tests": "uv run pytest tests/scripts_tools/test_dingtalk_finance_stream.py -q",
+    "lint": "uv run ruff check scripts-tools/dingtalk_finance_bot/finance_bot.py tests/scripts_tools/test_dingtalk_finance_stream.py",
+    "format": "uv run ruff format --check scripts-tools/dingtalk_finance_bot/finance_bot.py tests/scripts_tools/test_dingtalk_finance_stream.py"
+  }
+}

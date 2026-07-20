@@ -1,0 +1,111 @@
+{
+    "feature": "Python-controlled AI to CDR conversion service",
+    "goal": "Process Adobe Illustrator files from a local or NAS-backed queue on macOS, use the installed Illustrator and CorelDRAW applications as conversion engines, preserve source files and color-management data, and avoid clipboard-based automation.",
+    "acceptance_criteria": [
+        {
+            "id": "AC-01",
+            "description": "Initialization creates an isolated queue with inbox, processing, outbox, failed, and reports directories plus a readable configuration file.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_initialize_workspace -q"
+        },
+        {
+            "id": "AC-02",
+            "description": "Dry-run mode discovers stable AI files without moving them or invoking either desktop application.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_dry_run_does_not_mutate_queue -q"
+        },
+        {
+            "id": "AC-03",
+            "description": "A successful job copies the claimed NAS source into a mini4-local work directory, archives the original AI file, atomically publishes the CDR, Illustrator PDF bridge, and CorelDRAW-rendered PNG preview back to NAS, records a success report, and removes the local job directory.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_successful_job_publishes_artifacts -q"
+        },
+        {
+            "id": "AC-04",
+            "description": "A failed job is quarantined with its source and work artifacts intact and records the conversion error without blocking later jobs.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_failed_job_is_quarantined -q"
+        },
+        {
+            "id": "AC-05",
+            "description": "The Illustrator bridge script disables color conversion and image downsampling, carries the existing color profile, embeds linked artwork, and can outline text before PDF export.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_illustrator_script_preserves_color_inputs -q"
+        },
+        {
+            "id": "AC-06",
+            "description": "CorelDRAW automation is driven by Python and macOS accessibility events without reading or writing the system clipboard.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_corel_automation_does_not_use_clipboard -q"
+        },
+        {
+            "id": "AC-07",
+            "description": "The contract and the complete focused test module pass together.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py -q"
+        },
+        {
+            "id": "AC-08",
+            "description": "The tool can install a per-user launchd service that watches the queue after login using the same Python controller.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_launch_agent_uses_python_watch_mode -q"
+        },
+        {
+            "id": "AC-09",
+            "description": "An existing non-empty CDR can be opened and published to a PDF proof by CorelDRAW's internal PublishToPDF API without using the clipboard, then rasterized locally to a PNG snapshot; a shape-free document is rejected.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_corel_snapshot_uses_internal_export_api -q"
+        },
+        {
+            "id": "AC-10",
+            "description": "When Illustrator artwork is completely detached from every artboard, the active artboard is temporarily fitted to visible artwork before PDF export; Illustrator rejects an empty reopened bridge, and CorelDRAW publishes the final CDR only after the imported PDF and a reopened validation CDR both contain shapes and the validation CDR produces a non-empty PDF proof that is rasterized locally to PNG.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_corel_worker_validates_shapes_before_final_save -q"
+        },
+        {
+            "id": "AC-11",
+            "description": "A same-stem color-calibration sidecar can request exact process-CMYK source-to-target replacements for fills, strokes, or both before Illustrator writes the PDF bridge. Every requested mapping is audited and a zero-match mapping fails the job instead of reporting false success.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_illustrator_script_applies_and_audits_cmyk_mapping -q"
+        },
+        {
+            "id": "AC-12",
+            "description": "The Feishu assistant H5 upload workspace provides a reserved ICC calibration area, validates the ICC file signature, stores the profile inside the queue for audit, and labels the initial ICC mode as registered-only so an unapproved color-space conversion is never applied silently.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_color_calibration_validates_mapping_and_icc -q"
+        },
+        {
+            "id": "AC-13",
+            "description": "The queue waits for a same-stem calibration sidecar to settle, archives it beside the original AI, and records mapping, ICC, and Illustrator match-audit metadata in the job report.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_successful_job_archives_color_calibration -q"
+        },
+        {
+            "id": "AC-14",
+            "description": "One mini4 desktop worker processes batch submissions sequentially and atomically publishes per-file preparing, Illustrator, PDF bridge, CorelDRAW, reopened-validation, NAS publishing, and terminal progress snapshots for the Feishu H5 page; Illustrator and CorelDRAW are never driven concurrently on the same desktop session.",
+            "verification": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py::test_successful_job_publishes_artifacts tests/test_assistant_attachment_upload.py::test_ai_cdr_h5_uploads_batch_and_reads_mini4_progress -q"
+        },
+        {
+            "id": "AC-15",
+            "description": "The Feishu H5 batch action uses native form submission plus pointer and touch fallbacks, registers every drag-and-drop listener with both an event name and handler, prevents duplicate jobs while uploading, and surfaces client-side runtime errors instead of silently ignoring the employee's action.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_ai_cdr_workspace_has_batch_color_and_progress_controls -q"
+        },
+        {
+            "id": "AC-16",
+            "description": "Repeated submissions with the same AI filename ignore mini4 progress snapshots older than the current H5 submission and never expose a download URL until the current conversion succeeds.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_ai_cdr_h5_uploads_batch_and_reads_mini4_progress -q"
+        },
+        {
+            "id": "AC-17",
+            "description": "The Feishu H5 workspace reads PDF-compatible Illustrator CMYK swatches locally, presents the source color as a selectable read-only swatch, and requires designers to enter only the target CMYK values.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_ai_cdr_workspace_has_batch_color_and_progress_controls -q"
+        },
+        {
+            "id": "AC-18",
+            "description": "Each completed Feishu H5 job exposes one explicit CDR download button, downloads with the source AI stem as the CDR filename into the computer Downloads folder, and visibly reports the exact destination and filename or a failure without a secondary download path or an unsupported Save As prompt.",
+            "verification": "uv run pytest tests/test_assistant_attachment_upload.py::test_ai_cdr_workspace_has_batch_color_and_progress_controls tests/test_assistant_attachment_upload.py::test_ai_cdr_h5_uploads_batch_and_reads_mini4_progress -q"
+        }
+    ],
+    "runtime_policy": {
+        "supported_platform": "macOS 13 or newer",
+        "python": ">=3.10",
+        "required_apps": ["Adobe Illustrator 2026", "CorelDRAW 2026"],
+        "queue_root": "Any writable local directory or mounted NAS directory used only for queue and published artifacts",
+        "local_work_root": "A mini4-local directory used for all Illustrator and CorelDRAW document operations",
+        "source_retention": "Original AI files are archived on success and retained inside the failed job directory on error",
+        "clipboard": "The converter must not depend on shared or system clipboard contents",
+        "network": "Conversion itself does not require internet access"
+    },
+    "verification": {
+        "focused_tests": "uv run pytest tests/scripts_tools/test_ai_cdr_converter.py -q",
+        "lint": "uv run ruff check scripts-tools/ai_cdr_converter tests/scripts_tools/test_ai_cdr_converter.py",
+        "format": "uv run ruff format --check scripts-tools/ai_cdr_converter tests/scripts_tools/test_ai_cdr_converter.py"
+    }
+}

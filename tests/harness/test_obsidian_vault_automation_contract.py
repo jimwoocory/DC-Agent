@@ -33,6 +33,7 @@ def test_contract_points_to_wrapper_and_contract_verifiers() -> None:
         "uv run pytest dc_engines/tests/test_obsidian_vault_wrapper.py::test_write_requests_are_dry_run_audited_and_do_not_mutate_vault -q",
         "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py::test_contract_records_agent_skill_execution_boundaries -q",
         "uv run pytest tests/harness/test_obsidian_vault_automation_contract.py::test_contract_records_phase1_scope_and_non_goals -q",
+        "uv run pytest tests/test_obsidian_vault_tools.py -q",
     ]
 
 
@@ -88,3 +89,17 @@ def test_contract_records_phase1_scope_and_non_goals() -> None:
     assert "obsidian-cli directly" in non_goals
     assert "bulk delete" in non_goals
     assert "bulk move" in non_goals
+
+
+def test_contract_records_live_agent_and_nas_read_only_integration() -> None:
+    integration = _contract()["runtime_integration"]
+
+    assert integration["vault_mount"] == "/AstrBot/ObsidianVault"
+    assert integration["mount_mode"] == "read_only"
+    assert integration["authorization"] == "AstrBot admins_id"
+    assert integration["llm_tools"] == [
+        "search_obsidian_vault",
+        "read_obsidian_note",
+        "list_obsidian_vault",
+    ]
+    assert integration["context_policy"] == "retrieve_on_demand"

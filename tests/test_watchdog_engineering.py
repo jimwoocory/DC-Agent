@@ -47,6 +47,35 @@ def test_engine_exposes_expected_active_and_disabled_probe_names() -> None:
     assert engine.probe_enabled("feishu_sync_heartbeat") is False
 
 
+def test_nas_runtime_monitors_remote_assistant_without_local_astrbot() -> None:
+    engine = _load_module(WATCHDOG_ENGINE, "watchdog_engine_nas")
+
+    active = engine.active_probe_names("nas")
+    disabled = engine.disabled_probe_names("nas")
+
+    assert "nas_assistant_chat_health" in active
+    assert "astrbot_dashboard" not in active
+    assert "astrbot_api" not in active
+    assert "assistant_chat_health" not in active
+    assert "astrbot_dashboard" in disabled
+    assert "astrbot_api" in disabled
+    assert "hermes_gateway" in active
+
+
+def test_nas_chat_health_uses_restart_grace_for_transient_502() -> None:
+    engine = _load_module(WATCHDOG_ENGINE, "watchdog_engine_nas_restart_grace")
+
+    assert engine.should_suppress_for_agent_maintenance("nas_assistant_chat_health")
+
+
+def test_dc_watchdog_defaults_to_nas_runtime_ownership() -> None:
+    source = WATCHDOG_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'PRIMARY_RUNTIME="${DC_AGENT_PRIMARY_RUNTIME:-nas}"' in source
+    assert 'list-active --runtime "$PRIMARY_RUNTIME"' in source
+    assert 'list-disabled --runtime "$PRIMARY_RUNTIME"' in source
+
+
 def test_dashboard_static_probe_requires_index_html(tmp_path) -> None:
     engine = _load_module(WATCHDOG_ENGINE, "watchdog_engine")
     dist = tmp_path / "dist"

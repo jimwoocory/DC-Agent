@@ -1,0 +1,135 @@
+{
+  "feature": "watchdog_repair_closure",
+  "goal": "Turn watchdog incidents into bounded Codex repair proposals while keeping every executable action, retry, verification, rollback, and circuit-breaker decision deterministic.",
+  "acceptance_criteria": [
+    {
+      "id": "watchdog-repair-001",
+      "description": "Codex emits a strict repair proposal containing only bounded action identifiers and never an executable command.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py tests/test_watchdog_diagnose.py -q"
+    },
+    {
+      "id": "watchdog-repair-002",
+      "description": "The deterministic repair policy recomputes risk, rejects mismatched or unsupported proposals, and maps approved restart actions to fixed safe_restart commands.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py -q"
+    },
+    {
+      "id": "watchdog-repair-003",
+      "description": "Approved repairs are executed once per incident, verified against the original probe, and recorded without persisting command output or model-supplied shell.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py -q"
+    },
+    {
+      "id": "watchdog-repair-004",
+      "description": "The controller enforces a rolling retry budget, opens a service circuit breaker after repeated failed verification, and supports deterministic rollback metadata for persistent actions.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py -q"
+    },
+    {
+      "id": "watchdog-repair-005",
+      "description": "One structured OpenAI Codex call produces both the human diagnosis report and bounded repair proposal using gpt-5.6-sol with max reasoning, read-only sandboxing, ephemeral sessions, and ignored user provider configuration.",
+      "verification": "uv run pytest tests/test_watchdog_diagnose.py -q"
+    },
+    {
+      "id": "watchdog-repair-006",
+      "description": "Immediately before an approved action, the deterministic controller reruns the original probe and cancels the repair without consuming retry budget when launchd or another controller already restored the service.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py -q"
+    },
+    {
+      "id": "watchdog-repair-007",
+      "description": "Repair budgets, recent bounded outcomes, and circuit-breaker countdowns are exposed through watchdogctl and the Dashboard as read-only operational state without persisting command output.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "watchdog-repair-008",
+      "description": "A manual_intervention proposal creates a bounded review item only while the original probe is still failing, without executing a command, resetting a circuit, or consuming retry budget.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py -q"
+    },
+    {
+      "id": "watchdog-repair-009",
+      "description": "Review acknowledgement and resolution require short-lived exact Control Plans bound to the incident, operation, and current review state, and can mutate only review metadata.",
+      "verification": "uv run pytest tests/test_watchdog_repair.py tests/test_task_control_plane.py tests/test_system_entries_quick_entries.py -q"
+    },
+    {
+      "id": "watchdog-repair-010",
+      "description": "Pending manual reviews emit bounded deduplicated notifications with an http(s) Dashboard link and never expose a direct repair action button.",
+      "verification": "uv run pytest dc_engines/tests/test_alert_channel.py tests/test_watchdog_review_notifier.py -q"
+    },
+    {
+      "id": "watchdog-repair-011",
+      "description": "The watchdog schedules deterministic review reminders and escalations, records a stage only after successful delivery, and retries failed delivery without mutating repair budgets or review status.",
+      "verification": "uv run pytest tests/test_watchdog_review_notifier.py -q"
+    },
+    {
+      "id": "watchdog-repair-012",
+      "description": "A deterministic read-only analytics snapshot exposes 24-hour and 7-day repair outcomes, successful-repair MTTR, manual-review SLA breaches, open circuits, and a bounded recommendation for the existing Codex deep review.",
+      "verification": "uv run pytest tests/test_watchdog_repair_analytics.py -q"
+    },
+    {
+      "id": "watchdog-repair-013",
+      "description": "Audit retention is preview-only: it counts repair, notification, incident, and resolved-review records outside fixed windows without deleting or rewriting any source file.",
+      "verification": "uv run pytest tests/test_watchdog_repair_analytics.py -q"
+    }
+  ],
+  "runtime_policy": {
+    "proposal_actions": [
+      "observe_only",
+      "restart_managed_service",
+      "manual_intervention"
+    ],
+    "auto_execute_risk": ["low"],
+    "retry_budget": {
+      "max_attempts": 2,
+      "window_seconds": 3600
+    },
+    "circuit_breaker": {
+      "failed_verifications": 2,
+      "open_seconds": 21600
+    },
+    "manual_review": {
+      "transitions": [
+        "pending->acknowledged",
+        "acknowledged->resolved"
+      ],
+      "plan_ttl_seconds": 120,
+      "runtime_actions": false,
+      "circuit_reset": false,
+      "retry_budget_mutation": false
+    },
+    "model_runtime": {
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "max",
+      "sandbox": "read-only",
+      "ephemeral": true,
+      "ignore_user_config": true,
+      "calls_per_incident": 1,
+      "external_apps": false,
+      "plugins": false,
+      "multi_agent": false
+    },
+    "analytics": {
+      "refresh_interval_seconds": 300,
+      "metric_windows_seconds": {
+        "24h": 86400,
+        "7d": 604800
+      },
+      "review_sla_seconds": {
+        "pending_warning": 900,
+        "pending_critical": 3600,
+        "acknowledged_warning": 14400
+      },
+      "retention_preview_seconds": {
+        "repair_events": 7776000,
+        "notification_events": 7776000,
+        "incident_state": 2592000,
+        "resolved_reviews": 7776000
+      },
+      "deletion_enabled": false
+    }
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "manual": [
+      "bash -n scripts-watchdog/diagnose.sh",
+      "uv run pytest tests/test_watchdog_repair.py tests/test_watchdog_diagnose.py tests/test_watchdog_engineering.py -q"
+    ]
+  }
+}

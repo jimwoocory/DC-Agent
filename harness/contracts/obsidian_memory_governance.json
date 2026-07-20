@@ -9,7 +9,7 @@
     },
     {
       "id": "omg-002",
-      "description": "Edited Obsidian governance notes import back into data/governed_memory.db idempotently without creating duplicate governed memories for the same memory_id.",
+      "description": "Edited Obsidian governance notes import back into data/governed_memory.db idempotently: an unchanged note for the same memory_id creates neither a duplicate governed memory nor duplicate import audit.",
       "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_import_is_idempotent_for_same_memory_id -q"
     },
     {
@@ -19,7 +19,7 @@
     },
     {
       "id": "omg-004",
-      "description": "Every Obsidian import decision and runtime promotion writes an append-only audit record with actor, action, memory_id, payload, and timestamp.",
+      "description": "Every state-changing Obsidian import decision and runtime promotion writes an append-only audit record with actor, action, memory_id, payload, and timestamp.",
       "verification": "uv run pytest dc_engines/tests/test_memory_governance_store.py::test_decision_and_audit_records_are_append_only -q"
     },
     {
@@ -36,6 +36,31 @@
       "id": "omg-007",
       "description": "The first production version explicitly excludes an Obsidian native plugin, realtime Obsidian file watcher, bulk proactive review pings, and automatic deletion/forgetting from required scope.",
       "verification": "uv run pytest tests/harness/test_obsidian_memory_governance_contract.py::test_contract_records_first_version_non_goals -q"
+    },
+    {
+      "id": "omg-008",
+      "description": "Periodic promotion reconciles approved memories into runtime outputs idempotently: an already-current projection is reported as unchanged and creates no duplicate promoted_to_recall audit.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_promotion.py::test_promoter_noop_reconciliation_does_not_duplicate_audit -q"
+    },
+    {
+      "id": "omg-009",
+      "description": "The governed-memory importer consumes only notes carrying its memory_id schema and ignores EmployeeInsight or other governance schemas without failing their independent approval workflows.",
+      "verification": "uv run pytest dc_engines/tests/test_obsidian_memory_export_import.py::test_import_ignores_employee_insight_governance_schema -q"
+    },
+    {
+      "id": "omg-010",
+      "description": "Company-fact recall combines approved governed memories with relevant NAS project and document evidence instead of letting one approved match hide supporting or conflicting source material.",
+      "verification": "uv run pytest tests/dc_router/test_memory_injection.py::test_company_fact_retrieval_combines_governed_and_nas_evidence -q"
+    },
+    {
+      "id": "omg-011",
+      "description": "Company-fact recall resolves matching Obsidian entity, department, and person bridge pages into bounded deduplicated relationship context while treating generated bridges as indexes rather than approved facts.",
+      "verification": "uv run pytest tests/dc_router/test_memory_injection.py::test_obsidian_bridge_context_resolves_entity_department_and_executive_alias -q"
+    },
+    {
+      "id": "omg-012",
+      "description": "The Obsidian generator creates review-required canonical company, management, core-department, and client context pages from configured facts, links them from a company cognition index, and leaves priorities, preferences, current status, and decision criteria for explicit human confirmation.",
+      "verification": "uv run pytest tests/test_generate_obsidian_refs.py::test_write_canonical_company_context_builds_reviewable_standard_pages -q"
     }
   ],
   "non_goals": [

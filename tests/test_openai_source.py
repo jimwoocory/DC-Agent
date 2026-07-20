@@ -2,6 +2,7 @@ import base64
 import builtins
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -28,6 +29,12 @@ class _ErrorWithResponse(Exception):
     def __init__(self, message: str, response_text: str):
         super().__init__(message)
         self.response = SimpleNamespace(text=response_text)
+
+
+class _ErrorWithStatus(Exception):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _make_provider(overrides: dict | None = None) -> ProviderOpenAIOfficial:
@@ -146,6 +153,169 @@ async def test_get_models_retries_transient_request_error(monkeypatch):
 
     assert await provider.get_models() == ["gpt-a", "gpt-b"]
     assert models.calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "primary_error",
+    [
+        httpx.ConnectError("domestic endpoint unavailable"),
+        _ErrorWithStatus("gateway unavailable", 503),
+    ],
+)
+async def test_aihubmix_query_uses_configured_fallback_once(primary_error):
+    provider = _make_provider(
+        {
+            "type": "aihubmix_chat_completion",
+            "api_base": "https://api.inferera.com/v1",
+            "fallback_api_base": "https://aihubmix.com/v1",
+            "fallback_proxy": "http://aihubmix-aws-tunnel:7898",
+        }
+    )
+    completion = ChatCompletion.model_validate(
+        {
+            "id": "chatcmpl-fallback",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "qwen-mt-turbo",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "PONG"},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+    )
+    primary_create = AsyncMock(side_effect=primary_error)
+    fallback_create = AsyncMock(return_value=completion)
+    provider.client.chat.completions.create = primary_create
+    assert provider.fallback_client is not None
+    provider.fallback_client.chat.completions.create = fallback_create
+
+    try:
+        response = await provider._query(
+            {
+                "model": "qwen-mt-turbo",
+                "messages": [{"role": "user", "content": "PING"}],
+            },
+            tools=None,
+        )
+    finally:
+        await provider.terminate()
+
+    assert response.completion_text == "PONG"
+    primary_create.assert_awaited_once()
+    fallback_create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 401, 403, 429, 500])
+async def test_aihubmix_query_does_not_fallback_for_non_route_errors(status_code):
+    provider = _make_provider(
+        {
+            "type": "aihubmix_chat_completion",
+            "api_base": "https://api.inferera.com/v1",
+            "fallback_api_base": "https://aihubmix.com/v1",
+            "fallback_proxy": "http://aihubmix-aws-tunnel:7898",
+        }
+    )
+    error = _ErrorWithStatus("request rejected", status_code)
+    primary_create = AsyncMock(side_effect=error)
+    fallback_create = AsyncMock()
+    provider.client.chat.completions.create = primary_create
+    assert provider.fallback_client is not None
+    provider.fallback_client.chat.completions.create = fallback_create
+
+    try:
+        with pytest.raises(_ErrorWithStatus) as raised:
+            await provider._query(
+                {
+                    "model": "gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "PING"}],
+                },
+                tools=None,
+            )
+    finally:
+        await provider.terminate()
+
+    assert raised.value is error
+    primary_create.assert_awaited_once()
+    fallback_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aihubmix_stream_uses_fallback_before_any_chunk_is_emitted():
+    provider = _make_provider(
+        {
+            "type": "aihubmix_chat_completion",
+            "api_base": "https://api.inferera.com/v1",
+            "fallback_api_base": "https://aihubmix.com/v1",
+            "fallback_proxy": "http://aihubmix-aws-tunnel:7898",
+        }
+    )
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "id": "chatcmpl-fallback-stream",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "gemini-3.5-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": "PONG"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "id": "chatcmpl-fallback-stream",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "gemini-3.5-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+        ),
+    ]
+
+    async def fallback_stream():
+        for chunk in chunks:
+            yield chunk
+
+    primary_create = AsyncMock(
+        side_effect=httpx.ConnectError("domestic stream unavailable")
+    )
+    fallback_create = AsyncMock(return_value=fallback_stream())
+    provider.client.chat.completions.create = primary_create
+    assert provider.fallback_client is not None
+    provider.fallback_client.chat.completions.create = fallback_create
+
+    try:
+        responses = [
+            response
+            async for response in provider._query_stream(
+                {
+                    "model": "gemini-3.5-flash",
+                    "messages": [{"role": "user", "content": "PING"}],
+                },
+                tools=None,
+            )
+        ]
+    finally:
+        await provider.terminate()
+
+    assert any(response.completion_text == "PONG" for response in responses)
+    primary_create.assert_awaited_once()
+    fallback_create.assert_awaited_once()
 
 
 @pytest.mark.asyncio

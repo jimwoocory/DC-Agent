@@ -1,0 +1,55 @@
+{
+    "feature": "standalone_video_workspace",
+    "goal": "Replace nested navigation into the legacy dashboard with a first-class video workspace in the standalone Dianchi Agent toolbox.",
+    "acceptance_criteria": [
+        {
+            "id": "standalone-video-001",
+            "description": "Image and writing workspaces link to /video/ and no primary toolbox navigation links to the legacy /dashboard/ shell.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_primary_navigation_uses_video_workspace -q"
+        },
+        {
+            "id": "standalone-video-002",
+            "description": "The standalone server serves a dedicated video workspace at /video/ while retaining /dashboard/ only as a compatibility route.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_workspace_is_registered -q"
+        },
+        {
+            "id": "standalone-video-003",
+            "description": "The video workspace mirrors the image workflow with adaptive preview, a bottom prompt and settings dock, and a persistent right-side video prompt assistant while retaining generation and download controls.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_workspace_has_complete_ui -q"
+        },
+        {
+            "id": "standalone-video-004",
+            "description": "The video workspace does not persist API keys through localStorage or .env files.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_workspace_does_not_persist_secrets -q"
+        },
+        {
+            "id": "standalone-video-005",
+            "description": "The video prompt assistant compiles the source brief into three materially different, model-aware directions with distinct shot structures while preserving the source requirements.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_prompt_candidates_are_materially_distinct -q"
+        },
+        {
+            "id": "standalone-video-006",
+            "description": "The video workspace requests candidates from the standalone prompt compiler instead of cloning a browser-side sentence template.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_workspace_uses_prompt_candidate_api -q"
+        },
+        {
+            "id": "standalone-video-007",
+            "description": "The prompt compiler preserves long source constraints, uses explicit Seedance reference roles, and avoids multi-shot timecodes for short single-take requests.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_prompt_candidates_preserve_long_brief_and_single_take -q"
+        },
+        {
+            "id": "standalone-video-008",
+            "description": "Automatic prompt compilation prefers Codex OAuth semantic analysis and falls back to a local Prompt Pack when unavailable.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_video_prompt_candidates_prefer_codex_analysis -q"
+        },
+        {
+            "id": "standalone-video-009",
+            "description": "Dreamina 1080p generation selects a Seedance VIP model version that supports 1080p instead of the 720p-only fast model.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py::test_dreamina_1080p_uses_supported_vip_model -q"
+        }
+    ],
+    "verification": {
+        "focused": "uv run pytest tests/test_aihubmix_standalone_video_workspace.py -q",
+        "targeted": "scripts/agent-check.sh --profile targeted"
+    }
+}

@@ -12,6 +12,7 @@ from dc_engines.org_permissions import (
     HR_OPS,
     OFFICE_OPS,
     PermissionAssignmentStore,
+    authorize_permission_records,
     build_principal_context,
     build_principal_context_from_employee,
     can_view_employee_profile,
@@ -261,3 +262,63 @@ def test_build_principal_context_from_employee() -> None:
     assert principal.department == "中台部门"
     assert principal.managed_departments == ("客户部",)
     assert principal.has_permission(DEPARTMENT_MANAGER, "客户部")
+
+
+def test_authorization_decision_enforces_subject_type_enabled_and_scope() -> None:
+    valid_global = {
+        "subject_id": "ou_ops",
+        "subject_type": "user",
+        "permission": CONTENT_RULE_REVIEW,
+        "scope": "*",
+        "source": "manual",
+        "enabled": True,
+    }
+    wrong_subject = {**valid_global, "subject_id": "ou_other"}
+    disabled = {**valid_global, "enabled": False}
+    scoped = {**valid_global, "scope": "综合部"}
+    incomplete = dict(valid_global)
+    incomplete.pop("scope")
+    app_escalation = {
+        **valid_global,
+        "subject_id": "cli_assistant",
+        "subject_type": "app",
+        "permission": DC_ADMIN,
+    }
+
+    assert authorize_permission_records(
+        subject_id="ou_ops",
+        records=[valid_global],
+        permission=CONTENT_RULE_REVIEW,
+    ).allowed
+    assert not authorize_permission_records(
+        subject_id="ou_ops",
+        records=[wrong_subject],
+        permission=CONTENT_RULE_REVIEW,
+    ).allowed
+    assert not authorize_permission_records(
+        subject_id="ou_ops",
+        records=[disabled],
+        permission=CONTENT_RULE_REVIEW,
+    ).allowed
+    assert not authorize_permission_records(
+        subject_id="ou_ops",
+        records=[incomplete],
+        permission=CONTENT_RULE_REVIEW,
+    ).allowed
+    assert not authorize_permission_records(
+        subject_id="ou_ops",
+        records=[scoped],
+        permission=CONTENT_RULE_REVIEW,
+        scope="*",
+    ).allowed
+    assert authorize_permission_records(
+        subject_id="ou_ops",
+        records=[scoped],
+        permission=CONTENT_RULE_REVIEW,
+        scope="综合部",
+    ).allowed
+    assert not authorize_permission_records(
+        subject_id="cli_assistant",
+        records=[app_escalation],
+        permission=DC_ADMIN,
+    ).allowed

@@ -7,7 +7,9 @@ from pathlib import Path
 
 def load_cli_module():
     script = Path("scripts-tools/obsidian_memory_governance.py")
-    spec = importlib.util.spec_from_file_location("obsidian_memory_governance_cli", script)
+    spec = importlib.util.spec_from_file_location(
+        "obsidian_memory_governance_cli", script
+    )
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -73,9 +75,7 @@ def test_cli_doctor_and_status(tmp_path: Path) -> None:
     cli = load_cli_module()
     (tmp_path / "ObsidianVault").mkdir()
     create_nas_db(tmp_path / "data" / "nas_memory.db")
-    (tmp_path / "dc_engines" / "dc_engines" / "memory_governance").mkdir(
-        parents=True
-    )
+    (tmp_path / "dc_engines" / "dc_engines" / "memory_governance").mkdir(parents=True)
 
     doctor = cli.command_doctor(tmp_path)
     status = cli.command_status(tmp_path)
@@ -101,6 +101,7 @@ def test_cli_export_import_promote_dry_run(tmp_path: Path) -> None:
 
     assert exported["exported_count"] == 1
     assert imported["imported_count"] == 1
+    assert imported["ignored_count"] == 0
     assert imported["decision_count"] == 1
     assert promoted["dry_run"] is True
     assert promoted["promoted_memory_ids"] == exported["memory_ids"]

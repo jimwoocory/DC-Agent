@@ -44,8 +44,13 @@
     },
     {
       "id": "media-generation-sop-009",
-      "description": "GPT Image, Dreamina, and router media-generation success paths finalize media_generation cards through the runtime gateway and schedule retractable task cards after the generated media is sent separately.",
-      "verification": "uv run pytest tests/test_media_generation_runtime_paths.py::test_media_generation_runtime_paths_retract_success_task_cards -q"
+      "description": "GPT Image, legacy Dreamina, and primary router success paths keep completed image result cards visible and deliver generated images as standalone interactive Feishu preview cards in the exact card conversation; preview-card upload or sending failures fall back to native image delivery and then the original session. Successful video result cards also remain visible so their Feishu sidebar H5 player stays reopenable.",
+      "verification": "uv run pytest tests/test_media_generation_runtime_paths.py::test_media_generation_runtime_paths_keep_success_image_result_cards tests/test_feishu_card_templates.py::test_media_generation_compact_preview_card_contains_uploaded_image tests/dc_router/test_media_route_policy.py::test_image_job_sends_interactive_preview_card_without_native_post tests/dc_router/test_media_route_policy.py::test_image_job_prefers_card_conversation_and_retries_original_session tests/unit/test_lark_message_event.py::test_lark_image_upload_failure_propagates_from_message_chain tests/unit/test_star_context.py::test_send_message_propagates_platform_delivery_failure -q"
+    },
+    {
+      "id": "media-generation-sop-011",
+      "description": "Successful router video cards open a branded, responsive white-interface H5 player in Feishu sidebar-semi mode with custom playback, seek, volume, speed, picture-in-picture, fullscreen, close, loading, and failure states; the H5 endpoint accepts only bounded HTTP(S) media URLs, and a successfully finalized sidebar card suppresses the duplicate native video message while retaining native delivery as a card-failure fallback.",
+      "verification": "uv run pytest tests/test_feishu_card_templates.py::test_video_generation_result_card_has_clickable_preview_action tests/test_assistant_attachment_upload.py::test_media_player_page_has_cinematic_custom_controls tests/test_assistant_attachment_upload.py::test_media_player_route_is_non_cacheable_and_rejects_unsafe_source tests/dc_router/test_media_route_policy.py::test_video_job_uses_sidebar_card_without_duplicate_native_video -q"
     },
     {
       "id": "media-generation-sop-010",

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from dc_engines.employee_insight_loop import (
+    EmployeeInsightObsidianExporter,
     EmployeeInsightProfile,
     EmployeeInsightSession,
     EmployeeInsightSessionStatus,
@@ -23,6 +24,7 @@ from dc_engines.employee_insight_loop import (
     InsightEvent,
     PilotStatus,
     TaskStatus,
+    build_candidate_from_session,
 )
 
 from astrbot.api import logger
@@ -66,6 +68,7 @@ class EmployeeInsightPlugin(Star):
     def __init__(self, context: Context) -> None:
         super().__init__(context)
         self.store: EmployeeInsightStore | None = None
+        self.exporter: EmployeeInsightObsidianExporter | None = None
         self.enabled = True
         self.config: dict = {}
 
@@ -84,6 +87,21 @@ class EmployeeInsightPlugin(Star):
         data_dir.mkdir(parents=True, exist_ok=True)
         self.store = EmployeeInsightStore(data_dir / "employee_insight.db")
         await self.store.initialize()
+        configured_vault = getattr(
+            self.context,
+            "employee_insight_vault_path",
+            None,
+        )
+        vault_path = (
+            Path(configured_vault)
+            if configured_vault
+            else (
+                data_dir.parent / "ObsidianVault"
+                if data_dir.name == "data"
+                else data_dir / "ObsidianVault"
+            )
+        )
+        self.exporter = EmployeeInsightObsidianExporter(vault_path)
         self.context.employee_insight_store = self.store
         self.context.employee_insight_link_task = self.link_task_lifecycle
         self.context.employee_insight_update_task = self.update_task_lifecycle
@@ -351,6 +369,50 @@ class EmployeeInsightPlugin(Star):
                 created_at=now,
             )
         )
+        if status in {"delivered", "closed", "confirmed"}:
+            await self._distill_candidate(updated, actor=source or "harness")
+
+    async def _distill_candidate(
+        self,
+        session: EmployeeInsightSession,
+        *,
+        actor: str,
+    ) -> None:
+        """Create and govern one stable candidate for a delivered task.
+
+        Args:
+            session: Employee insight session linked to the Harness task.
+            actor: Runtime component that reported the authoritative lifecycle.
+        """
+        assert self.store is not None
+        events = await self.store.list_events(session.session_id)
+        candidate = build_candidate_from_session(session, events)
+        existing = await self.store.get_candidate(candidate.candidate_id)
+        if existing is not None:
+            if not existing.obsidian_note_path and self.exporter is not None:
+                await self.exporter.export_candidate(
+                    self.store,
+                    existing,
+                    actor=actor,
+                )
+            return
+
+        await self.store.upsert_candidate(candidate)
+        await self.store.record_audit(
+            action="candidate_created",
+            actor=actor,
+            target_id=candidate.candidate_id,
+            detail={
+                "source_session_ids": candidate.source_session_ids,
+                "review_status": candidate.review_status.value,
+            },
+        )
+        if self.exporter is not None:
+            await self.exporter.export_candidate(
+                self.store,
+                candidate,
+                actor=actor,
+            )
 
     async def _message_tracking_allowed(self, event: AstrMessageEvent) -> bool:
         assert self.store is not None

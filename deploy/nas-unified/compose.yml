@@ -1,0 +1,131 @@
+name: dc-agent-unified
+
+services:
+  aihubmix-aws-tunnel:
+    build:
+      context: ./runtime-bin/aihubmix-aws-tunnel
+      dockerfile: Dockerfile
+    image: dc-agent-aihubmix-aws-tunnel:2026.07.15
+    container_name: dc-agent-aihubmix-aws-tunnel
+    user: "1026:100"
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      AUTOSSH_GATETIME: "0"
+      AUTOSSH_POLL: "30"
+    entrypoint:
+      - autossh
+    command:
+      - -M
+      - "0"
+      - -N
+      - -T
+      - -o
+      - ExitOnForwardFailure=yes
+      - -o
+      - ServerAliveInterval=30
+      - -o
+      - ServerAliveCountMax=3
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - UserKnownHostsFile=/run/secrets/aws-tunnel/known_hosts
+      - -i
+      - /run/secrets/aws-tunnel/id_ed25519
+      - -L
+      - 0.0.0.0:7898:127.0.0.1:8888
+      - ubuntu@54.153.29.194
+    expose:
+      - "7898"
+    volumes:
+      - ./runtime-secrets/aws-aihubmix-tunnel/id_ed25519:/run/secrets/aws-tunnel/id_ed25519:ro
+      - ./runtime-secrets/aws-aihubmix-tunnel/known_hosts:/run/secrets/aws-tunnel/known_hosts:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /home/tunnel/.ssh:size=1m,uid=1026,gid=100,mode=0700
+    healthcheck:
+      test:
+        - CMD
+        - nc
+        - -z
+        - 127.0.0.1
+        - "7898"
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: 10m
+    pids_limit: 64
+
+  dc-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.nas
+    image: dc-agent-unified:2026.07.20-creative-obsidian-p0.1
+    pull_policy: build
+    container_name: dc-agent-unified
+    restart: unless-stopped
+    depends_on:
+      aihubmix-aws-tunnel:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:6285:6185"
+    environment:
+      ASTRBOT_ROOT: /AstrBot
+      DC_AGENT_ROOT: /AstrBot
+      DC_ASSISTANT_H5_ORIGIN: "${DC_ASSISTANT_H5_ORIGIN:-http://192.168.1.35:6185}"
+      DC_ASSISTANT_H5_ADMIN_TOKEN: "${DC_ASSISTANT_H5_ADMIN_TOKEN:?Set DC_ASSISTANT_H5_ADMIN_TOKEN before deploying}"
+      DC_ASSISTANT_H5_TTL_SECONDS: "86400"
+      FEISHU_UNIFIED_CONNECTOR_BASE_URL: "https://dianchi2026.vercel.app"
+      FEISHU_UNIFIED_CONNECTOR_PROXY_URL: "http://aihubmix-aws-tunnel:7898"
+      FEISHU_ATTACHMENT_OAUTH_APP: "agent"
+      HTTP_PROXY: "http://aihubmix-aws-tunnel:7898"
+      HTTPS_PROXY: "http://aihubmix-aws-tunnel:7898"
+      http_proxy: "http://aihubmix-aws-tunnel:7898"
+      https_proxy: "http://aihubmix-aws-tunnel:7898"
+      NO_PROXY: "127.0.0.1,localhost,::1,dc-agent,aihubmix-aws-tunnel,192.168.1.35,.feishu.cn,.larksuite.com,.dingtalk.com"
+      no_proxy: "127.0.0.1,localhost,::1,dc-agent,aihubmix-aws-tunnel,192.168.1.35,.feishu.cn,.larksuite.com,.dingtalk.com"
+      CODEX_CLI_PATH: /usr/local/bin/codex
+      DREAMINA_CLI_PATH: /usr/local/bin/dreamina
+      XDG_RUNTIME_DIR: /tmp/xdg-runtime
+      DC_IMAGE_CACHE_DIR: /AstrBot/data/output/images
+      DC_NAS_INBOX_DIR: /mnt/nas/inbox/download
+      DC_NAS_MOUNT_POINT: /mnt/nas
+      DC_AI_CDR_QUEUE_ROOT: /mnt/nas/AI转CDR工具/AI转CDR共享
+      DC_OBSIDIAN_VAULT_PATH: /AstrBot/ObsidianVault
+      TZ: Asia/Shanghai
+    volumes:
+      - ./runtime-data:/AstrBot/data
+      - ./runtime-secrets/codex:/root/.codex
+      - ./runtime-secrets/dreamina:/root/.dreamina_cli
+      - ./runtime-secrets/dreamina-keyring:/root/.local/share/keyrings
+      - ./runtime-bin/dreamina:/usr/local/bin/dreamina:ro
+      - /volume1/knowledge:/mnt/nas
+      - /volume1/knowledge/dc-agent-obsidian/ObsidianVault:/AstrBot/ObsidianVault:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:6185/api/chat/health', timeout=3).read()
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: 20m
+    pids_limit: 512

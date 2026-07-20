@@ -1,0 +1,25 @@
+{
+    "feature": "standalone_toolbox_header",
+    "goal": "Keep the standalone image, video, and writing workspaces visually aligned under one Dianchi Agent toolbox header.",
+    "acceptance_criteria": [
+        {
+            "id": "standalone-toolbox-header-001",
+            "description": "All three workspaces show Dianchi Agent Toolbox at the left without the retired Dianchi Intelligence and Local Studio logo block.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_toolbox_header.py::test_workspace_headers_use_single_toolbox_brand -q"
+        },
+        {
+            "id": "standalone-toolbox-header-002",
+            "description": "The image, video, and writing mode controls use an equal-width centered three-column navigation so active states do not shift between pages.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_toolbox_header.py::test_workspace_mode_navigation_is_centered_and_equal_width -q"
+        },
+        {
+            "id": "standalone-toolbox-header-003",
+            "description": "Image generation parameter labels share fixed rows and the same horizontal text inset as their corresponding controls.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_toolbox_header.py::test_image_parameter_labels_align_with_controls -q"
+        }
+    ],
+    "verification": {
+        "focused": "uv run pytest tests/test_aihubmix_standalone_toolbox_header.py -q",
+        "targeted": "scripts/agent-check.sh --profile targeted"
+    }
+}

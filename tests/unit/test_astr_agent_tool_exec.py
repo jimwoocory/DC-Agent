@@ -21,9 +21,13 @@ class _DummyEvent:
         self.unified_msg_origin = "webchat:FriendMessage:webchat!user!session"
         self.message_obj = SimpleNamespace(message=message_components or [])
         self.role = "member"
+        self.extras: dict[str, object] = {}
 
-    def get_extra(self, _key: str):
-        return None
+    def get_extra(self, key: str, default=None):
+        return self.extras.get(key, default)
+
+    def set_extra(self, key: str, value: object) -> None:
+        self.extras[key] = value
 
 
 class _DummyTool:
@@ -36,6 +40,66 @@ def _build_run_context(message_components: list[object] | None = None):
     event = _DummyEvent(message_components=message_components)
     ctx = SimpleNamespace(event=event, context=SimpleNamespace())
     return ContextWrapper(context=ctx)
+
+
+@pytest.mark.asyncio
+async def test_middle_router_blocks_unapproved_handoff() -> None:
+    run_context = _build_run_context()
+    run_context.context.event.extras["dc_middle_router_enforce_handoffs"] = True
+    tool = HandoffTool(Agent(name="research_agent"))
+
+    results = []
+    async for result in FunctionToolExecutor.execute(
+        tool,
+        run_context,
+        input="research this",
+    ):
+        results.append(result)
+
+    assert len(results) == 1
+    assert results[0].isError is True
+    assert "Router approval" in results[0].content[0].text
+
+
+@pytest.mark.asyncio
+async def test_middle_router_approval_is_single_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_context = _build_run_context()
+    event = run_context.context.event
+    event.extras["dc_middle_router_enforce_handoffs"] = True
+    event.extras["dc_middle_router_approved_handoff"] = "transfer_to_research_agent"
+    tool = HandoffTool(Agent(name="research_agent"))
+
+    async def _fake_handoff(cls, tool, run_context, **tool_args):
+        yield mcp.types.CallToolResult(
+            content=[mcp.types.TextContent(type="text", text="delegated")]
+        )
+
+    monkeypatch.setattr(
+        FunctionToolExecutor,
+        "_execute_handoff",
+        classmethod(_fake_handoff),
+    )
+
+    first = []
+    async for result in FunctionToolExecutor.execute(
+        tool,
+        run_context,
+        input="research this",
+    ):
+        first.append(result)
+    second = []
+    async for result in FunctionToolExecutor.execute(
+        tool,
+        run_context,
+        input="research this again",
+    ):
+        second.append(result)
+
+    assert first[0].content[0].text == "delegated"
+    assert event.extras["dc_middle_router_approved_handoff"] == ""
+    assert second[0].isError is True
 
 
 class _DoneRunner:

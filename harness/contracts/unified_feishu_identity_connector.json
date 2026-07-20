@@ -18,7 +18,9 @@
       "cloud_docs"
     ],
     "token_boundary": "employee cookie, desktop session, and cloud-document grant are isolated",
-    "task_return": "cloud-document reauthorization resumes the original draft"
+    "task_return": "cloud-document reauthorization resumes the original draft",
+    "workbench_origin": "NAS LAN origin for the internal pilot, then one domestic HTTPS origin shared by Feishu web, Feishu desktop, and the company desktop client",
+    "nas_ingress": "NAS LAN forward during phase 1, then an outbound reverse tunnel to the existing Tencent Cloud server"
   },
   "acceptance_criteria": [
     {

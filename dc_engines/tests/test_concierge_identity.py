@@ -7,7 +7,11 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from dc_engines.employee_directory import Employee, EmployeeMemoryBridge
+from dc_engines.employee_directory import (
+    Employee,
+    EmployeeMemoryBridge,
+    requester_meta_from_event,
+)
 from dc_engines.employee_directory.store import EmployeeStore
 
 from astrbot.api.provider import LLMResponse, ProviderRequest
@@ -24,10 +28,12 @@ class _DummyEvent:
         *,
         admin: bool,
         private: bool,
+        sender_id: str = "ou_admin",
         requester_dc_permissions: list[dict] | None = None,
     ) -> None:
         self.role = "admin" if admin else "member"
         self._private = private
+        self._sender_id = sender_id
         self._requester_dc_permissions = requester_dc_permissions or []
 
     def is_admin(self) -> bool:
@@ -35,6 +41,9 @@ class _DummyEvent:
 
     def is_private_chat(self) -> bool:
         return self._private
+
+    def get_sender_id(self) -> str:
+        return self._sender_id
 
     def get_extra(self, key=None, default=None):
         if key == "requester_dc_permissions":
@@ -56,6 +65,7 @@ class _DummyFeishuEvent:
         self._sender_id = sender_id
         self.message_str = message
         self.unified_msg_origin = f"lark:{platform_id}:test-session"
+        self.extra: dict = {}
 
     def get_platform_id(self) -> str:
         return self._platform_id
@@ -65,6 +75,12 @@ class _DummyFeishuEvent:
 
     def get_sender_id(self) -> str:
         return self._sender_id
+
+    def get_extra(self, key=None, default=None):
+        return self.extra.get(key, default)
+
+    def set_extra(self, key, value) -> None:
+        self.extra[key] = value
 
 
 def test_boss_address_uses_stable_surname_zong() -> None:
@@ -110,6 +126,30 @@ def test_daily_feishu_memory_entry_is_not_limited_to_concierge_bot() -> None:
     assert plugin._is_concierge_platform(devops_event) is False
 
 
+async def test_runtime_principal_hook_publishes_reusable_subject_bound_context() -> (
+    None
+):
+    plugin = _plugin()
+    plugin.context = SimpleNamespace(
+        employee_store=None,
+        dc_permission_store=None,
+        get_config=lambda: {"admins_id": ["ou_admin"]},
+    )
+    event = _DummyFeishuEvent(sender_id="ou_admin")
+
+    await plugin.resolve_runtime_principal(event)
+
+    principal = event.extra["dc_runtime_principal"]
+    assert principal["requester_open_id"] == "ou_admin"
+    assert principal["requester_identity_source"] == "event_sender"
+    assert any(
+        item["subject_id"] == "ou_admin" and item["permission"] == "dc_admin"
+        for item in principal["requester_dc_permissions"]
+    )
+    plugin.context.get_config = lambda: {"admins_id": []}
+    assert await requester_meta_from_event(plugin.context, event) == principal
+
+
 async def test_inject_employee_context_runs_on_daily_feishu_platform(
     employee_store: EmployeeStore,
 ) -> None:
@@ -143,7 +183,7 @@ async def test_inject_employee_context_runs_on_daily_feishu_platform(
     assert traces[0]["platform_id"] == "巅池-技术"
 
 
-async def test_employee_directory_auto_sync_uses_feishu_as_authoritative_source(
+async def test_employee_directory_auto_sync_defaults_to_safe_preview(
     employee_store: EmployeeStore,
     monkeypatch,
 ) -> None:
@@ -151,17 +191,27 @@ async def test_employee_directory_auto_sync_uses_feishu_as_authoritative_source(
     plugin.store = employee_store
     plugin.feishu_client = SimpleNamespace(enabled=True)
     plugin.config = {}
+    monkeypatch.setattr(
+        plugin,
+        "_load_expected_org_people",
+        lambda: {"员工": {"department": "测试部", "role": "测试岗位"}},
+    )
     calls = []
 
     async def fake_sync_from_feishu(store, client, **kwargs):
         calls.append((store, client, kwargs))
         return SimpleNamespace(
             success=True,
+            preview_only=True,
+            plan_id="plan_safe",
+            conflict_count=0,
+            review_required_count=0,
             departments_scanned=1,
             department_names=["活动统筹部"],
             users_added=3,
             users_updated=0,
             users_skipped=0,
+            roster_enriched_count=0,
             error=None,
         )
 
@@ -179,7 +229,13 @@ async def test_employee_directory_auto_sync_uses_feishu_as_authoritative_source(
         (
             employee_store,
             plugin.feishu_client,
-            {"authoritative": True},
+            {
+                "organization_people": {
+                    "员工": {"department": "测试部", "role": "测试岗位"}
+                },
+                "authoritative": False,
+                "preview_only": True,
+            },
         )
     ]
 
@@ -346,11 +402,39 @@ def test_employee_debug_commands_accept_explicit_dc_admin_permission() -> None:
         admin=False,
         private=True,
         requester_dc_permissions=[
-            {"permission": "dc_admin", "scope": "*", "source": "admins_id"}
+            {
+                "subject_id": "ou_admin",
+                "subject_type": "user",
+                "permission": "dc_admin",
+                "scope": "*",
+                "source": "admins_id",
+                "enabled": True,
+            }
         ],
     )
 
     assert plugin._is_admin_event(event) is True
+
+
+def test_employee_debug_commands_reject_permission_bound_to_another_subject() -> None:
+    plugin = _plugin()
+    event = _DummyEvent(
+        admin=False,
+        private=True,
+        sender_id="ou_user",
+        requester_dc_permissions=[
+            {
+                "subject_id": "ou_admin",
+                "subject_type": "user",
+                "permission": "dc_admin",
+                "scope": "*",
+                "source": "admins_id",
+                "enabled": True,
+            }
+        ],
+    )
+
+    assert plugin._is_admin_event(event) is False
 
 
 def test_employee_debug_commands_do_not_accept_feishu_admin_fact() -> None:
@@ -361,9 +445,12 @@ def test_employee_debug_commands_do_not_accept_feishu_admin_fact() -> None:
         private=True,
         requester_dc_permissions=[
             {
+                "subject_id": "ou_admin",
+                "subject_type": "user",
                 "permission": "feishu_admin_observed",
                 "scope": "feishu",
                 "source": "manual_confirmed_by_user",
+                "enabled": True,
             }
         ],
     )

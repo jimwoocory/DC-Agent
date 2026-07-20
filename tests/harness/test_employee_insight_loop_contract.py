@@ -31,7 +31,7 @@ def test_employee_insight_loop_contract_points_to_required_verifiers() -> None:
         "uv run pytest tests/harness/test_employee_insight_loop_contract.py -q",
         "uv run pytest dc_engines/tests/test_employee_insight_loop.py -q",
         "uv run pytest tests/test_employee_insight_route.py -q",
-        "uv run pytest dc_engines/tests/test_employee_insight_loop.py dc_engines/tests/test_card_system_dedup.py tests/test_employee_insight_route.py -q",
+        "uv run python scripts/run_cross_suite_pytests.py --dc-engine dc_engines/tests/test_employee_insight_loop.py --dc-engine dc_engines/tests/test_card_system_dedup.py --root tests/test_employee_insight_route.py",
         "uv run pytest tests/test_employee_insight_plugin.py -q",
     ]
 

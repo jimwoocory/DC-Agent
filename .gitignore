@@ -93,6 +93,16 @@ dashboard/bun.lock
 !data/config/
 !data/feishu_whitelist.example.yaml
 
+# Standalone local/desktop toolbox source lives outside AstrBot plugins.
+!drafts/
+!drafts/aihubmix_standalone/
+!drafts/aihubmix_standalone/**
+drafts/aihubmix_standalone/**/__pycache__/
+drafts/aihubmix_standalone/**/*.pyc
+drafts/aihubmix_standalone/data/**
+!drafts/aihubmix_standalone/data/
+!drafts/aihubmix_standalone/data/youmind_gpt_image2_prompts.json
+
 # Treat config as sensitive by default; explicitly unignore reviewed templates/configs.
 data/config/*.json
 data/config/*.yaml
@@ -168,6 +178,14 @@ data/plugin_data/
 data/config/abconf_*.json
 data/config/alert_channel.yaml
 data/antigravity_health.json
+
+# Local runtime captures and generated review-session state
+astrbot.*.log
+.superpowers/brainstorm/
+data/publicity_hotspot/
+data/sop_signal_capture_audit.jsonl
+CONTEXT.md
+pkcs11.txt
 data/*_events.jsonl
 data/*_state.json
 data/grok_worker_state.json

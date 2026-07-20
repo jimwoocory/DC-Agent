@@ -22,16 +22,6 @@
         "icon": "💬"
       },
       {
-        "name": "OpenClaw",
-        "url": "http://localhost:4312/",
-        "probe_host": "127.0.0.1",
-        "probe_port": 4312,
-        "health_path": "/",
-        "hint": "按需启动 / 看门狗 :9120/kick",
-        "icon": "🖥️",
-        "on_demand_kick": "http://localhost:9120/kick"
-      },
-      {
         "name": "小助手实时看板",
         "url": "/#/live-monitor",
         "probe_host": null,

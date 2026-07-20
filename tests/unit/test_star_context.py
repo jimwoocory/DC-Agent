@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -104,3 +105,20 @@ def test_add_llm_tools_handles_empty_tool_module_path():
     context.add_llm_tools(tool)
 
     assert tool.handler_module_path == ""
+
+
+@pytest.mark.asyncio
+async def test_send_message_propagates_platform_delivery_failure():
+    platform = SimpleNamespace(
+        meta=lambda: SimpleNamespace(id="lark-test"),
+        send_by_session=AsyncMock(return_value=False),
+    )
+    context = make_context()
+    context.platform_manager = SimpleNamespace(platform_insts=[platform])
+
+    delivered = await context.send_message(
+        "lark-test:FriendMessage:ou_user",
+        SimpleNamespace(chain=[]),
+    )
+
+    assert delivered is False

@@ -1,0 +1,76 @@
+{
+  "feature": "executor_settlement",
+  "goal": "Give Codex, Hermes, and media Adapters one durable Harness settlement Interface so execution, delivery, Artifact, and task lifecycle cannot drift apart across callback replay or process restart.",
+  "runtime_model": {
+    "owner": "dc_engines.harness.executor_settlement.ExecutorSettlement",
+    "store": "dc_engines.harness.task_store.HarnessTaskStore",
+    "interface": [
+      "begin",
+      "settle",
+      "reconcile"
+    ],
+    "adapters": [
+      "data.plugins.dc_router.preprocessing.media_route",
+      "data.plugins.gpt_image_plugin.main",
+      "data.plugins.dreamina_plugin.main",
+      "data.plugins.dc_router.cli_handlers",
+      "data.plugins.hermes_bridge.hermes_bridge"
+    ]
+  },
+  "acceptance_criteria": [
+    {
+      "id": "executor-settlement-001",
+      "description": "begin is idempotent and every migrated Codex, Hermes, and media attempt has a durable Harness execution before executor work starts.",
+      "verification": "uv run python scripts/run_cross_suite_pytests.py --dc-engine dc_engines/tests/test_executor_settlement.py::test_begin_is_idempotent --root tests/test_gpt_image_executor_settlement.py --root tests/test_dreamina_cli.py::test_cardless_dreamina_attempt_is_durable_and_reviewable"
+    },
+    {
+      "id": "executor-settlement-002",
+      "description": "settle records one durable settlement per execution, rejects conflicting replay, and returns the same receipt after process restart.",
+      "verification": "uv run pytest dc_engines/tests/test_executor_settlement.py::test_success_settlement_is_durable_and_idempotent -q"
+    },
+    {
+      "id": "executor-settlement-003",
+      "description": "A completed task requires confirmed or not-required delivery evidence; runtime-owned delivery may only close an attempt into review_required or blocked.",
+      "verification": "uv run pytest dc_engines/tests/test_executor_settlement.py::test_completed_settlement_requires_delivery_confirmation -q"
+    },
+    {
+      "id": "executor-settlement-004",
+      "description": "Successful media settlement requires an Artifact and atomically records Artifact lineage with the execution outcome and pending settlement record.",
+      "verification": "uv run pytest dc_engines/tests/test_executor_settlement.py::test_media_success_requires_artifact -q"
+    },
+    {
+      "id": "executor-settlement-005",
+      "description": "reconcile applies a durable pending task transition after a simulated crash without duplicating the Artifact or lifecycle event.",
+      "verification": "uv run pytest dc_engines/tests/test_executor_settlement.py::test_reconcile_applies_pending_settlement_after_restart -q"
+    },
+    {
+      "id": "executor-settlement-006",
+      "description": "Codex and Hermes Adapters persist request and result digests, usage, provenance, and delivery references without persisting complete prompts or complete answers in settlement metadata.",
+      "verification": "uv run pytest tests/dc_router/test_cli_handlers.py tests/harness/test_hermes_bridge.py -q"
+    },
+    {
+      "id": "executor-settlement-007",
+      "description": "Router media, GPT Image, Dreamina, Codex, and Hermes production Adapters use the shared Executor Settlement Interface rather than directly pairing execution and Harness task terminal writes.",
+      "verification": "uv run pytest tests/harness/test_executor_settlement_contract.py -q"
+    },
+    {
+      "id": "executor-settlement-008",
+      "description": "Harness runtime startup exposes one shared Executor Settlement instance and reconciles durable pending settlements without granting scheduling ownership to any executor.",
+      "verification": "uv run pytest tests/test_harness_runtime_plugin.py -q"
+    }
+  ],
+  "non_goals": [
+    "Do not make Harness the Router or scheduler.",
+    "Do not move card rendering or message delivery into Harness.",
+    "Do not persist complete Codex prompts or complete Codex/Hermes answers.",
+    "Do not merge executor invocation implementations.",
+    "Do not trigger Obsidian publication or long-term distillation in this phase."
+  ],
+  "verification": {
+    "contract": "uv run pytest tests/harness/test_executor_settlement_contract.py -q",
+    "module": "uv run pytest dc_engines/tests/test_executor_settlement.py -q",
+    "media_adapters": "uv run pytest tests/test_gpt_image_executor_settlement.py tests/test_dreamina_cli.py::test_cardless_dreamina_attempt_is_durable_and_reviewable -q",
+    "targeted": "scripts/agent-check.sh --profile targeted",
+    "full": "scripts/agent-check.sh --profile full"
+  }
+}

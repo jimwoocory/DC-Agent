@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,6 +41,15 @@ class ArchiveResult:
 _INVALID_FILENAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 
 
+def _utc_iso() -> str:
+    """Return the current UTC timestamp in stable ISO-8601 form.
+
+    Returns:
+        A timezone-aware timestamp ending in ``Z``.
+    """
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _slug(name: str, max_len: int = 40) -> str:
     """生成文件系统安全的 slug，保留中文。"""
     s = (name or "case").strip()
@@ -61,7 +70,7 @@ def _build_manifest(case: Case, tasks: list[dict], deliverables: list[dict]) -> 
         "roles": dict(case.roles or {}),
         "created_at": case.created_at,
         "updated_at": case.updated_at,
-        "archived_at": datetime.utcnow().isoformat() + "Z",
+        "archived_at": _utc_iso(),
         "task_ids": list(case.task_ids or []),
         "tasks": tasks,
         "deliverables": deliverables,
@@ -78,7 +87,7 @@ def _render_history_md(case: Case, events: list[dict]) -> str:
         f"- client: {case.client_name or '—'}",
         f"- status: {case.status}",
         f"- created: {case.created_at}",
-        f"- archived: {datetime.utcnow().isoformat()}Z",
+        f"- archived: {_utc_iso()}",
         "",
         "## 事件流水",
         "",
@@ -103,7 +112,7 @@ async def archive_to_nas(
     """主入口。任何 NAS 不可达 / IO 错误 → 落 DLQ，返回 ArchiveResult(success=False)。"""
     try:
         # NAS 路径
-        month = datetime.utcnow().strftime("%Y-%m")
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
         dir_name = f"{case.case_id[:8]}_{_slug(case.name)}"
         case_dir = nas_root / "dc-agent-cases" / month / dir_name
 
@@ -146,7 +155,7 @@ async def archive_to_nas(
         # 写 DLQ
         dlq_path.parent.mkdir(parents=True, exist_ok=True)
         record = {
-            "ts": datetime.utcnow().isoformat() + "Z",
+            "ts": _utc_iso(),
             "case_id": case.case_id,
             "case_name": case.name,
             "error": f"{type(exc).__name__}: {exc}",

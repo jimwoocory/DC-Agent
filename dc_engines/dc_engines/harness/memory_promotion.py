@@ -1,9 +1,45 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, Protocol
 
 from .contracts import HarnessTask
 from .memory_store import HarnessMemoryRecord, HarnessMemoryStore
+
+HarnessMemoryDistillationStatus = Literal["created", "recovered", "unchanged"]
+
+
+@dataclass(slots=True, frozen=True)
+class HarnessMemoryDistillationReceipt:
+    """Result returned by a governed-memory distillation port.
+
+    Attributes:
+        memory_id: Stable governed-memory candidate identifier.
+        status: Whether the candidate changed or was already current.
+        note_path: Human-review adapter reference when available.
+    """
+
+    memory_id: str
+    status: HarnessMemoryDistillationStatus
+    note_path: str
+
+
+class HarnessMemoryDistiller(Protocol):
+    """Port used by Harness after a task outcome memory is promoted."""
+
+    async def distill(
+        self,
+        record: HarnessMemoryRecord,
+    ) -> HarnessMemoryDistillationReceipt:
+        """Distill one bounded task outcome into governed memory.
+
+        Args:
+            record: Bounded Harness task-outcome memory.
+
+        Returns:
+            Durable governed-memory distillation receipt.
+        """
+        ...
 
 
 @dataclass(slots=True)

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import http
 import json
 import re
 import time
@@ -17,6 +18,21 @@ from lark_oapi.api.im.v1.processor import (
     P2ImChatAccessEventBotP2pChatEnteredV1Processor,
     P2ImMessageReceiveV1Processor,
 )
+from lark_oapi.event.callback.model.p2_card_action_trigger import (
+    P2CardActionTriggerResponse,
+)
+from lark_oapi.ws import client as lark_ws_client
+from lark_oapi.ws.const import (
+    HEADER_BIZ_RT,
+    HEADER_MESSAGE_ID,
+    HEADER_SEQ,
+    HEADER_SUM,
+    HEADER_TRACE_ID,
+    HEADER_TYPE,
+)
+from lark_oapi.ws.enum import MessageType as LarkWSMessageType
+from lark_oapi.ws.model import Response as LarkWSResponse
+from websockets.exceptions import ConnectionClosedOK
 
 import astrbot.api.message_components as Comp
 from astrbot import logger
@@ -37,6 +53,131 @@ from ...register import register_platform_adapter
 from .bot_info import request_lark_bot_info
 from .lark_event import LarkMessageEvent
 from .server import LarkWebhookServer
+
+
+class _LarkCardCallbackClient(lark.ws.Client):
+    """Handle card callback frames that the upstream WebSocket client drops."""
+
+    async def _connect(self) -> None:
+        """Bind the SDK receiver task to the application's running event loop.
+
+        Returns:
+            None.
+        """
+        lark_ws_client.loop = asyncio.get_running_loop()
+        await super()._connect()
+
+    async def _receive_message_loop(self) -> None:
+        """Receive frames without reporting a normal code-1000 close as an error.
+
+        Returns:
+            None.
+        """
+        try:
+            while self._conn is not None:
+                message = await self._conn.recv()
+                asyncio.create_task(self._handle_message(message))
+        except ConnectionClosedOK:
+            await self._disconnect()
+            if self._auto_reconnect:
+                await self._reconnect()
+        except Exception as exc:
+            logger.error("[Lark.Socket] receive loop exited unexpectedly: %s", exc)
+            await self._disconnect()
+            if self._auto_reconnect:
+                await self._reconnect()
+            else:
+                raise
+
+    async def _handle_data_frame(self, frame) -> None:
+        """Dispatch card frames and acknowledge them on the existing connection.
+
+        Args:
+            frame: Feishu WebSocket protobuf data frame.
+
+        Returns:
+            None.
+        """
+        headers = frame.headers
+        header_values = {header.key: header.value for header in headers}
+        if header_values.get(HEADER_TYPE) != LarkWSMessageType.CARD.value:
+            await super()._handle_data_frame(frame)
+            return
+
+        payload = frame.payload
+        part_count = int(header_values.get(HEADER_SUM, "1"))
+        if part_count > 1:
+            payload = self._combine(
+                header_values.get(HEADER_MESSAGE_ID, ""),
+                part_count,
+                int(header_values.get(HEADER_SEQ, "0")),
+                payload,
+            )
+            if payload is None:
+                return
+
+        raw_callback = json.loads(payload.decode("utf-8"))
+        if raw_callback.get("event_type") and not raw_callback.get("header"):
+            payload = json.dumps(
+                {
+                    "schema": raw_callback.get("schema", "2.0"),
+                    "header": {
+                        "event_id": raw_callback.get("event_id"),
+                        "token": raw_callback.get("token"),
+                        "create_time": raw_callback.get("create_time"),
+                        "event_type": raw_callback.get("event_type"),
+                        "tenant_key": raw_callback.get("tenant_key"),
+                        "app_id": raw_callback.get("app_id"),
+                    },
+                    "event": {
+                        key: value
+                        for key, value in raw_callback.items()
+                        if key
+                        not in {
+                            "schema",
+                            "event_id",
+                            "create_time",
+                            "event_type",
+                            "tenant_key",
+                            "app_id",
+                        }
+                    },
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+        logger.info(
+            "[Lark.CardAction] received callback frame message_id=%s trace_id=%s",
+            header_values.get(HEADER_MESSAGE_ID, ""),
+            header_values.get(HEADER_TRACE_ID, ""),
+        )
+
+        response = LarkWSResponse(code=http.HTTPStatus.OK)
+        try:
+            started_at = int(round(time.time() * 1000))
+            result = self._event_handler._do_without_validation(payload)
+            header = headers.add()
+            header.key = HEADER_BIZ_RT
+            header.value = str(int(round(time.time() * 1000)) - started_at)
+            if result is not None:
+                response.data = base64.b64encode(
+                    lark.JSON.marshal(result).encode("utf-8")
+                )
+        except Exception as exc:
+            logger.error(
+                "[Lark] card callback frame failed message_id=%s trace_id=%s error=%s",
+                header_values.get(HEADER_MESSAGE_ID, ""),
+                header_values.get(HEADER_TRACE_ID, ""),
+                exc,
+            )
+            response = LarkWSResponse(code=http.HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        frame.payload = lark.JSON.marshal(response).encode("utf-8")
+        await self._write_message(frame.SerializeToString())
+        logger.info(
+            "[Lark.CardAction] acknowledged callback frame message_id=%s",
+            header_values.get(HEADER_MESSAGE_ID, ""),
+        )
 
 
 @register_platform_adapter(
@@ -74,8 +215,9 @@ class LarkPlatformAdapter(Platform):
         async def on_card_action_recv(event) -> None:
             await self.convert_card_action(event)
 
-        def do_card_action_event(event) -> None:
+        def do_card_action_event(event) -> P2CardActionTriggerResponse:
             asyncio.create_task(on_card_action_recv(event))
+            return P2CardActionTriggerResponse({})
 
         async def on_p2p_chat_entered_recv(event) -> None:
             await self.convert_p2p_chat_entered(event)
@@ -96,7 +238,7 @@ class LarkPlatformAdapter(Platform):
         self.do_v2_msg_event = do_v2_msg_event
         self.do_p2p_chat_entered_event = do_p2p_chat_entered_event
 
-        self.client = lark.ws.Client(
+        self.client = _LarkCardCallbackClient(
             app_id=self.appid,
             app_secret=self.appsecret,
             log_level=lark.LogLevel.ERROR,
@@ -962,7 +1104,7 @@ class LarkPlatformAdapter(Platform):
         self,
         session: MessageSesion,
         message_chain: MessageChain,
-    ) -> None:
+    ) -> bool:
         if session.message_type == MessageType.GROUP_MESSAGE:
             id_type = "chat_id"
             receive_id = session.session_id
@@ -973,7 +1115,7 @@ class LarkPlatformAdapter(Platform):
             receive_id = session.session_id
 
         # 复用 LarkMessageEvent 中的通用发送逻辑
-        await LarkMessageEvent.send_message_chain(
+        delivered = await LarkMessageEvent.send_message_chain(
             message_chain,
             self.lark_api,
             receive_id=receive_id,
@@ -981,6 +1123,7 @@ class LarkPlatformAdapter(Platform):
         )
 
         await super().send_by_session(session, message_chain)
+        return delivered
 
     def meta(self) -> PlatformMetadata:
         return PlatformMetadata(
@@ -1164,14 +1307,26 @@ class LarkPlatformAdapter(Platform):
 
     @staticmethod
     def _expects_follow_up_media(abm: AstrBotMessage) -> bool:
-        """Return whether plain text explicitly refers to an adjacent attachment."""
+        """Return whether plain text explicitly refers to an adjacent attachment.
+
+        Args:
+            abm: Parsed AstrBot message that may precede an attachment.
+
+        Returns:
+            True when the message contains media or an explicit nearby/future
+            attachment reference.
+        """
         if any(isinstance(comp, (Comp.File, Comp.Image)) for comp in abm.message or []):
             return True
         text = str(getattr(abm, "message_str", "") or "")
         return bool(
             re.search(
-                r"(这张|这幅|这个图片|这份|这些|附件|文件|图片|照片|截图|上传).{0,18}"
-                r"(帮我|分析|总结|提炼|看看|处理|修改|抠|读取|对比|检查)?",
+                r"(?:(?:这(?:张|幅|个|份|些|两份)|刚(?:刚|才)(?:发|传|上传)?的?"
+                r"|上(?:面|一条)|下(?:面|一条)).{0,18}"
+                r"(?:附件|文件|图片|照片|截图|素材|方案|文档)"
+                r"|附件|上传"
+                r"|(?:文件|图片|照片|截图|素材).{0,18}"
+                r"(?:等下|待会|稍后|马上|接着|随后)(?:发|传|上传)?)",
                 text,
                 re.IGNORECASE,
             )
@@ -1346,6 +1501,33 @@ class LarkPlatformAdapter(Platform):
                 else None,
                 "token": getattr(data, "token", None),
             }
+            original_msg_id = str(payload.get("open_message_id") or "")
+            if original_msg_id:
+                try:
+                    from dc_engines.card_runtime import (
+                        record_card_action_via_runtime,
+                    )
+
+                    safe_value = action_value if isinstance(action_value, dict) else {}
+                    record_card_action_via_runtime(
+                        message_id=original_msg_id,
+                        conversation_id=str(payload.get("open_chat_id") or ""),
+                        action=str(
+                            safe_value.get("action")
+                            or getattr(action, "name", None)
+                            or getattr(action, "tag", None)
+                            or ""
+                        ),
+                        source=str(safe_value.get("source") or ""),
+                        task_id=str(
+                            safe_value.get("task_id")
+                            or safe_value.get("record_id")
+                            or ""
+                        ),
+                        operator_id=open_id,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[Lark] card action audit skipped: %s", exc)
 
             abm = AstrBotMessage()
             abm.timestamp = int(time.time())
@@ -1358,7 +1540,6 @@ class LarkPlatformAdapter(Platform):
             # Use real open_message_id from card context when available (prevents 99992354 invalid id errors).
             # The synthetic "card_action_..." was being passed as open_message_id to Feishu APIs expecting real "om_..." card message ids.
             # Fallback to synthetic only if no original id (for pure action identification).
-            original_msg_id = payload.get("open_message_id")
             abm.message_id = (
                 original_msg_id
                 or f"card_action_{int(time.time() * 1000)}_{open_id[:8]}"
@@ -1494,6 +1675,7 @@ class LarkPlatformAdapter(Platform):
                 pass
             self._polling_fallback_task = None
         if self.connection_mode == "socket":
+            self.client._auto_reconnect = False
             await self.client._disconnect()
         cache_cron = getattr(getattr(self.client, "_cache", None), "_cron", None)
         if cache_cron is not None and not cache_cron.done():

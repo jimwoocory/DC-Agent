@@ -1,0 +1,66 @@
+{
+  "feature": "codex_advanced_executor",
+  "goal": "Keep Codex behind one deterministic authorization Interface as an optional Advanced Executor that never owns DC-Agent scheduling or runtime control.",
+  "acceptance_criteria": [
+    {
+      "id": "codex-advanced-executor-001",
+      "description": "Only known Codex capabilities authorized by a user or the Deterministic Controller are allowed.",
+      "verification": "uv run pytest dc_engines/tests/test_codex_capability.py -q"
+    },
+    {
+      "id": "codex-advanced-executor-002",
+      "description": "Every request that gives Codex ownership of scheduling is denied regardless of capability or authorizer.",
+      "verification": "uv run pytest dc_engines/tests/test_codex_capability.py -q"
+    },
+    {
+      "id": "codex-advanced-executor-003",
+      "description": "The CLI reasoning, OAuth image generation, and deterministic incident diagnosis Adapters authorize through the shared Codex capability Interface before execution.",
+      "verification": "uv run pytest tests/dc_router/test_cli_handlers.py tests/test_media_generation_runtime_paths.py tests/test_watchdog_diagnose.py -q"
+    },
+    {
+      "id": "codex-advanced-executor-004",
+      "description": "One deterministic capability catalog supplies the truthful Codex tools shown in Feishu and Dashboard, including authority, entrypoints, execution mode, and no scheduler ownership.",
+      "verification": "uv run python scripts/run_cross_suite_pytests.py --dc-engine dc_engines/tests/test_codex_capability.py --root tests/dc_router/test_assistant_workbench.py --root tests/test_system_entries_quick_entries.py"
+    },
+    {
+      "id": "codex-advanced-executor-005",
+      "description": "The dedicated #codex工具 marker and Feishu Codex confirmation route to the real read-only CLI Adapter, while existing #codex model-pin semantics remain unchanged.",
+      "verification": "uv run pytest tests/dc_router/test_dispatch_pipeline.py tests/dc_router/test_reasoning_prefix.py tests/dc_router/test_assistant_workbench.py -q"
+    },
+    {
+      "id": "codex-advanced-executor-006",
+      "description": "Every real Codex CLI execution creates a Harness task and append-only start/finish timeline without persisting the complete prompt, complete answer, or command preview.",
+      "verification": "uv run pytest tests/dc_router/test_cli_handlers.py -q"
+    },
+    {
+      "id": "codex-advanced-executor-007",
+      "description": "Local project development requires the exact gpt-5.6-sol model with reasoning effort high, xhigh, or max, defaults to max, and rejects invalid requests before starting a subprocess.",
+      "verification": "uv run python scripts/run_cross_suite_pytests.py --dc-engine dc_engines/tests/test_codex_capability.py --root tests/dc_router/test_cli_runner.py"
+    },
+    {
+      "id": "codex-advanced-executor-008",
+      "description": "Workspace-write project development is authorized only for the local operator, is never exposed through Feishu, and never gives Codex scheduler ownership.",
+      "verification": "uv run python scripts/run_cross_suite_pytests.py --dc-engine dc_engines/tests/test_codex_capability.py --root tests/dc_router/test_assistant_workbench.py"
+    }
+  ],
+  "policy": {
+    "role": "advanced_executor",
+    "scheduler_ownership": false,
+    "capabilities": {
+      "deep_reasoning": ["user"],
+      "image_generation": ["user"],
+      "incident_diagnosis": ["deterministic_controller"],
+      "project_engineering": ["local_operator"]
+    },
+    "development_runtime": {
+      "model": "gpt-5.6-sol",
+      "minimum_reasoning_effort": "high",
+      "default_reasoning_effort": "max",
+      "sandbox": "workspace-write",
+      "remote_entrypoints": []
+    }
+  },
+  "verification": {
+    "targeted": "scripts/agent-check.sh --profile targeted"
+  }
+}

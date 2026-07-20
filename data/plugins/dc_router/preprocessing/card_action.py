@@ -21,6 +21,7 @@ CARD_ACTION_PREFIX: Final[str] = "__card_action__:"
 # 已知 source 名 (跟 department_memory.build_department_memory_prompt_card 对齐)
 DEPT_MEMORY_SOURCE: Final[str] = "department_memory_prompt"
 SOP_SIGNAL_SOURCE: Final[str] = "sop_signal_confirmation"
+ASSISTANT_WORKBENCH_SOURCE: Final[str] = "assistant_workbench"
 
 
 @dataclass(slots=True)
@@ -130,7 +131,51 @@ async def try_handle_card_action(
             return CardActionResult(handled=True, stop=True)
         return CardActionResult(handled=result.handled, stop=result.stop)
 
-    # 3) Disabled legacy CLI queue card
+    # 3) 助手工作台 — 导航和表单预览固定路由；只有明确点击开始执行才恢复文本
+    value = _card_value(event)
+    if value.get("source") == ASSISTANT_WORKBENCH_SOURCE:
+        if not _is_trusted(event):
+            try:
+                event.should_call_llm(False)
+                event.set_result(
+                    MessageEventResult().message("").use_t2i(False).stop_event()
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return CardActionResult(handled=True, stop=True)
+        try:
+            from .assistant_workbench import (
+                handle_assistant_workbench_card_action,
+            )
+
+            result = await handle_assistant_workbench_card_action(
+                context,
+                event,
+                value=value,
+                payload=_parse_payload(event),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[dc_router] assistant workbench action failed: %s", exc)
+            try:
+                event.should_call_llm(False)
+                event.set_result(
+                    MessageEventResult()
+                    .message("任务卡片操作失败，请从底部菜单重新打开。")
+                    .use_t2i(False)
+                    .stop_event()
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            return CardActionResult(handled=True, stop=True)
+        if result.resumed_text:
+            return CardActionResult(
+                handled=False,
+                stop=False,
+                resumed_text=result.resumed_text,
+            )
+        return CardActionResult(handled=result.handled, stop=result.handled)
+
+    # 4) Disabled legacy CLI queue card
     try:
         from ..cli_handlers import handle_disabled_legacy_cli_card_action
     except Exception as exc:  # noqa: BLE001

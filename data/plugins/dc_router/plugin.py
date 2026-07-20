@@ -140,9 +140,12 @@ class DCRouterPlugin(Star):
             self._dc_cancel_session_callback = _cancel_session
             self.context.dc_cancel_session_work = _cancel_session
         logger.info(
-            "[dc_router] initialize · enabled=%s dry_run=%s",
+            "[dc_router] initialize · enabled=%s dry_run=%s architecture=%s "
+            "main_agent=%s",
             cfg.enabled,
             cfg.dry_run,
+            cfg.architecture_mode,
+            cfg.main_agent_provider_id if cfg.uses_middle_router else "legacy",
         )
 
     async def terminate(self) -> None:

@@ -1,0 +1,45 @@
+{
+    "feature": "standalone_writing_workspace",
+    "goal": "Add a focused Chinese writing workspace as the third mode of the standalone Dianchi Agent toolbox.",
+    "acceptance_criteria": [
+        {
+            "id": "standalone-writing-001",
+            "description": "The image workspace exposes writing as the third top-level mode, and the standalone server serves the writing workspace at /writing/.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_workspace_is_registered -q"
+        },
+        {
+            "id": "standalone-writing-002",
+            "description": "The writing workspace provides an outline, centered document editor, writing assistant controls, word count, copy, and export interactions in Chinese.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_workspace_has_complete_ui -q"
+        },
+        {
+            "id": "standalone-writing-003",
+            "description": "The writing workspace does not persist API keys or drafts through localStorage or .env files.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_workspace_does_not_persist_secrets -q"
+        },
+        {
+            "id": "standalone-writing-004",
+            "description": "The writing workspace offers local Codex OAuth GPT-5.6 Sol and the five requested AIHUBMIX writing models with exact validated model IDs.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_model_catalog -q"
+        },
+        {
+            "id": "standalone-writing-005",
+            "description": "Selected writing models run independently in one comparison request so a failed provider does not discard successful drafts from other models.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_generation_compares_models_and_isolates_failures -q"
+        },
+        {
+            "id": "standalone-writing-006",
+            "description": "The writing UI supports multi-select model comparison, temporary AIHUBMIX credentials, result previews, and explicitly adopting a selected draft alongside the preserved local fixed template.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_workspace_uses_model_comparison_api -q"
+        },
+        {
+            "id": "standalone-writing-007",
+            "description": "Model results never automatically replace the current document, and failed model cards offer an isolated refresh retry without discarding other comparison results.",
+            "verification": "uv run pytest tests/test_aihubmix_standalone_writing.py::test_writing_workspace_preserves_template_and_retries_failures -q"
+        }
+    ],
+    "verification": {
+        "focused": "uv run pytest tests/test_aihubmix_standalone_writing.py -q",
+        "targeted": "scripts/agent-check.sh --profile targeted"
+    }
+}

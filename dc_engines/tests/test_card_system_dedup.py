@@ -338,6 +338,43 @@ def test_retried_grey_push_failure_is_cleared_by_later_success() -> None:
     assert _deduped_production_card_failures(events) == []
 
 
+def test_retried_design_sample_is_cleared_only_by_matching_success() -> None:
+    events = [
+        _ev(
+            False,
+            "",
+            "design_sample",
+            card_type="assistant_task_confirmation",
+            chat_id="ou_operator",
+            receive_id_type="open_id",
+            ts="2026-07-15T02:16:34Z",
+            detail="research delivery preview sample",
+        ),
+        _ev(
+            True,
+            "om_success",
+            "design_sample",
+            card_type="assistant_task_confirmation",
+            chat_id="ou_operator",
+            receive_id_type="open_id",
+            ts="2026-07-15T02:17:17Z",
+            detail="research delivery preview sample",
+        ),
+        _ev(
+            False,
+            "",
+            "design_sample",
+            card_type="assistant_task_confirmation",
+            chat_id="ou_operator",
+            receive_id_type="open_id",
+            ts="2026-07-15T02:18:00Z",
+            detail="different preview sample",
+        ),
+    ]
+
+    assert _deduped_production_card_failures(events) == [events[2]]
+
+
 def test_regular_runtime_failure_is_not_cleared_by_later_success() -> None:
     events = [
         _ev(
@@ -387,7 +424,7 @@ def test_card_system_next_step_treats_retried_grey_push_as_green(monkeypatch) ->
                 chat_id="on_operator",
                 receive_id_type="union_id",
                 ts="2026-06-20T18:57:04Z",
-                detail="font size heading_3 grey validation",
+                detail="retry after removing unsupported font field",
             ),
         ],
     )

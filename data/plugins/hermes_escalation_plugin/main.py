@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 
@@ -245,6 +246,40 @@ class HermesEscalationPlugin(Star):
             if hasattr(task, "payload") and isinstance(task.payload, dict)
             else "project_followup"
         )
+
+        executor_settlement = getattr(self.context, "executor_settlement", None)
+        if executor_settlement is None:
+            await engine.fail_task(
+                task.task_id,
+                reason="Executor Settlement runtime unavailable",
+            )
+            return
+        request_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "task_id": task.task_id,
+                    "workflow_kind": workflow_kind,
+                    "brief": text,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        try:
+            await executor_settlement.begin(
+                task_id=task.task_id,
+                executor_kind="hermes",
+                capability="deep_workflow",
+                idempotency_key=f"hermes:{task.task_id}:{request_digest[:16]}",
+                request_digest=request_digest,
+                metadata={"workflow_kind": workflow_kind},
+            )
+        except Exception as exc:  # noqa: BLE001
+            await engine.fail_task(
+                task.task_id,
+                reason=f"Hermes execution ledger start failed: {exc}",
+            )
+            return
 
         dispatched = await self._dispatch_to_hermes(task, workflow_kind, event)
 

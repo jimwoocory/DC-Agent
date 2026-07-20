@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>飞书综合/财务看板</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f7f8fa;
+        --surface: #ffffff;
+        --surface-2: #f1f5f9;
+        --line: #d8dee8;
+        --text: #172033;
+        --muted: #64748b;
+        --green: #15803d;
+        --red: #b42318;
+        --amber: #b45309;
+        --blue: #2563eb;
+      }
+
+      [data-theme="dark"] {
+        --bg: #111827;
+        --surface: #182235;
+        --surface-2: #202b40;
+        --line: #334155;
+        --text: #e5e7eb;
+        --muted: #a7b0c0;
+        --green: #4ade80;
+        --red: #fb7185;
+        --amber: #fbbf24;
+        --blue: #93c5fd;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 24px 0 36px;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      button {
+        min-height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+        font: inherit;
+        padding: 0 12px;
+      }
+
+      button:hover {
+        border-color: var(--blue);
+      }
+
+      .tabs {
+        display: flex;
+        gap: 6px;
+        margin: 18px 0 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tab {
+        border-bottom: 2px solid transparent;
+        border-radius: 6px 6px 0 0;
+        background: transparent;
+      }
+
+      .tab.active {
+        border-color: var(--blue);
+        background: var(--surface);
+        color: var(--blue);
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 16px 0;
+      }
+
+      .metric,
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .metric {
+        min-height: 82px;
+        padding: 12px;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 24px;
+        line-height: 1;
+      }
+
+      .panel {
+        overflow: hidden;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 48px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-2);
+      }
+
+      h2 {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.3;
+      }
+
+      .status {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        font-size: 13px;
+        overflow-wrap: anywhere;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: var(--surface-2);
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .bad {
+        color: var(--red);
+      }
+
+      .warn {
+        color: var(--amber);
+      }
+
+      .good {
+        color: var(--green);
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .empty {
+        padding: 24px 14px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 760px) {
+        main {
+          width: min(100vw - 20px, 1180px);
+          padding-top: 14px;
+        }
+
+        header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .metrics {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .tabs {
+          overflow-x: auto;
+        }
+
+        table {
+          min-width: 680px;
+        }
+
+        .panel {
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>飞书综合/财务看板</h1>
+          <p class="subtitle" id="updated">等待数据刷新</p>
+        </div>
+        <div class="toolbar">
+          <button id="refresh" type="button" title="刷新数据">刷新</button>
+        </div>
+      </header>
+
+      <section class="metrics" aria-label="核心指标">
+        <div class="metric">
+          <span>办公用品</span>
+          <strong id="metric-assets">0</strong>
+        </div>
+        <div class="metric">
+          <span>低库存</span>
+          <strong id="metric-low">0</strong>
+        </div>
+        <div class="metric">
+          <span>财务审批</span>
+          <strong id="metric-finance">0</strong>
+        </div>
+        <div class="metric">
+          <span>入职待办</span>
+          <strong id="metric-hr">0</strong>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="管理入口">
+        <button class="tab active" data-tab="admin" type="button">综合行政</button>
+        <button class="tab" data-tab="finance" type="button">财务审批</button>
+        <button class="tab" data-tab="health" type="button">飞书集成健康</button>
+      </nav>
+
+      <section id="tab-admin" class="panel">
+        <div class="panel-head">
+          <h2>库存与低库存预警</h2>
+          <span class="status" id="admin-status">-</span>
+        </div>
+        <div id="admin-body"></div>
+      </section>
+
+      <section id="tab-finance" class="panel hidden">
+        <div class="panel-head">
+          <h2>缺附件与异常单据</h2>
+          <span class="status" id="finance-status">-</span>
+        </div>
+        <div id="finance-body"></div>
+      </section>
+
+      <section id="tab-health" class="panel hidden">
+        <div class="panel-head">
+          <h2>飞书 API 状态</h2>
+          <span class="status" id="health-status">-</span>
+        </div>
+        <div id="health-body"></div>
+      </section>
+    </main>
+
+    <script>
+      const state = { summary: null, health: null };
+      const $ = (id) => document.getElementById(id);
+
+      function esc(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      async function fetchJson(url) {
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        return res.json();
+      }
+
+      function setMetric(id, value) {
+        $(id).textContent = String(value ?? 0);
+      }
+
+      function renderMetrics() {
+        const data = state.summary?.data || {};
+        const counts = data.counts || {};
+        setMetric("metric-assets", counts.asset_items);
+        setMetric("metric-low", (data.low_stock_items || []).length);
+        setMetric("metric-finance", counts.finance_approval_records);
+        setMetric("metric-hr", counts.hr_onboarding_tasks);
+      }
+
+      function table(headers, rows) {
+        if (!rows.length) return '<div class="empty">暂无数据</div>';
+        const head = headers.map((item) => `<th>${esc(item)}</th>`).join("");
+        const body = rows
+          .map((row) => `<tr>${row.map((item) => `<td>${item}</td>`).join("")}</tr>`)
+          .join("");
+        return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+      }
+
+      function renderAdmin() {
+        const data = state.summary?.data || {};
+        const rows = (data.low_stock_items || []).map((item) => [
+          esc(item.name),
+          esc(item.category),
+          `<span class="badge warn">${esc(item.stock)} / ${esc(item.warning_threshold)}</span>`,
+          esc(item.custodian),
+          esc(item.updated_at),
+        ]);
+        $("admin-status").textContent = `${rows.length} 项低库存`;
+        $("admin-body").innerHTML = table(
+          ["物品", "类别", "库存/预警线", "保管人", "更新时间"],
+          rows,
+        );
+      }
+
+      function renderFinance() {
+        const data = state.summary?.data || {};
+        const rows = (data.finance_missing_attachments || []).map((record) => [
+          esc(record.approval_instance_code),
+          esc(record.approval_type),
+          esc(record.applicant_name || record.applicant_id),
+          esc(record.department),
+          esc(Number(record.amount || 0).toFixed(2)),
+          `<span class="badge bad">${esc((record.missing_attachments || []).join("、"))}</span>`,
+        ]);
+        $("finance-status").textContent = `${rows.length} 单缺附件`;
+        $("finance-body").innerHTML = table(
+          ["审批单", "类型", "申请人", "部门", "金额", "缺少材料"],
+          rows,
+        );
+      }
+
+      function renderHealth() {
+        const data = state.health?.data || {};
+        const stats = data.hub_stats || {};
+        const rows = [
+          ["飞书 Hub", data.feishu_enabled ? '<span class="good">启用</span>' : '<span class="bad">未启用</span>'],
+          ["总调用", esc(stats.total_calls || 0)],
+          ["失败数", esc(stats.total_errors || 0)],
+          ["错误率", esc(stats.error_rate || 0)],
+          ["最近错误", esc(stats.last_error || "-")],
+          ["周报群", data.management_chat_configured ? '<span class="good">已配置</span>' : '<span class="warn">未配置</span>'],
+        ];
+        $("health-status").textContent = data.feishu_enabled ? "API 可用" : "凭证未启用";
+        $("health-body").innerHTML = table(["项目", "状态"], rows);
+      }
+
+      function renderAll() {
+        renderMetrics();
+        renderAdmin();
+        renderFinance();
+        renderHealth();
+        $("updated").textContent = `最近刷新 ${new Date().toLocaleString()}`;
+      }
+
+      async function refresh() {
+        $("updated").textContent = "刷新中...";
+        try {
+          const [summary, health] = await Promise.all([
+            fetchJson("/api/plug/feishu_business_report_plugin/feishu_business/summary"),
+            fetchJson("/api/plug/feishu_business_report_plugin/feishu_business/health"),
+          ]);
+          state.summary = summary;
+          state.health = health;
+          renderAll();
+        } catch (err) {
+          $("updated").textContent = `刷新失败：${err.message}`;
+        }
+      }
+
+      document.querySelectorAll(".tab").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("active"));
+          button.classList.add("active");
+          ["admin", "finance", "health"].forEach((name) => {
+            $(`tab-${name}`).classList.toggle("hidden", button.dataset.tab !== name);
+          });
+        });
+      });
+
+      $("refresh").addEventListener("click", refresh);
+      refresh();
+    </script>
+  </body>
+</html>

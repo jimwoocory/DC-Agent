@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+RUNTIME_CONTEXT_SECTIONS_EXTRA_KEY = "runtime_context_sections"
+
 
 class RuntimeContextPriority(StrEnum):
     CURRENT = "current"

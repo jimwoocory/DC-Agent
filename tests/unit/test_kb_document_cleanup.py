@@ -22,7 +22,10 @@ async def kb_db(tmp_path):
     db = KBSQLiteDatabase(db_path)
     await db.initialize()
     await db.migrate_to_v1()
-    return db
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 @pytest_asyncio.fixture
